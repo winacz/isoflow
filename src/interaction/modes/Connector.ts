@@ -128,7 +128,9 @@ export const Connector: ModeActions = {
       draft.anchors[1] = { id: generateId(), ref: nextRef };
     });
 
-    scene.updateConnector(uiState.mode.id, newConnector);
+    scene.updateConnector(uiState.mode.id, newConnector, {
+      overlapResolve: 'off'
+    });
   },
   mousedown: ({ uiState, scene, model, isRendererInteraction }) => {
     if (uiState.mode.type !== 'CONNECTOR' || !isRendererInteraction) return;

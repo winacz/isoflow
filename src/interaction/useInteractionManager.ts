@@ -7,7 +7,9 @@ import {
   getItemAtTile,
   getPanScrollFromDelta,
   setWindowCursor,
-  BLACK_CROSSHAIR_CURSOR
+  BLACK_CROSSHAIR_CURSOR,
+  connectorPathTileToGlobal,
+  CoordsUtils
 } from 'src/utils';
 import { useResizeObserver } from 'src/hooks/useResizeObserver';
 import { useScene } from 'src/hooks/useScene';
@@ -187,15 +189,39 @@ export const useInteractionManager = () => {
         return;
       }
 
+      const tile = uiState.mouse.position.tile;
+
+      const connectorAtTile = scene.connectors.find((con) => {
+        return con.path.tiles.some((pathTile) => {
+          const globalPathTile = connectorPathTileToGlobal(
+            pathTile,
+            con.path.rectangle.from
+          );
+          return CoordsUtils.isEqual(globalPathTile, tile);
+        });
+      });
+
+      if (connectorAtTile) {
+        uiState.actions.setItemControls({
+          type: 'CONNECTOR',
+          id: connectorAtTile.id
+        });
+        uiState.actions.setContextMenu({
+          item: { type: 'CONNECTOR', id: connectorAtTile.id },
+          tile
+        });
+        return;
+      }
+
       const itemAtTile = getItemAtTile({
-        tile: uiState.mouse.position.tile,
+        tile,
         scene
       });
 
       if (itemAtTile?.type === 'RECTANGLE') {
         uiState.actions.setContextMenu({
           item: itemAtTile,
-          tile: uiState.mouse.position.tile
+          tile
         });
       } else if (uiState.contextMenu) {
         uiState.actions.setContextMenu(null);
@@ -247,6 +273,14 @@ export const useInteractionManager = () => {
       }
     };
 
+    const onKeyChange = (e: KeyboardEvent) => {
+      if (e.key !== 'Shift') return;
+      uiState.actions.setMouse({
+        ...uiState.mouse,
+        shiftKey: e.type === 'keydown'
+      });
+    };
+
     el.addEventListener('mousemove', onMouseEvent);
     el.addEventListener('mousedown', onMouseEvent);
     el.addEventListener('mouseup', onMouseEvent);
@@ -255,6 +289,8 @@ export const useInteractionManager = () => {
     el.addEventListener('touchstart', onTouchStart);
     el.addEventListener('touchmove', onTouchMove);
     el.addEventListener('touchend', onTouchEnd);
+    el.addEventListener('keydown', onKeyChange);
+    el.addEventListener('keyup', onKeyChange);
     uiState.rendererEl?.addEventListener('wheel', onScroll);
 
     return () => {
@@ -266,6 +302,8 @@ export const useInteractionManager = () => {
       el.removeEventListener('touchstart', onTouchStart);
       el.removeEventListener('touchmove', onTouchMove);
       el.removeEventListener('touchend', onTouchEnd);
+      el.removeEventListener('keydown', onKeyChange);
+      el.removeEventListener('keyup', onKeyChange);
       uiState.rendererEl?.removeEventListener('wheel', onScroll);
     };
   }, [

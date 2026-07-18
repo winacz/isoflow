@@ -1,16 +1,22 @@
 import React, { useMemo } from 'react';
 import type { useScene } from 'src/hooks/useScene';
 import { useUiStateStore } from 'src/stores/uiStateStore';
+import { getActiveStackKey, useStackFanStore } from 'src/stores/stackFanStore';
 import {
   findConnectorJumpsById,
-  getConnectorGlobalTiles
+  findConnectorStackBadges,
+  getConnectorGlobalTiles,
+  getStackFanOffsetsPx
 } from 'src/utils';
+import { TILE_SIZE_2D } from 'src/config';
 import { Connector } from './Connector';
 import { Connector2d } from './Connector2d';
 
 interface Props {
   connectors: ReturnType<typeof useScene>['connectors'];
 }
+
+const FAN_SPACING_PX = Math.round(TILE_SIZE_2D * 0.55);
 
 const connectorTouchesItem = (
   connector: { anchors: { ref: { item?: string } }[] },
@@ -21,17 +27,24 @@ const connectorTouchesItem = (
   });
 };
 
+const stackKey = (tile: { x: number; y: number }) => {
+  return `${tile.x},${tile.y}`;
+};
+
 export const Connectors = ({ connectors }: Props) => {
   const itemControls = useUiStateStore((state) => {
     return state.itemControls;
   });
-
   const mode = useUiStateStore((state) => {
     return state.mode;
   });
-
   const projectionMode = useUiStateStore((state) => {
     return state.projectionMode;
+  });
+
+  const activeStackKey = useStackFanStore(getActiveStackKey);
+  const highlightedConnectorId = useStackFanStore((state) => {
+    return state.highlightedConnectorId;
   });
 
   const selectedConnectorId = useMemo(() => {
@@ -52,18 +65,38 @@ export const Connectors = ({ connectors }: Props) => {
     selectedConnectorId || (projectionMode === 'TWO_D' && selectedItemId)
   );
 
+  const pathInputs = useMemo(() => {
+    if (projectionMode !== 'TWO_D') return [];
+
+    return connectors.map((connector) => {
+      return {
+        id: connector.id,
+        tiles: getConnectorGlobalTiles(connector)
+      };
+    });
+  }, [connectors, projectionMode]);
+
   const jumpsByConnectorId = useMemo(() => {
     if (projectionMode !== 'TWO_D') return {};
 
-    return findConnectorJumpsById(
-      connectors.map((connector) => {
-        return {
-          id: connector.id,
-          tiles: getConnectorGlobalTiles(connector)
-        };
-      })
+    return findConnectorJumpsById(pathInputs);
+  }, [pathInputs, projectionMode]);
+
+  const fanOffsets = useMemo(() => {
+    if (projectionMode !== 'TWO_D' || !activeStackKey) return {};
+
+    const badges = findConnectorStackBadges(pathInputs);
+    const badge = badges.find((candidate) => {
+      return stackKey(candidate.tile) === activeStackKey;
+    });
+    if (!badge) return {};
+
+    return getStackFanOffsetsPx(
+      badge.connectorIds,
+      badge.along,
+      FAN_SPACING_PX
     );
-  }, [connectors, projectionMode]);
+  }, [activeStackKey, pathInputs, projectionMode]);
 
   return (
     <>
@@ -72,7 +105,16 @@ export const Connectors = ({ connectors }: Props) => {
         const isRelatedToItem = Boolean(
           selectedItemId && connectorTouchesItem(connector, selectedItemId)
         );
-        const isFocused = isSelected || isRelatedToItem;
+        const offset = fanOffsets[connector.id];
+        const isHandleTarget = highlightedConnectorId === connector.id;
+        const isFocused =
+          isSelected ||
+          isRelatedToItem ||
+          Boolean(offset) ||
+          isHandleTarget;
+        const isDimmed =
+          (hasSelectionFocus && !isFocused) ||
+          (highlightedConnectorId !== null && !isHandleTarget);
 
         if (projectionMode === 'TWO_D') {
           return (
@@ -82,7 +124,9 @@ export const Connectors = ({ connectors }: Props) => {
               jumps={jumpsByConnectorId[connector.id] ?? []}
               isSelected={isSelected}
               isFocused={isFocused}
-              isDimmed={hasSelectionFocus && !isFocused}
+              isHighlighted={isHandleTarget}
+              isDimmed={isDimmed}
+              visualOffset={offset}
             />
           );
         }

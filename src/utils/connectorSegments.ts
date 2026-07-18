@@ -125,11 +125,195 @@ type Span = {
   endWaypointId: string | null;
 };
 
+type TileWaypoint = {
+  id: string;
+  tile: Coords;
+  pathIndex: number;
+};
+
+const segmentAxis = (start: Coords, end: Coords): 'H' | 'V' => {
+  return start.y === end.y ? 'H' : 'V';
+};
+
+/** One-step perpendicular (tile space) — used to keep exit WPs off port cells. */
+const unitPerp = (along: Coords): Coords => {
+  if (along.x === 0 && along.y === 0) {
+    return { x: 1, y: 0 };
+  }
+
+  return {
+    x: -Math.sign(along.y),
+    y: Math.sign(along.x)
+  };
+};
+
+const listTileWaypoints = (
+  anchors: ConnectorAnchor[],
+  globalTiles: Coords[]
+): TileWaypoint[] => {
+  return anchors
+    .filter((anchor) => {
+      return Boolean(anchor.ref.tile);
+    })
+    .map((anchor) => {
+      const waypointTile = anchor.ref.tile as Coords;
+      return {
+        id: anchor.id,
+        tile: waypointTile,
+        pathIndex: pathIndexOf(globalTiles, waypointTile)
+      };
+    })
+    .sort((a, b) => {
+      return a.pathIndex - b.pathIndex;
+    });
+};
+
+const buildSpans = (
+  tileWaypoints: TileWaypoint[],
+  pathLength: number
+): Span[] => {
+  const spans: Span[] = [];
+  if (tileWaypoints.length === 0) return spans;
+
+  const firstWp = tileWaypoints[0];
+  if (firstWp.pathIndex >= 1) {
+    spans.push({
+      fromIndex: 0,
+      toIndex: firstWp.pathIndex,
+      startWaypointId: null,
+      endWaypointId: firstWp.id
+    });
+  }
+
+  for (let i = 0; i < tileWaypoints.length - 1; i += 1) {
+    const start = tileWaypoints[i];
+    const end = tileWaypoints[i + 1];
+    if (end.pathIndex - start.pathIndex < 1) continue;
+
+    spans.push({
+      fromIndex: start.pathIndex,
+      toIndex: end.pathIndex,
+      startWaypointId: start.id,
+      endWaypointId: end.id
+    });
+  }
+
+  const lastWp = tileWaypoints[tileWaypoints.length - 1];
+  if (lastWp.pathIndex <= pathLength - 2) {
+    spans.push({
+      fromIndex: lastWp.pathIndex,
+      toIndex: pathLength - 1,
+      startWaypointId: lastWp.id,
+      endWaypointId: null
+    });
+  }
+
+  return spans;
+};
+
+const hitFromPortPortPath = (
+  connectorId: string,
+  globalTiles: Coords[]
+): WaypointSegmentHit => {
+  const n = globalTiles.length;
+  const startTile = globalTiles[0];
+  const endTile = globalTiles[n - 1];
+  const mid = globalTiles[Math.floor(n / 2)];
+
+  // Prefer interior exits; for length-2 diagonals offset perpendicular so
+  // WPs are not coincident with port cells (avoids triangle hairpins).
+  let startExit: Coords;
+  let endExit: Coords;
+
+  if (n >= 3) {
+    startExit = globalTiles[1];
+    endExit = globalTiles[n - 2];
+  } else {
+    const along = {
+      x: endTile.x - startTile.x,
+      y: endTile.y - startTile.y
+    };
+    const perp = unitPerp(along);
+    startExit = { x: startTile.x + perp.x, y: startTile.y + perp.y };
+    endExit = { x: endTile.x + perp.x, y: endTile.y + perp.y };
+  }
+
+  return {
+    connectorId,
+    mid,
+    axis: segmentAxis(startTile, endTile),
+    existingWaypointIds: [],
+    materializeAtPort: false,
+    materializeBothPorts: true,
+    startPortTile: { ...startExit },
+    endPortTile: { ...endExit }
+  };
+};
+
+const hitFromSpan = (
+  connectorId: string,
+  globalTiles: Coords[],
+  span: Span
+): WaypointSegmentHit | null => {
+  const spanTiles = globalTiles.slice(span.fromIndex, span.toIndex + 1);
+  if (spanTiles.length < 2) return null;
+
+  const mid = spanTiles[Math.floor(spanTiles.length / 2)];
+  const startTile = spanTiles[0];
+  const endTile = spanTiles[spanTiles.length - 1];
+  const axis = segmentAxis(startTile, endTile);
+
+  if (span.startWaypointId && span.endWaypointId) {
+    return {
+      connectorId,
+      mid,
+      axis,
+      existingWaypointIds: [span.startWaypointId, span.endWaypointId],
+      materializeAtPort: false,
+      materializeBothPorts: false
+    };
+  }
+
+  const existingId = span.startWaypointId ?? span.endWaypointId;
+  if (!existingId) return null;
+
+  const portSide: 'start' | 'end' = span.startWaypointId ? 'end' : 'start';
+  // First cable tile after the port along this span (not the port cell)
+  let exitTile =
+    portSide === 'start'
+      ? spanTiles[Math.min(1, spanTiles.length - 1)]
+      : spanTiles[Math.max(0, spanTiles.length - 2)];
+
+  if (CoordsUtils.isEqual(exitTile, startTile) || CoordsUtils.isEqual(exitTile, endTile)) {
+    const along = {
+      x: endTile.x - startTile.x,
+      y: endTile.y - startTile.y
+    };
+    const perp = unitPerp(along);
+    const portTile = portSide === 'start' ? startTile : endTile;
+    exitTile = { x: portTile.x + perp.x, y: portTile.y + perp.y };
+  }
+
+  return {
+    connectorId,
+    mid,
+    axis,
+    existingWaypointIds: [existingId],
+    materializeAtPort: true,
+    materializeBothPorts: false,
+    portTile: { ...exitTile },
+    portSide
+  };
+};
+
 /**
  * Finds a draggable span under `tile`:
  * - between two tile waypoints,
  * - between a path end (RJ45 port) and the nearest tile waypoint,
  * - or the whole path when there are no tile waypoints yet (port↔port).
+ *
+ * Requires an intermediate path tile (strict hover) — use
+ * `findWaypointSegmentNearTile` for stack-badge grabs on diagonals.
  */
 export const findWaypointSegmentAtTile = ({
   connectorId,
@@ -146,21 +330,7 @@ export const findWaypointSegmentAtTile = ({
 
   if (globalTiles.length < 2) return null;
 
-  const tileWaypoints = anchors
-    .filter((anchor) => {
-      return Boolean(anchor.ref.tile);
-    })
-    .map((anchor) => {
-      const waypointTile = anchor.ref.tile as Coords;
-      return {
-        id: anchor.id,
-        tile: waypointTile,
-        pathIndex: pathIndexOf(globalTiles, waypointTile)
-      };
-    })
-    .sort((a, b) => {
-      return a.pathIndex - b.pathIndex;
-    });
+  const tileWaypoints = listTileWaypoints(anchors, globalTiles);
 
   // No waypoints yet: whole cable between two ports is one draggable span
   if (tileWaypoints.length === 0) {
@@ -173,61 +343,10 @@ export const findWaypointSegmentAtTile = ({
 
     if (!hovering) return null;
 
-    const startTile = globalTiles[0];
-    const endTile = globalTiles[globalTiles.length - 1];
-    // Spawn WPs on the first/last cable tiles — not on the port cells.
-    // Coincident port+WP + a 1-tile drag creates a Port→WP→diagonal hairpin
-    // that renders as a sharp "triangle" spike on diagonal cables.
-    const startExit = globalTiles[1];
-    const endExit = globalTiles[globalTiles.length - 2];
-    const mid = globalTiles[Math.floor(globalTiles.length / 2)];
-
-    return {
-      connectorId,
-      mid,
-      axis: startTile.y === endTile.y ? 'H' : 'V',
-      existingWaypointIds: [],
-      materializeAtPort: false,
-      materializeBothPorts: true,
-      startPortTile: { ...startExit },
-      endPortTile: { ...endExit }
-    };
+    return hitFromPortPortPath(connectorId, globalTiles);
   }
 
-  const spans: Span[] = [];
-
-  const firstWp = tileWaypoints[0];
-  if (firstWp.pathIndex >= 2) {
-    spans.push({
-      fromIndex: 0,
-      toIndex: firstWp.pathIndex,
-      startWaypointId: null,
-      endWaypointId: firstWp.id
-    });
-  }
-
-  for (let i = 0; i < tileWaypoints.length - 1; i += 1) {
-    const start = tileWaypoints[i];
-    const end = tileWaypoints[i + 1];
-    if (end.pathIndex - start.pathIndex < 2) continue;
-
-    spans.push({
-      fromIndex: start.pathIndex,
-      toIndex: end.pathIndex,
-      startWaypointId: start.id,
-      endWaypointId: end.id
-    });
-  }
-
-  const lastWp = tileWaypoints[tileWaypoints.length - 1];
-  if (lastWp.pathIndex <= globalTiles.length - 3) {
-    spans.push({
-      fromIndex: lastWp.pathIndex,
-      toIndex: globalTiles.length - 1,
-      startWaypointId: lastWp.id,
-      endWaypointId: null
-    });
-  }
+  const spans = buildSpans(tileWaypoints, globalTiles.length);
 
   for (const span of spans) {
     const spanTiles = globalTiles.slice(span.fromIndex, span.toIndex + 1);
@@ -240,45 +359,60 @@ export const findWaypointSegmentAtTile = ({
 
     if (!hoveringSpan) continue;
 
-    const mid = spanTiles[Math.floor(spanTiles.length / 2)];
-    const startTile = spanTiles[0];
-    const endTile = spanTiles[spanTiles.length - 1];
-    const axis: 'H' | 'V' = startTile.y === endTile.y ? 'H' : 'V';
-
-    if (span.startWaypointId && span.endWaypointId) {
-      return {
-        connectorId,
-        mid,
-        axis,
-        existingWaypointIds: [span.startWaypointId, span.endWaypointId],
-        materializeAtPort: false,
-        materializeBothPorts: false
-      };
-    }
-
-    const existingId = span.startWaypointId ?? span.endWaypointId;
-    if (!existingId) continue;
-
-    const portSide: 'start' | 'end' = span.startWaypointId ? 'end' : 'start';
-    // First cable tile after the port along this span (not the port cell)
-    const exitTile =
-      portSide === 'start'
-        ? spanTiles[1]
-        : spanTiles[spanTiles.length - 2];
-
-    return {
-      connectorId,
-      mid,
-      axis,
-      existingWaypointIds: [existingId],
-      materializeAtPort: true,
-      materializeBothPorts: false,
-      portTile: { ...exitTile },
-      portSide
-    };
+    return hitFromSpan(connectorId, globalTiles, span);
   }
 
   return null;
+};
+
+/**
+ * Stack-badge / diagonal-safe segment lookup.
+ * Badge mid tiles often land on edge endpoints (esp. diagonals) or short
+ * paths (<3 tiles) where strict hover fails — still return a draggable hit.
+ */
+export const findWaypointSegmentNearTile = ({
+  connectorId,
+  anchors,
+  path,
+  tile
+}: {
+  connectorId: string;
+  anchors: ConnectorAnchor[];
+  path: ConnectorPath;
+  tile: Coords;
+}): WaypointSegmentHit | null => {
+  const exact = findWaypointSegmentAtTile({
+    connectorId,
+    anchors,
+    path,
+    tile
+  });
+  if (exact) return exact;
+
+  const globalTiles = getGlobalPathTiles(path);
+  if (globalTiles.length < 2) return null;
+
+  const tileWaypoints = listTileWaypoints(anchors, globalTiles);
+
+  if (tileWaypoints.length === 0) {
+    return hitFromPortPortPath(connectorId, globalTiles);
+  }
+
+  let idx = pathIndexOf(globalTiles, tile);
+  if (idx <= 0 && globalTiles.length > 1) idx = 1;
+  if (idx >= globalTiles.length - 1 && globalTiles.length > 1) {
+    idx = globalTiles.length - 2;
+  }
+
+  const spans = buildSpans(tileWaypoints, globalTiles.length);
+  const containing =
+    spans.find((span) => {
+      return idx >= span.fromIndex && idx <= span.toIndex;
+    }) ?? spans[0];
+
+  if (!containing) return null;
+
+  return hitFromSpan(connectorId, globalTiles, containing);
 };
 
 /**
@@ -380,6 +514,10 @@ export const prepareWaypointSegmentDrag = ({
 /**
  * If a tile WP forms a short reverse stub against a neighbour (classic
  * diagonal "triangle" spike), snap it onto the chord toward the far anchor.
+ *
+ * Only true local spikes: BOTH legs must be short (≤2). A short exit stub
+ * that then runs a long way to the far port (U/L via one WP) has dot < 0
+ * but must be kept — otherwise upward stubs need 3+ tiles of clearance.
  */
 export const untangleAnchorHairpins = (
   anchors: ConnectorAnchor[],
@@ -410,25 +548,9 @@ export const untangleAnchorHairpins = (
     const endStubLen = Math.abs(toNext.x) + Math.abs(toNext.y);
     const dot = toCurr.x * toNext.x + toCurr.y * toNext.y;
 
-    if (stubLen < 1 || stubLen > 2 || dot >= 0) {
-      // Also catch hairpin into a short end stub (WP just before end port)
-      if (endStubLen < 1 || endStubLen > 2 || dot >= 0) {
-        return anchor;
-      }
-
-      const chord = { x: next.x - prev.x, y: next.y - prev.y };
-      const step = { x: Math.sign(chord.x), y: Math.sign(chord.y) };
-      if (step.x === 0 && step.y === 0) return anchor;
-
-      const fixed = { x: next.x - step.x, y: next.y - step.y };
-      if (
-        CoordsUtils.isEqual(fixed, prev) ||
-        CoordsUtils.isEqual(fixed, curr)
-      ) {
-        return anchor;
-      }
-
-      return { ...anchor, ref: { tile: fixed } };
+    // Local triangle spike only (both legs short + reverse)
+    if (stubLen < 1 || stubLen > 2 || endStubLen < 1 || endStubLen > 2 || dot >= 0) {
+      return anchor;
     }
 
     const chord = { x: next.x - prev.x, y: next.y - prev.y };

@@ -26,8 +26,12 @@ interface Props {
   isSelected?: boolean;
   /** Emphasize line (e.g. linked to selected node) without showing waypoints */
   isFocused?: boolean;
+  /** Stronger than focus — stack handle hover target */
+  isHighlighted?: boolean;
   /** Fade when another connector/node is the selection focus */
   isDimmed?: boolean;
+  /** Render-only pixel offset (stack fan-out on badge hover). */
+  visualOffset?: { x: number; y: number };
 }
 
 export const Connector2d = ({
@@ -35,7 +39,9 @@ export const Connector2d = ({
   jumps = [],
   isSelected,
   isFocused,
-  isDimmed
+  isHighlighted,
+  isDimmed,
+  visualOffset
 }: Props) => {
   const theme = useTheme();
   const color = useColor(_connector.color);
@@ -163,22 +169,38 @@ export const Connector2d = ({
   if (globalTiles.length === 0) return null;
 
   const handleColor = getColorVariant(color.value, 'dark', { grade: 1 });
-  const emphasize = Boolean(isSelected || isFocused);
-  const lineOpacity = isDimmed ? 0.22 : emphasize ? 0.92 : 0.72;
-  const outlineOpacity = isDimmed ? 0.12 : emphasize ? 0.65 : 0.45;
+  const emphasize = Boolean(isSelected || isFocused || isHighlighted);
+  const lineOpacity = isDimmed
+    ? 0.18
+    : isHighlighted
+      ? 1
+      : emphasize
+        ? 0.92
+        : 0.72;
+  const outlineOpacity = isDimmed
+    ? 0.1
+    : isHighlighted
+      ? 0.85
+      : emphasize
+        ? 0.65
+        : 0.45;
+  const widthBoost = isHighlighted ? 1.55 : emphasize ? 1.25 : 1;
 
   return (
     <Box
       sx={{
         position: 'absolute',
         pointerEvents: 'none',
-        opacity: isDimmed ? 0.55 : 1,
-        transition: 'opacity 0.15s ease'
+        opacity: isDimmed ? 0.4 : 1,
+        transition: 'opacity 0.12s ease'
       }}
       style={{
-        left: originPx.x,
-        top: originPx.y,
-        zIndex: jumps.length > 0 ? 2 : 1
+        left: originPx.x + (visualOffset?.x ?? 0),
+        top: originPx.y + (visualOffset?.y ?? 0),
+        zIndex: isHighlighted ? 4 : jumps.length > 0 || visualOffset ? 2 : 1,
+        transition: visualOffset
+          ? 'left 0.12s ease, top 0.12s ease'
+          : undefined
       }}
     >
       <Svg viewboxSize={pxSize}>
@@ -199,7 +221,7 @@ export const Connector2d = ({
               <path
                 d={pathD}
                 stroke={theme.palette.common.white}
-                strokeWidth={connectorWidthPx * (emphasize ? 1.8 : 1.4)}
+                strokeWidth={connectorWidthPx * (emphasize ? 1.8 : 1.4) * (isHighlighted ? 1.15 : 1)}
                 strokeLinecap="butt"
                 strokeLinejoin="round"
                 strokeOpacity={outlineOpacity}
@@ -209,7 +231,7 @@ export const Connector2d = ({
               <path
                 d={pathD}
                 stroke={handleColor}
-                strokeWidth={connectorWidthPx * (emphasize ? 1.25 : 1)}
+                strokeWidth={connectorWidthPx * widthBoost}
                 strokeLinecap="butt"
                 strokeLinejoin="round"
                 strokeOpacity={lineOpacity}

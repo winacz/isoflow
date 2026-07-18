@@ -34,6 +34,7 @@ Bootstrap danych: [`src/examples/createEditorInitialData.ts`](src/examples/creat
 ### Kable / waypoints
 - Tworzenie WP: dblclick na kablu (także nad body urządzenia).
 - Usuwanie WP: dblclick na WP.
+- **PPM na kablu** → „Resetuj waypointy” (zostawia tylko końce portów, path A* ze skosami).
 - Uchwyt segmentu (OpenWith) do przesuwania odcinka; Shift → ortogonalne L/U (`applyOrthogonalBendAnchors`), nie schody A*.
 - Max ~2 helper WP między końcami → czyste L lub U.
 - Przy drag segmentu port↔port WP materializowane na **exit tiles** (nie na komórce portu), potem `untangleAnchorHairpins`.
@@ -51,9 +52,11 @@ Bootstrap danych: [`src/examples/createEditorInitialData.ts`](src/examples/creat
 ### Anti-overlap ścieżek
 - **Konflikt** = wspólna **krawędź** (para sąsiednich tile’i), nie sam wspólny wierzchołek.
 - Przecięcie X (wspólny tile bez wspólnej krawędzi) = OK + hop.
-- Przy drag **noda**: auto-odsunięcie tylko ścieżek tego noda (`resolveConnectorAnchorsAgainstOthers` — bumpy WP).
-- Przy uchwycie segmentu/WP: **snap** / reject (`snapConnectorAnchorsOffOverlap`), bez zostawiania kabla na cudzym odcinku.
-- Przy **usunięciu WP**: NIE używać bump-resolvera (robił bałagan / zygzaki przez nody). Zamiast tego `overlapResolve: 'orthogonalDetour'` + `resolveOrthogonalDetourAfterWaypointRemoval` (czyste L/U, hint = usunięty tile).
+- Przy drag **noda**: `pruneAnchorsAfterNodeMove` → `sync off` (zachowaj skos/WP). **Bez** bump/`orthogonalDetour` przy node move.
+- Gdy kable **dzielą krawędź**: czerwony **stack badge** (`ConnectorStackBadges` nad warstwą interakcji). Fan: kursor w zasięgu tile badge’a albo hover DOM; klik paska → drag segmentu.
+- Tworzenie / rysowanie kabla: `overlapResolve: 'off'`.
+- Przy uchwycie segmentu/WP: **bez** snap anti-overlap (stack badge zamiast); Shift → czyste L/U.
+- Przy **usunięciu WP**: tylko `off` — łączy sąsiadów (A*), bez przebudowy całej trasy na L/U.
 
 ### Wygląd kabli 2D
 - Cieńsze i mniej przezroczyste niż wcześniej (`Connector2d`: width ~`1.65`, opacity ~`0.72` / emphasize `0.92`).
@@ -70,9 +73,11 @@ Bootstrap danych: [`src/examples/createEditorInitialData.ts`](src/examples/creat
 | Path build | `src/utils/renderer.ts` (`getConnectorPath`, split by node bodies, placement) |
 | Pathfinding | `src/utils/pathfinder.ts`, `src/utils/pathOptions.ts` |
 | Segmenty / WP | `src/utils/connectorSegments.ts` |
+| Node-move WP prune | `src/utils/connectorNodeMove.ts` (`pruneAnchorsAfterNodeMove`) |
 | Anti-overlap | `src/utils/connectorOverlap.ts` |
 | Hop przy X | `src/utils/connectorJumps.ts` |
-| Sync kabli | `src/stores/reducers/connector.ts` (`overlapResolve`: `default` \| `orthogonalDetour` \| `off`) |
+| Stack badge (N kabli) | `src/utils/connectorStacks.ts` |
+| Sync kabli | `src/stores/reducers/connector.ts` (`overlapResolve` domyślnie `off`; `orthogonalDetour` przy delete WP) |
 | Update item → sync | `src/stores/reducers/viewItem.ts` |
 | Drag | `src/interaction/modes/DragItems.ts` |
 | Cursor / dblclick WP | `src/interaction/modes/Cursor.ts` |
@@ -122,13 +127,17 @@ Connector.anchors (porty + opcjonalne ref.tile WP)
 - Anti-overlap krawędzi + snap uchwytu + resolve przy sync (2D only).
 - Fix: izometria wyłączona z resolve.
 - Fix: usuwanie WP → `orthogonalDetour` zamiast bumpów.
-- Fix makaron przy drag noda: strip absolutnych WP → ortogonalny rebuild + lane detour; ręczny drag kabla z `overlapResolve: 'off'`.
+- Node drag: prune + `sync off` (hybryda bump cofnięta — psuła create).
+- Fix: nowe połączenia / rubber-band z `overlapResolve: 'off'`.
+- Fix Shift: bez snap anti-overlap przy drag kabla (stack badge zamiast); sync domyślnie `off`.
+- Stack badge: gdy ≥2 kable dzielą krawędź → liczba na środku runu (`connectorStacks.ts`).
 - Handoff: ten plik.
 
 ---
 
 ## 8. Sensowne następne kroki (jeśli użytkownik wróci)
 
-- Ręczny test: równoległe kable → delete WP rogu → czyste L/U, nie zygzak.
-- Ewentualnie ujednolicić jakość detourów przy drag noda (dziś nadal bump-resolver).
+- Ręczny test: 3 skośne PC↔Switch → Switch o 1 kafelek → skos + rozjazd (nie L/U flip).
+- Jeśli bump dokłada za dużo WP: ograniczyć `MAX_RESOLVE_ITERS` / offset tylko dla node-move.
+- Stack-badge „N kabli” — odłożone (alternatywa do pełnego rozjazdu).
 - Migracja już nachodzących starych kabli (świadomie poza zakresem wcześniejszego planu).

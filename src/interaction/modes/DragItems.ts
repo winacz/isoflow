@@ -3,9 +3,7 @@ import {
   ModeActions,
   Coords,
   ItemReference,
-  Connector,
-  ConnectorAnchor,
-  ConnectorPath
+  Connector
 } from 'src/types';
 import { useScene } from 'src/hooks/useScene';
 import {
@@ -24,8 +22,7 @@ import {
   applyOrthogonalBendAnchors,
   withOrthogonalPath,
   axisLockTile,
-  snapConnectorAnchorsOffOverlap,
-  collectOtherConnectorPaths
+  generateId
 } from 'src/utils';
 import { getShape2dSize } from 'src/config';
 
@@ -42,40 +39,6 @@ const axisLockDelta = (delta: Coords): Coords => {
   }
 
   return { x: 0, y: delta.y };
-};
-
-const otherPathsFromScene = (
-  scene: ReturnType<typeof useScene>,
-  excludeConnectorId: string
-) => {
-  const byId: Record<string, { path: ConnectorPath }> = {};
-  scene.connectors.forEach((connector) => {
-    byId[connector.id] = { path: connector.path };
-  });
-  return collectOtherConnectorPaths(byId, excludeConnectorId);
-};
-
-/** Snap tile WPs off foreign cable edges; null = reject this move. */
-const snapTwoDConnectorAnchors = ({
-  anchors,
-  moveAnchorIds,
-  connectorId,
-  scene,
-  modelItems
-}: {
-  anchors: ConnectorAnchor[];
-  moveAnchorIds: string[];
-  connectorId: string;
-  scene: ReturnType<typeof useScene>;
-  modelItems?: { id: string; icon?: string }[];
-}): ConnectorAnchor[] | null => {
-  return snapConnectorAnchorsOffOverlap({
-    anchors,
-    moveAnchorIds,
-    view: scene.currentView,
-    modelItems,
-    otherPaths: otherPathsFromScene(scene, connectorId)
-  });
 };
 
 const dragItems = (
@@ -243,20 +206,6 @@ const dragItems = (
           scene.currentView,
           options.modelItems
         );
-
-        const snapped = snapTwoDConnectorAnchors({
-          anchors: nextAnchors,
-          moveAnchorIds: [startAnchorId, endAnchorId],
-          connectorId: connector.id,
-          scene,
-          modelItems: options.modelItems
-        });
-
-        if (!snapped) {
-          return;
-        }
-
-        nextAnchors = snapped;
       }
 
       scene.updateConnector(
@@ -285,22 +234,10 @@ const dragItems = (
           options.modelItems
         );
 
-        const snapped = snapTwoDConnectorAnchors({
-          anchors: bent,
-          moveAnchorIds: [item.id],
-          connectorId: connector.id,
-          scene,
-          modelItems: options.modelItems
-        });
-
-        if (!snapped) {
-          return;
-        }
-
         scene.updateConnector(
           connector.id,
           {
-            anchors: snapped
+            anchors: bent
           },
           { overlapResolve: 'off' }
         );
@@ -327,6 +264,10 @@ const dragItems = (
             }
           });
 
+          const wasPortEndpoint = Boolean(
+            anchor.value.ref.item && anchor.value.ref.port
+          );
+
           if (portHit) {
             draft.anchors[anchor.index] = {
               ...anchor.value,
@@ -335,15 +276,47 @@ const dragItems = (
                 port: portHit.portId
               }
             };
-          } else {
-            draft.anchors[anchor.index] = {
-              ...anchor.value,
-              ref: {
-                tile
-              }
-            };
+            return;
           }
 
+          // Dragging a port handle off the jack: keep the port attachment and
+          // place/move an exit WP at `tile` (so you can pull a vertical stub up).
+          if (wasPortEndpoint) {
+            const isFirst = anchor.index === 0;
+            const neighborIndex = isFirst
+              ? 1
+              : Math.max(0, anchor.index - 1);
+            const neighbor = draft.anchors[neighborIndex];
+
+            if (
+              neighbor &&
+              neighbor.id !== anchor.value.id &&
+              neighbor.ref.tile
+            ) {
+              draft.anchors[neighborIndex] = {
+                ...neighbor,
+                ref: { tile: { ...tile } }
+              };
+            } else if (isFirst) {
+              draft.anchors.splice(1, 0, {
+                id: generateId(),
+                ref: { tile: { ...tile } }
+              });
+            } else {
+              draft.anchors.splice(anchor.index, 0, {
+                id: generateId(),
+                ref: { tile: { ...tile } }
+              });
+            }
+            return;
+          }
+
+          draft.anchors[anchor.index] = {
+            ...anchor.value,
+            ref: {
+              tile
+            }
+          };
           return;
         }
 
@@ -382,25 +355,13 @@ const dragItems = (
           return anchor.id === item.id;
         });
 
-        // Port attach: allow sync resolve to clear overlaps. Tile WP: snap/reject.
+        // Overlaps use stack badges — no snap/reject on tile WP drag.
         if (movedAnchor?.ref.tile) {
-          const snapped = snapTwoDConnectorAnchors({
-            anchors: newConnector.anchors,
-            moveAnchorIds: [item.id],
-            connectorId: connector.id,
-            scene,
-            modelItems: options.modelItems
-          });
-
-          if (!snapped) {
-            return;
-          }
-
           scene.updateConnector(
             connector.id,
             {
               anchors: untangleAnchorHairpins(
-                snapped,
+                newConnector.anchors,
                 scene.currentView,
                 options.modelItems
               )

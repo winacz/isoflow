@@ -56,7 +56,7 @@ export const syncConnector = (
   { viewId, state }: ViewReducerContext,
   options?: SyncConnectorOptions
 ) => {
-  const overlapResolve = options?.overlapResolve ?? 'default';
+  const overlapResolve = options?.overlapResolve ?? 'off';
 
   const newState = produce(state, (draft) => {
     const view = getItemByIdOrThrow(draft.model.views, viewId);
@@ -196,10 +196,14 @@ export const createConnector = (
       draft.model.views[view.index].connectors?.unshift(newConnector);
     }
 
-    const stateAfterSync = syncConnector(newConnector.id, {
-      viewId,
-      state: draft
-    });
+    const stateAfterSync = syncConnector(
+      newConnector.id,
+      {
+        viewId,
+        state: draft
+      },
+      { overlapResolve: 'off' }
+    );
 
     draft.model = stateAfterSync.model;
     draft.scene = stateAfterSync.scene;

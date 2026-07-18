@@ -1,6 +1,11 @@
-import React, { useCallback } from 'react';
+import React, { useCallback, useMemo } from 'react';
 import { useUiStateStore } from 'src/stores/uiStateStore';
-import { getTilePosition, CoordsUtils } from 'src/utils';
+import {
+  getTilePosition,
+  getTilePosition2d,
+  CoordsUtils,
+  getItemByIdOrThrow
+} from 'src/utils';
 import { useScene } from 'src/hooks/useScene';
 import { ContextMenu } from './ContextMenu';
 
@@ -12,6 +17,9 @@ export const ContextMenuManager = ({ anchorEl }: Props) => {
   const scene = useScene();
   const zoom = useUiStateStore((state) => {
     return state.zoom;
+  });
+  const projectionMode = useUiStateStore((state) => {
+    return state.projectionMode;
   });
   const contextMenu = useUiStateStore((state) => {
     return state.contextMenu;
@@ -25,19 +33,46 @@ export const ContextMenuManager = ({ anchorEl }: Props) => {
     uiStateActions.setContextMenu(null);
   }, [uiStateActions]);
 
-  if (!contextMenu) {
-    return null;
-  }
+  const menuItems = useMemo(() => {
+    if (!contextMenu) return [];
 
-  return (
-    <ContextMenu
-      anchorEl={anchorEl}
-      onClose={onClose}
-      position={CoordsUtils.multiply(
-        getTilePosition({ tile: contextMenu.tile }),
-        zoom
-      )}
-      menuItems={[
+    if (contextMenu.item.type === 'CONNECTOR') {
+      return [
+        {
+          label: 'Resetuj waypointy',
+          onClick: () => {
+            try {
+              const connector = getItemByIdOrThrow(
+                scene.connectors,
+                contextMenu.item.id
+              ).value;
+
+              if (connector.anchors.length <= 2) {
+                onClose();
+                return;
+              }
+
+              const nextAnchors = [
+                connector.anchors[0],
+                connector.anchors[connector.anchors.length - 1]
+              ];
+
+              scene.updateConnector(
+                connector.id,
+                { anchors: nextAnchors },
+                { overlapResolve: 'off' }
+              );
+            } catch {
+              // Connector may have been removed
+            }
+            onClose();
+          }
+        }
+      ];
+    }
+
+    if (contextMenu.item.type === 'RECTANGLE') {
+      return [
         {
           label: 'Send backward',
           onClick: () => {
@@ -66,7 +101,27 @@ export const ContextMenuManager = ({ anchorEl }: Props) => {
             onClose();
           }
         }
-      ]}
+      ];
+    }
+
+    return [];
+  }, [contextMenu, onClose, scene]);
+
+  if (!contextMenu || menuItems.length === 0) {
+    return null;
+  }
+
+  const tilePos =
+    projectionMode === 'TWO_D'
+      ? getTilePosition2d({ tile: contextMenu.tile })
+      : getTilePosition({ tile: contextMenu.tile });
+
+  return (
+    <ContextMenu
+      anchorEl={anchorEl}
+      onClose={onClose}
+      position={CoordsUtils.multiply(tilePos, zoom)}
+      menuItems={menuItems}
     />
   );
 };

@@ -8,6 +8,7 @@ import { Cursor } from 'src/components/Cursor/Cursor';
 import { Nodes } from 'src/components/SceneLayers/Nodes/Nodes';
 import { Rectangles } from 'src/components/SceneLayers/Rectangles/Rectangles';
 import { Connectors } from 'src/components/SceneLayers/Connectors/Connectors';
+import { ConnectorStackBadges } from 'src/components/SceneLayers/Connectors/ConnectorStackBadges';
 import { ConnectorLabels } from 'src/components/SceneLayers/ConnectorLabels/ConnectorLabels';
 import { TextBoxes } from 'src/components/SceneLayers/TextBoxes/TextBoxes';
 import { SizeIndicator } from 'src/components/DebugUtils/SizeIndicator';
@@ -185,6 +186,12 @@ export const Renderer = ({ showGrid, backgroundColor }: RendererProps) => {
           zIndex: 10
         }}
       />
+      {/* Above interaction overlay so badge hover/click work */}
+      {isTwoD && (
+        <SceneLayer order={11} sx={{ pointerEvents: 'none' }}>
+          <ConnectorStackBadges />
+        </SceneLayer>
+      )}
     </Box>
   );
 };

@@ -520,13 +520,12 @@ export const Cursor: ModeActions = {
         return;
       }
 
+      // Just drop the WP — path rebuilds between remaining neighbours (A*).
+      // No orthogonalDetour: that rewrote the whole cable to L/U.
       scene.updateConnector(
         freshConnector.id,
         { anchors: nextAnchors },
-        {
-          overlapResolve: 'orthogonalDetour',
-          removedTile: { ...tile }
-        }
+        { overlapResolve: 'off' }
       );
       armedWaypoint = null;
 

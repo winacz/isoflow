@@ -1,6 +1,10 @@
 import { produce } from 'immer';
 import { ViewItem } from 'src/types';
-import { getItemByIdOrThrow, getConnectorsByViewItem } from 'src/utils';
+import {
+  getItemByIdOrThrow,
+  getConnectorsByViewItem,
+  pruneAnchorsAfterNodeMove
+} from 'src/utils';
 import { validateView } from 'src/schemas/validation';
 import { State, ViewReducerContext } from './types';
 import * as reducers from './view';
@@ -28,42 +32,31 @@ export const updateViewItem = (
 
       const connectors = draft.model.views[view.index].connectors;
       if (connectors) {
-        // Absolute tile WPs stay in world space when a port moves — they create
-        // diagonal spaghetti. Strip them before rebuilding paths.
+        // Keep cable topology; only drop WPs that would spaghetti after the move.
         connectorsToUpdate.forEach((connector) => {
           const entry = getItemByIdOrThrow(connectors, connector.id);
-          if (entry.value.anchors.length <= 2) return;
+          const pruned = pruneAnchorsAfterNodeMove({
+            anchors: entry.value.anchors,
+            movedItemId: viewItem.value.id,
+            view: draft.model.views[view.index],
+            modelItems: draft.model.items
+          });
 
           connectors[entry.index] = {
             ...entry.value,
-            anchors: [
-              entry.value.anchors[0],
-              entry.value.anchors[entry.value.anchors.length - 1]
-            ]
+            anchors: pruned
           };
         });
       }
 
-      // Rebuild clean port↔port paths first so peers see each other correctly
-      const afterStrip = connectorsToUpdate.reduce((acc, connector) => {
+      // Rebuild paths only — keep topology (no bump / orthogonalDetour on node move).
+      const updatedConnectors = connectorsToUpdate.reduce((acc, connector) => {
         return syncConnector(
           connector.id,
           { viewId, state: acc },
           { overlapResolve: 'off' }
         );
       }, draft);
-
-      // Then fan out with orthogonal L/U anti-overlap (no bump/A* hairballs)
-      const updatedConnectors = connectorsToUpdate.reduce(
-        (acc, connector, laneIndex) => {
-          return syncConnector(
-            connector.id,
-            { viewId, state: acc },
-            { overlapResolve: 'orthogonalDetour', laneIndex }
-          );
-        },
-        afterStrip
-      );
 
       draft.model.views[view.index].connectors =
         updatedConnectors.model.views[view.index].connectors;
