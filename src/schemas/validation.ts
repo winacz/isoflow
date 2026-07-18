@@ -87,7 +87,13 @@ export const validateConnectorAnchor = (
 ): Issue[] => {
   const issues: Issue[] = [];
 
-  if (Object.keys(anchor.ref).length !== 1) {
+  const refKeys = Object.keys(anchor.ref);
+  const isItemPortRef =
+    Boolean(anchor.ref.item) &&
+    Boolean(anchor.ref.port) &&
+    refKeys.length === 2;
+
+  if (refKeys.length !== 1 && !isItemPortRef) {
     issues.push({
       type: 'INVALID_ANCHOR_REF',
       params: {

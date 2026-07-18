@@ -1,6 +1,8 @@
 import { useState, useMemo } from 'react';
 import { useModelStore } from 'src/stores/modelStore';
+import { useUiStateStore } from 'src/stores/uiStateStore';
 import { Icon } from 'src/types';
+import { isShape2dIcon } from 'src/config';
 
 export const useIconFiltering = () => {
   const [filter, setFilter] = useState<string>('');
@@ -8,20 +10,26 @@ export const useIconFiltering = () => {
   const icons = useModelStore((state) => {
     return state.icons;
   });
+  const projectionMode = useUiStateStore((state) => {
+    return state.projectionMode;
+  });
+
+  const modeIcons = useMemo(() => {
+    return icons.filter((icon: Icon) => {
+      const isPlan = isShape2dIcon(icon.id);
+      return projectionMode === 'TWO_D' ? isPlan : !isPlan;
+    });
+  }, [icons, projectionMode]);
 
   const filteredIcons = useMemo(() => {
     if (filter === '') return null;
 
     const regex = new RegExp(filter, 'gi');
 
-    return icons.filter((icon: Icon) => {
-      if (!filter) {
-        return true;
-      }
-
+    return modeIcons.filter((icon: Icon) => {
       return regex.test(icon.name);
     });
-  }, [icons, filter]);
+  }, [modeIcons, filter]);
 
   return {
     setFilter,

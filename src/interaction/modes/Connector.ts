@@ -2,20 +2,114 @@ import { produce } from 'immer';
 import {
   generateId,
   getItemAtTile,
+  getShape2dItemAtTile,
+  getNearestShape2dPort,
   getItemByIdOrThrow,
   hasMovedTile,
-  setWindowCursor
+  setWindowCursor,
+  BLACK_CROSSHAIR_CURSOR,
+  SHAPE_2D_PORT_SNAP_DISTANCE,
+  isShape2dPortInUse
 } from 'src/utils';
-import { ModeActions, Connector as ConnectorI } from 'src/types';
+import {
+  ModeActions,
+  Connector as ConnectorI,
+  ItemReference,
+  State,
+  ConnectorAnchor
+} from 'src/types';
+import { isShape2dIcon } from 'src/config';
+
+const resolveItemAtTile = ({
+  uiState,
+  scene,
+  model
+}: Pick<State, 'uiState' | 'scene' | 'model'>): ItemReference | null => {
+  if (uiState.projectionMode === 'TWO_D') {
+    return getShape2dItemAtTile({
+      tile: uiState.mouse.position.tile,
+      scene,
+      modelItems: model.items
+    });
+  }
+
+  const itemAtTile = getItemAtTile({
+    tile: uiState.mouse.position.tile,
+    scene
+  });
+
+  if (itemAtTile?.type === 'ITEM') {
+    const modelItem = model.items.find((item) => {
+      return item.id === itemAtTile.id;
+    });
+
+    if (modelItem && isShape2dIcon(modelItem.icon)) {
+      return null;
+    }
+  }
+
+  return itemAtTile;
+};
+
+const getViewConnectors = (scene: State['scene']) => {
+  return scene.currentView.connectors ?? [];
+};
+
+const resolveAnchorRef = ({
+  uiState,
+  scene,
+  model
+}: Pick<State, 'uiState' | 'scene' | 'model'>): ConnectorAnchor['ref'] => {
+  if (uiState.projectionMode === 'TWO_D') {
+    const connectors = getViewConnectors(scene);
+    const excludeConnectorId =
+      uiState.mode.type === 'CONNECTOR' ? uiState.mode.id : null;
+
+    const portHit = getNearestShape2dPort({
+      tile: uiState.mouse.position.tile,
+      scene,
+      modelItems: model.items,
+      maxDistance: SHAPE_2D_PORT_SNAP_DISTANCE,
+      isPortAvailable: (hit) => {
+        return !isShape2dPortInUse({
+          itemId: hit.itemId,
+          portId: hit.portId,
+          connectors,
+          excludeConnectorId
+        });
+      }
+    });
+
+    if (portHit) {
+      return {
+        item: portHit.itemId,
+        port: portHit.portId
+      };
+    }
+
+    // Require port handles in 2D — don't attach to device body
+    return {
+      tile: uiState.mouse.position.tile
+    };
+  }
+
+  const itemAtTile = resolveItemAtTile({ uiState, scene, model });
+
+  if (itemAtTile?.type === 'ITEM') {
+    return { item: itemAtTile.id };
+  }
+
+  return { tile: uiState.mouse.position.tile };
+};
 
 export const Connector: ModeActions = {
   entry: () => {
-    setWindowCursor('crosshair');
+    setWindowCursor(BLACK_CROSSHAIR_CURSOR);
   },
   exit: () => {
     setWindowCursor('default');
   },
-  mousemove: ({ uiState, scene }) => {
+  mousemove: ({ uiState, scene, model }) => {
     if (
       uiState.mode.type !== 'CONNECTOR' ||
       !uiState.mode.id ||
@@ -28,54 +122,44 @@ export const Connector: ModeActions = {
       uiState.mode.id
     );
 
-    const itemAtTile = getItemAtTile({
-      tile: uiState.mouse.position.tile,
-      scene
+    const nextRef = resolveAnchorRef({ uiState, scene, model });
+
+    const newConnector = produce(connector.value, (draft) => {
+      draft.anchors[1] = { id: generateId(), ref: nextRef };
     });
 
-    if (itemAtTile?.type === 'ITEM') {
-      const newConnector = produce(connector.value, (draft) => {
-        draft.anchors[1] = { id: generateId(), ref: { item: itemAtTile.id } };
-      });
-
-      scene.updateConnector(uiState.mode.id, newConnector);
-    } else {
-      const newConnector = produce(connector.value, (draft) => {
-        draft.anchors[1] = {
-          id: generateId(),
-          ref: { tile: uiState.mouse.position.tile }
-        };
-      });
-
-      scene.updateConnector(uiState.mode.id, newConnector);
-    }
+    scene.updateConnector(uiState.mode.id, newConnector);
   },
-  mousedown: ({ uiState, scene, isRendererInteraction }) => {
+  mousedown: ({ uiState, scene, model, isRendererInteraction }) => {
     if (uiState.mode.type !== 'CONNECTOR' || !isRendererInteraction) return;
+
+    const startRef = resolveAnchorRef({ uiState, scene, model });
+
+    // In 2D, connections must start from a free port handle
+    if (uiState.projectionMode === 'TWO_D') {
+      if (!startRef.port || !startRef.item) return;
+
+      if (
+        isShape2dPortInUse({
+          itemId: startRef.item,
+          portId: startRef.port,
+          connectors: getViewConnectors(scene)
+        })
+      ) {
+        return;
+      }
+    }
 
     const newConnector: ConnectorI = {
       id: generateId(),
       color: scene.colors[0].id,
-      anchors: []
+      anchors: [
+        { id: generateId(), ref: startRef },
+        { id: generateId(), ref: startRef }
+      ]
     };
 
-    const itemAtTile = getItemAtTile({
-      tile: uiState.mouse.position.tile,
-      scene
-    });
-
-    if (itemAtTile && itemAtTile.type === 'ITEM') {
-      newConnector.anchors = [
-        { id: generateId(), ref: { item: itemAtTile.id } },
-        { id: generateId(), ref: { item: itemAtTile.id } }
-      ];
-    } else {
-      newConnector.anchors = [
-        { id: generateId(), ref: { tile: uiState.mouse.position.tile } },
-        { id: generateId(), ref: { tile: uiState.mouse.position.tile } }
-      ];
-    }
-
+    scene.beginHistoryTransaction();
     scene.createConnector(newConnector);
 
     uiState.actions.setMode({
@@ -85,19 +169,57 @@ export const Connector: ModeActions = {
     });
   },
   mouseup: ({ uiState, scene }) => {
-    if (uiState.mode.type !== 'CONNECTOR' || !uiState.mode.id) return;
+    if (uiState.mode.type !== 'CONNECTOR' || !uiState.mode.id) {
+      scene.endHistoryTransaction();
+      return;
+    }
 
     const connector = getItemByIdOrThrow(scene.connectors, uiState.mode.id);
     const firstAnchor = connector.value.anchors[0];
     const lastAnchor =
       connector.value.anchors[connector.value.anchors.length - 1];
 
-    if (
-      connector.value.path.tiles.length < 2 ||
-      !(firstAnchor.ref.item && lastAnchor.ref.item)
-    ) {
+    const startsOnDevice = Boolean(firstAnchor.ref.item);
+    const endsOnDevice = Boolean(lastAnchor.ref.item);
+    const startsOnPort = Boolean(firstAnchor.ref.port);
+    const endsOnPort = Boolean(lastAnchor.ref.port);
+
+    const connectors = getViewConnectors(scene);
+    const endPortFree =
+      firstAnchor.ref.item &&
+      firstAnchor.ref.port &&
+      lastAnchor.ref.item &&
+      lastAnchor.ref.port
+        ? !isShape2dPortInUse({
+            itemId: lastAnchor.ref.item,
+            portId: lastAnchor.ref.port,
+            connectors,
+            excludeConnectorId: uiState.mode.id
+          })
+        : false;
+
+    const isValidIso =
+      uiState.projectionMode !== 'TWO_D' &&
+      connector.value.path.tiles.length >= 2 &&
+      startsOnDevice &&
+      endsOnDevice;
+
+    const isValid2d =
+      uiState.projectionMode === 'TWO_D' &&
+      connector.value.path.tiles.length >= 2 &&
+      startsOnPort &&
+      endsOnPort &&
+      endPortFree &&
+      !(
+        firstAnchor.ref.item === lastAnchor.ref.item &&
+        firstAnchor.ref.port === lastAnchor.ref.port
+      );
+
+    if (!isValidIso && !isValid2d) {
       scene.deleteConnector(uiState.mode.id);
     }
+
+    scene.endHistoryTransaction();
 
     uiState.actions.setMode({
       type: 'CURSOR',

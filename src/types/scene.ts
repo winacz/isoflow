@@ -15,6 +15,8 @@ export const ItemReferenceTypeOptions = {
   ITEM: 'ITEM',
   CONNECTOR: 'CONNECTOR',
   CONNECTOR_ANCHOR: 'CONNECTOR_ANCHOR',
+  /** 2D: drag both tile waypoints that bound a segment handle */
+  CONNECTOR_SEGMENT: 'CONNECTOR_SEGMENT',
   TEXTBOX: 'TEXTBOX',
   RECTANGLE: 'RECTANGLE'
 } as const;

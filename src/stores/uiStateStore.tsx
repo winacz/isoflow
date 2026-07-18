@@ -14,6 +14,7 @@ const initialState = () => {
     return {
       zoom: INITIAL_UI_STATE.zoom,
       scroll: INITIAL_UI_STATE.scroll,
+      projectionMode: INITIAL_UI_STATE.projectionMode,
       view: '',
       mainMenuOptions: [],
       editorMode: 'EXPLORABLE_READONLY',
@@ -26,7 +27,8 @@ const initialState = () => {
       mouse: {
         position: { screen: CoordsUtils.zero(), tile: CoordsUtils.zero() },
         mousedown: null,
-        delta: null
+        delta: null,
+        shiftKey: false
       },
       itemControls: null,
       enableDebugTools: false,
@@ -91,6 +93,9 @@ const initialState = () => {
         },
         setRendererEl: (el) => {
           set({ rendererEl: el });
+        },
+        setProjectionMode: (projectionMode) => {
+          set({ projectionMode });
         }
       }
     };

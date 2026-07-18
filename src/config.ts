@@ -24,6 +24,104 @@ export const PROJECTED_TILE_SIZE = {
   height: UNPROJECTED_TILE_SIZE * TILE_PROJECTION_MULTIPLIERS.height
 };
 
+export const SHAPE_2D_SWITCH_ID = 'SWITCH';
+export const SHAPE_2D_PC_ID = 'PC';
+
+/**
+ * Pixel size of one 2D grid cell (independent from isometric UNPROJECTED_TILE_SIZE).
+ */
+export const TILE_SIZE_2D = 40;
+
+/**
+ * 16-port switch footprint (tiles) — card layout:
+ * - rows 0..2: header (name)
+ * - row 3: divider / spacer
+ * - row 4: 8 top RJ45 (cols 2,4,6,8,10,12,14,16)
+ * - rows 5..6: spacer
+ * - row 7: 8 bottom RJ45
+ * - row 8: bottom padding
+ */
+export const SWITCH_2D_SIZE: Size = { width: 20, height: 9 };
+
+/** PC card — same visual language, single NIC port. */
+export const PC_2D_SIZE: Size = { width: 8, height: 7 };
+
+export type Shape2dPortSide = 'TOP' | 'BOTTOM' | 'LEFT' | 'RIGHT';
+
+export interface Shape2dPort {
+  id: string;
+  /** Tile offset from the shape's top-left corner */
+  tile: { x: number; y: number };
+  side: Shape2dPortSide;
+}
+
+export const SWITCH_2D_PORTS: Shape2dPort[] = [
+  ...Array.from({ length: 8 }, (_, index) => {
+    return {
+      id: `port-top-${index + 1}`,
+      tile: { x: 2 + index * 2, y: 4 },
+      side: 'TOP' as const
+    };
+  }),
+  ...Array.from({ length: 8 }, (_, index) => {
+    return {
+      id: `port-bottom-${index + 1}`,
+      tile: { x: 2 + index * 2, y: 7 },
+      side: 'BOTTOM' as const
+    };
+  })
+];
+
+export const PC_2D_PORTS: Shape2dPort[] = [
+  {
+    id: 'port-1',
+    tile: { x: 3, y: 5 },
+    side: 'BOTTOM'
+  }
+];
+
+/** Footprint of 2D shapes in grid cells (for ports / connections later). */
+export const SHAPE_2D_SIZES: Record<string, Size> = {
+  [SHAPE_2D_SWITCH_ID]: SWITCH_2D_SIZE,
+  [SHAPE_2D_PC_ID]: PC_2D_SIZE
+};
+
+export const SHAPE_2D_PORTS: Record<string, Shape2dPort[]> = {
+  [SHAPE_2D_SWITCH_ID]: SWITCH_2D_PORTS,
+  [SHAPE_2D_PC_ID]: PC_2D_PORTS
+};
+
+export const SHAPES_2D: Icon[] = [
+  {
+    id: SHAPE_2D_SWITCH_ID,
+    name: 'Switch',
+    url: '',
+    collection: 'Shapes',
+    isIsometric: false
+  },
+  {
+    id: SHAPE_2D_PC_ID,
+    name: 'PC',
+    url: '',
+    collection: 'Shapes',
+    isIsometric: false
+  }
+];
+
+export const getShape2dSize = (shapeId: string): Size | null => {
+  return SHAPE_2D_SIZES[shapeId] ?? null;
+};
+
+export const getShape2dPorts = (shapeId: string): Shape2dPort[] => {
+  return SHAPE_2D_PORTS[shapeId] ?? [];
+};
+
+export const isShape2dIcon = (iconId: string | undefined | null): boolean => {
+  if (!iconId) return false;
+
+  return SHAPE_2D_SIZES[iconId] !== undefined;
+};
+
 export const DEFAULT_COLOR: Colors[0] = {
   id: '__DEFAULT__',
   value: customVars.customPalette.defaultColor
@@ -88,7 +186,8 @@ export const INITIAL_UI_STATE = {
   scroll: {
     position: CoordsUtils.zero(),
     offset: CoordsUtils.zero()
-  }
+  },
+  projectionMode: 'ISOMETRIC' as const
 };
 export const INITIAL_SCENE_STATE = {
   connectors: {},

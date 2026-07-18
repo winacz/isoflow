@@ -9,7 +9,9 @@ export const anchorSchema = z.object({
     .object({
       item: id,
       anchor: id,
-      tile: coords
+      tile: coords,
+      /** 2D device port id (used with item) */
+      port: z.string()
     })
     .partial()
 });

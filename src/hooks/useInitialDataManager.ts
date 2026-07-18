@@ -1,6 +1,7 @@
 import { useCallback, useState, useRef } from 'react';
 import { InitialData, IconCollectionState } from 'src/types';
-import { INITIAL_DATA, INITIAL_SCENE_STATE } from 'src/config';
+import { INITIAL_SCENE_STATE } from 'src/config';
+import { createEditorInitialData } from 'src/examples/createEditorInitialData';
 import {
   getFitToViewParams,
   CoordsUtils,
@@ -12,6 +13,7 @@ import * as reducers from 'src/stores/reducers';
 import { useModelStore } from 'src/stores/modelStore';
 import { useView } from 'src/hooks/useView';
 import { useUiStateStore } from 'src/stores/uiStateStore';
+import { useHistoryStore, resetHistoryTransaction } from 'src/stores/historyStore';
 import { modelSchema } from 'src/schemas/model';
 
 export const useInitialDataManager = () => {
@@ -39,7 +41,11 @@ export const useInitialDataManager = () => {
       if (!validationResult.success) {
         // TODO: let's get better at reporting error messages here (starting with how we present them to users)
         // - not in console but in a modal
-        console.log(validationResult.error.errors);
+        // eslint-disable-next-line no-console
+        console.error(
+          'Model validation failed',
+          validationResult.error.errors
+        );
         window.alert('There is an error in your model.');
         return;
       }
@@ -69,6 +75,10 @@ export const useInitialDataManager = () => {
 
       changeView(view.value.id, initialData);
 
+      if (initialData.projectionMode) {
+        uiStateActions.setProjectionMode(initialData.projectionMode);
+      }
+
       if (initialData.fitToView) {
         const rendererSize = rendererEl?.getBoundingClientRect();
 
@@ -96,15 +106,19 @@ export const useInitialDataManager = () => {
 
       uiStateActions.setIconCategoriesState(categoriesState);
 
+      useHistoryStore.getState().clear();
+      resetHistoryTransaction();
+
       setIsReady(true);
     },
     [changeView, model.actions, rendererEl, uiStateActions]
   );
 
   const clear = useCallback(() => {
-    load({ ...INITIAL_DATA, icons: model.icons, colors: model.colors });
     uiStateActions.resetUiState();
-  }, [load, model.icons, model.colors, uiStateActions]);
+    // Reset both isometric demo and 2D practice topology
+    load(createEditorInitialData());
+  }, [load, uiStateActions]);
 
   return {
     load,

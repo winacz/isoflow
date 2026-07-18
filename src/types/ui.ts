@@ -1,4 +1,9 @@
-import { Coords, EditorModeEnum, MainMenuOptions } from './common';
+import {
+  Coords,
+  EditorModeEnum,
+  MainMenuOptions,
+  ProjectionMode
+} from './common';
 import { Icon } from './model';
 import { ItemReference } from './scene';
 
@@ -21,6 +26,8 @@ export interface Mouse {
     screen: Coords;
     tile: Coords;
   } | null;
+  /** True while Shift is held (from the latest mouse event). */
+  shiftKey: boolean;
 }
 
 // Mode types
@@ -40,6 +47,8 @@ export interface DragItemsMode {
   showCursor: boolean;
   items: ItemReference[];
   isInitialMovement: Boolean;
+  /** View-item tiles at drag start — used for absolute 2D placement. */
+  itemOrigins?: Record<string, Coords>;
 }
 
 export interface PanMode {
@@ -146,6 +155,7 @@ export interface UiState {
   mouse: Mouse;
   rendererEl: HTMLDivElement | null;
   enableDebugTools: boolean;
+  projectionMode: ProjectionMode;
 }
 
 export interface UiStateActions {
@@ -166,6 +176,7 @@ export interface UiStateActions {
   setMouse: (mouse: Mouse) => void;
   setRendererEl: (el: HTMLDivElement) => void;
   setEnableDebugTools: (enabled: boolean) => void;
+  setProjectionMode: (projectionMode: ProjectionMode) => void;
 }
 
 export type UiStateStore = UiState & {

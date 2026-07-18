@@ -18,4 +18,5 @@ export type ModeActions = {
   mousemove?: ModeActionsAction;
   mousedown?: ModeActionsAction;
   mouseup?: ModeActionsAction;
+  dblclick?: ModeActionsAction;
 };

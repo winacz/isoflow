@@ -1,7 +1,11 @@
-import React from 'react';
+import React, { useMemo } from 'react';
 import Isoflow from 'src/Isoflow';
-import { initialData } from '../initialData';
+import { createEditorInitialData } from '../createEditorInitialData';
 
 export const BasicEditor = () => {
-  return <Isoflow initialData={{ ...initialData, fitToView: true }} />;
+  const initialData = useMemo(() => {
+    return createEditorInitialData();
+  }, []);
+
+  return <Isoflow initialData={initialData} />;
 };

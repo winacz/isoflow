@@ -63,7 +63,7 @@
     "typescript": "^5.1.6",
     "webpack": "^5.76.2",
     "webpack-cli": "^5.0.1",
-    "webpack-dev-server": "^4.15.1"
+    "webpack-dev-server": "^6.0.0"
   },
   "dependencies": {
     "@emotion/react": "^11.10.6",
@@ -76,14 +76,15 @@
     "file-saver": "^2.0.5",
     "gsap": "^3.11.4",
     "immer": "^10.0.2",
+    "isoflow": "^0.3.30",
     "mui-color-input": "^2.0.3",
     "paper": "^0.12.17",
     "pathfinding": "^0.4.18",
     "react-hook-form": "^7.43.2",
     "react-quill": "^2.0.0",
     "react-router-dom": "^6.8.1",
-    "uuid": "^9.0.0",
-    "zod": "3.22.2",
+    "uuid": "^14.0.1",
+    "zod": "^3.25.76",
     "zustand": "^4.3.3"
   },
   "peerDependencies": {

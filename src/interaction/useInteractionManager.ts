@@ -2,7 +2,13 @@ import { useCallback, useEffect, useRef } from 'react';
 import { useModelStore } from 'src/stores/modelStore';
 import { useUiStateStore } from 'src/stores/uiStateStore';
 import { ModeActions, State, SlimMouseEvent } from 'src/types';
-import { getMouse, getItemAtTile } from 'src/utils';
+import {
+  getMouse,
+  getItemAtTile,
+  getPanScrollFromDelta,
+  setWindowCursor,
+  BLACK_CROSSHAIR_CURSOR
+} from 'src/utils';
 import { useResizeObserver } from 'src/hooks/useResizeObserver';
 import { useScene } from 'src/hooks/useScene';
 import { Cursor } from './modes/Cursor';
@@ -13,6 +19,9 @@ import { Connector } from './modes/Connector';
 import { Pan } from './modes/Pan';
 import { PlaceIcon } from './modes/PlaceIcon';
 import { TextBox } from './modes/TextBox';
+
+const RIGHT_MOUSE_BUTTON = 2;
+const PAN_DRAG_THRESHOLD_PX = 3;
 
 const modes: { [k in string]: ModeActions } = {
   CURSOR: Cursor,
@@ -34,14 +43,34 @@ const getModeFunction = (mode: ModeActions, e: SlimMouseEvent) => {
       return mode.mousedown;
     case 'mouseup':
       return mode.mouseup;
+    case 'dblclick':
+      return mode.dblclick;
     default:
       return null;
+  }
+};
+
+const restoreCursorForMode = (modeType: string) => {
+  switch (modeType) {
+    case 'PAN':
+      setWindowCursor('grab');
+      break;
+    case 'CONNECTOR':
+      setWindowCursor(BLACK_CROSSHAIR_CURSOR);
+      break;
+    case 'RECTANGLE.DRAW':
+    case 'TEXTBOX':
+      setWindowCursor('crosshair');
+      break;
+    default:
+      setWindowCursor('default');
   }
 };
 
 export const useInteractionManager = () => {
   const rendererRef = useRef<HTMLElement>();
   const reducerTypeRef = useRef<string>();
+  const rightButtonPanRef = useRef({ active: false, didPan: false });
   const uiState = useUiStateStore((state) => {
     return state;
   });
@@ -55,10 +84,8 @@ export const useInteractionManager = () => {
     (e: SlimMouseEvent) => {
       if (!rendererRef.current) return;
 
-      const mode = modes[uiState.mode.type];
-      const modeFunction = getModeFunction(mode, e);
-
-      if (!modeFunction) return;
+      const isRendererInteraction = rendererRef.current === e.target;
+      const rightButtonPan = rightButtonPanRef.current;
 
       const nextMouse = getMouse({
         interactiveElement: rendererRef.current,
@@ -66,8 +93,59 @@ export const useInteractionManager = () => {
         scroll: uiState.scroll,
         lastMouse: uiState.mouse,
         mouseEvent: e,
-        rendererSize
+        rendererSize,
+        projectionMode: uiState.projectionMode
       });
+
+      if (e.type === 'mousedown' && e.button === RIGHT_MOUSE_BUTTON) {
+        if (!isRendererInteraction) return;
+
+        e.preventDefault();
+        rightButtonPan.active = true;
+        rightButtonPan.didPan = false;
+        setWindowCursor('grabbing');
+        uiState.actions.setMouse(nextMouse);
+        return;
+      }
+
+      // Prevent native browser drag (shows ⃠) on the empty interaction layer
+      if (e.type === 'mousedown' && isRendererInteraction && e.button === 0) {
+        e.preventDefault();
+      }
+
+      if (e.type === 'dblclick' && isRendererInteraction) {
+        e.preventDefault();
+      }
+
+      if (rightButtonPan.active && e.type === 'mousemove') {
+        uiState.actions.setMouse(nextMouse);
+
+        if (nextMouse.mousedown) {
+          const dx = nextMouse.position.screen.x - nextMouse.mousedown.screen.x;
+          const dy = nextMouse.position.screen.y - nextMouse.mousedown.screen.y;
+
+          if (Math.hypot(dx, dy) > PAN_DRAG_THRESHOLD_PX) {
+            rightButtonPan.didPan = true;
+          }
+        }
+
+        uiState.actions.setScroll(
+          getPanScrollFromDelta(uiState.scroll, nextMouse.delta?.screen)
+        );
+        return;
+      }
+
+      if (rightButtonPan.active && e.type === 'mouseup') {
+        uiState.actions.setMouse(nextMouse);
+        rightButtonPan.active = false;
+        restoreCursorForMode(uiState.mode.type);
+        return;
+      }
+
+      const mode = modes[uiState.mode.type];
+      const modeFunction = getModeFunction(mode, e);
+
+      if (!modeFunction) return;
 
       uiState.actions.setMouse(nextMouse);
 
@@ -77,7 +155,7 @@ export const useInteractionManager = () => {
         uiState,
         rendererRef: rendererRef.current,
         rendererSize,
-        isRendererInteraction: rendererRef.current === e.target
+        isRendererInteraction
       };
 
       if (reducerTypeRef.current !== uiState.mode.type) {
@@ -103,6 +181,11 @@ export const useInteractionManager = () => {
   const onContextMenu = useCallback(
     (e: SlimMouseEvent) => {
       e.preventDefault();
+
+      if (rightButtonPanRef.current.didPan) {
+        rightButtonPanRef.current.didPan = false;
+        return;
+      }
 
       const itemAtTile = getItemAtTile({
         tile: uiState.mouse.position.tile,
@@ -131,7 +214,8 @@ export const useInteractionManager = () => {
         ...e,
         clientX: Math.floor(e.touches[0].clientX),
         clientY: Math.floor(e.touches[0].clientY),
-        type: 'mousedown'
+        type: 'mousedown',
+        button: 0
       });
     };
 
@@ -140,7 +224,8 @@ export const useInteractionManager = () => {
         ...e,
         clientX: Math.floor(e.touches[0].clientX),
         clientY: Math.floor(e.touches[0].clientY),
-        type: 'mousemove'
+        type: 'mousemove',
+        button: 0
       });
     };
 
@@ -149,7 +234,8 @@ export const useInteractionManager = () => {
         ...e,
         clientX: 0,
         clientY: 0,
-        type: 'mouseup'
+        type: 'mouseup',
+        button: 0
       });
     };
 
@@ -164,6 +250,7 @@ export const useInteractionManager = () => {
     el.addEventListener('mousemove', onMouseEvent);
     el.addEventListener('mousedown', onMouseEvent);
     el.addEventListener('mouseup', onMouseEvent);
+    el.addEventListener('dblclick', onMouseEvent);
     el.addEventListener('contextmenu', onContextMenu);
     el.addEventListener('touchstart', onTouchStart);
     el.addEventListener('touchmove', onTouchMove);
@@ -174,6 +261,7 @@ export const useInteractionManager = () => {
       el.removeEventListener('mousemove', onMouseEvent);
       el.removeEventListener('mousedown', onMouseEvent);
       el.removeEventListener('mouseup', onMouseEvent);
+      el.removeEventListener('dblclick', onMouseEvent);
       el.removeEventListener('contextmenu', onContextMenu);
       el.removeEventListener('touchstart', onTouchStart);
       el.removeEventListener('touchmove', onTouchMove);

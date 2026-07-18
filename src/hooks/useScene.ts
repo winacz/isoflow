@@ -11,13 +11,21 @@ import {
 import { useUiStateStore } from 'src/stores/uiStateStore';
 import { useModelStore } from 'src/stores/modelStore';
 import { useSceneStore } from 'src/stores/sceneStore';
+import {
+  useHistoryStore,
+  enterHistoryTransaction,
+  leaveHistoryTransaction,
+  isHistoryTransactionOpen,
+  resetHistoryTransaction
+} from 'src/stores/historyStore';
 import * as reducers from 'src/stores/reducers';
 import type { State } from 'src/stores/reducers/types';
-import { getItemByIdOrThrow } from 'src/utils';
+import { getItemByIdOrThrow, modelFromModelStore } from 'src/utils';
 import {
   CONNECTOR_DEFAULTS,
   RECTANGLE_DEFAULTS,
-  TEXTBOX_DEFAULTS
+  TEXTBOX_DEFAULTS,
+  INITIAL_SCENE_STATE
 } from 'src/config';
 
 export const useScene = () => {
@@ -31,6 +39,12 @@ export const useScene = () => {
 
   const currentViewId = useUiStateStore((state) => {
     return state.view;
+  });
+  const historyPush = useHistoryStore((state) => {
+    return state.push;
+  });
+  const historyPop = useHistoryStore((state) => {
+    return state.pop;
   });
 
   const currentView = useMemo(() => {
@@ -85,13 +99,60 @@ export const useScene = () => {
     };
   }, [model.actions, scene.actions]);
 
+  const recordHistory = useCallback(() => {
+    historyPush(structuredClone(modelFromModelStore(model.actions.get())));
+  }, [historyPush, model.actions]);
+
   const setState = useCallback(
-    (newState: State) => {
+    (newState: State, options?: { skipHistory?: boolean }) => {
+      if (!options?.skipHistory && !isHistoryTransactionOpen()) {
+        recordHistory();
+      }
+
       model.actions.set(newState.model);
       scene.actions.set(newState.scene);
     },
-    [model.actions, scene.actions]
+    [model.actions, scene.actions, recordHistory]
   );
+
+  const beginHistoryTransaction = useCallback(() => {
+    if (!isHistoryTransactionOpen()) {
+      recordHistory();
+    }
+    enterHistoryTransaction();
+  }, [recordHistory]);
+
+  const endHistoryTransaction = useCallback(() => {
+    leaveHistoryTransaction();
+  }, []);
+
+  const undo = useCallback(() => {
+    const previous = historyPop();
+    if (!previous) return false;
+
+    resetHistoryTransaction();
+
+    const current = model.actions.get();
+    model.actions.set({
+      ...previous,
+      actions: current.actions
+    });
+
+    const synced = reducers.view({
+      action: 'SYNC_SCENE',
+      payload: undefined,
+      ctx: {
+        viewId: currentViewId,
+        state: {
+          model: model.actions.get(),
+          scene: INITIAL_SCENE_STATE
+        }
+      }
+    });
+
+    scene.actions.set(synced.scene);
+    return true;
+  }, [historyPop, model.actions, scene.actions, currentViewId]);
 
   const createModelItem = useCallback(
     (newModelItem: ModelItem) => {
@@ -166,10 +227,17 @@ export const useScene = () => {
   );
 
   const updateConnector = useCallback(
-    (id: string, updates: Partial<Connector>) => {
+    (
+      id: string,
+      updates: Partial<Connector>,
+      options?: {
+        overlapResolve?: 'default' | 'orthogonalDetour' | 'off';
+        removedTile?: { x: number; y: number };
+      }
+    ) => {
       const newState = reducers.view({
         action: 'UPDATE_CONNECTOR',
-        payload: { id, ...updates },
+        payload: { id, ...updates, ...options },
         ctx: { viewId: currentViewId, state: getState() }
       });
       setState(newState);
@@ -295,6 +363,9 @@ export const useScene = () => {
     createRectangle,
     updateRectangle,
     deleteRectangle,
-    changeLayerOrder
+    changeLayerOrder,
+    beginHistoryTransaction,
+    endHistoryTransaction,
+    undo
   };
 };

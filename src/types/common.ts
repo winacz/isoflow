@@ -18,11 +18,24 @@ export const ProjectionOrientationEnum = {
   Y: 'Y'
 } as const;
 
+export const ProjectionModeEnum = {
+  ISOMETRIC: 'ISOMETRIC',
+  TWO_D: 'TWO_D'
+} as const;
+
+export type ProjectionMode = keyof typeof ProjectionModeEnum;
+
 export type BoundingBox = [Coords, Coords, Coords, Coords];
 
 export type SlimMouseEvent = Pick<
   MouseEvent,
-  'clientX' | 'clientY' | 'target' | 'type' | 'preventDefault'
+  | 'clientX'
+  | 'clientY'
+  | 'target'
+  | 'type'
+  | 'preventDefault'
+  | 'button'
+  | 'shiftKey'
 >;
 
 export const EditorModeEnum = {

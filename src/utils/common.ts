@@ -1,6 +1,8 @@
 import chroma from 'chroma-js';
-import { Icon, EditorModeEnum, Mode } from 'src/types';
+import { produce } from 'immer';
+import { Icon, EditorModeEnum, Mode, Coords, Scroll } from 'src/types';
 import { v4 as uuid } from 'uuid';
+import { CoordsUtils } from './CoordsUtils';
 
 export const generateId = () => {
   return uuid();
@@ -40,6 +42,25 @@ export const getColorVariant = (
 
 export const setWindowCursor = (cursor: string) => {
   window.document.body.style.cursor = cursor;
+};
+
+/** Black reticle for connector placement (hotspot at center). */
+export const BLACK_CROSSHAIR_CURSOR = `url("data:image/svg+xml,${encodeURIComponent(
+  `<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24">
+    <path d="M12 1v8M12 15v8M1 12h8M15 12h8" stroke="#000" stroke-width="2" fill="none"/>
+    <circle cx="12" cy="12" r="2.5" stroke="#000" stroke-width="2" fill="none"/>
+  </svg>`
+)}") 12 12, crosshair`;
+
+export const getPanScrollFromDelta = (
+  scroll: Scroll,
+  deltaScreen: Coords | null | undefined
+): Scroll => {
+  return produce(scroll, (draft) => {
+    draft.position = deltaScreen
+      ? CoordsUtils.add(draft.position, deltaScreen)
+      : draft.position;
+  });
 };
 
 export const toPx = (value: number | string) => {

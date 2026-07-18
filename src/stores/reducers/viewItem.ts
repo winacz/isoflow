@@ -4,6 +4,7 @@ import { getItemByIdOrThrow, getConnectorsByViewItem } from 'src/utils';
 import { validateView } from 'src/schemas/validation';
 import { State, ViewReducerContext } from './types';
 import * as reducers from './view';
+import { syncConnector } from './connector';
 
 export const updateViewItem = (
   { id, ...updates }: { id: string } & Partial<ViewItem>,
@@ -25,13 +26,44 @@ export const updateViewItem = (
         view.value.connectors ?? []
       );
 
-      const updatedConnectors = connectorsToUpdate.reduce((acc, connector) => {
-        return reducers.view({
-          action: 'UPDATE_CONNECTOR',
-          payload: connector,
-          ctx: { viewId, state: acc }
+      const connectors = draft.model.views[view.index].connectors;
+      if (connectors) {
+        // Absolute tile WPs stay in world space when a port moves — they create
+        // diagonal spaghetti. Strip them before rebuilding paths.
+        connectorsToUpdate.forEach((connector) => {
+          const entry = getItemByIdOrThrow(connectors, connector.id);
+          if (entry.value.anchors.length <= 2) return;
+
+          connectors[entry.index] = {
+            ...entry.value,
+            anchors: [
+              entry.value.anchors[0],
+              entry.value.anchors[entry.value.anchors.length - 1]
+            ]
+          };
         });
+      }
+
+      // Rebuild clean port↔port paths first so peers see each other correctly
+      const afterStrip = connectorsToUpdate.reduce((acc, connector) => {
+        return syncConnector(
+          connector.id,
+          { viewId, state: acc },
+          { overlapResolve: 'off' }
+        );
       }, draft);
+
+      // Then fan out with orthogonal L/U anti-overlap (no bump/A* hairballs)
+      const updatedConnectors = connectorsToUpdate.reduce(
+        (acc, connector, laneIndex) => {
+          return syncConnector(
+            connector.id,
+            { viewId, state: acc },
+            { overlapResolve: 'orthogonalDetour', laneIndex }
+          );
+        },
+        afterStrip
+      );
 
       draft.model.views[view.index].connectors =
         updatedConnectors.model.views[view.index].connectors;
