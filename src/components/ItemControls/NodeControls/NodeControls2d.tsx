@@ -30,6 +30,7 @@ import {
   CABINET_DEFAULT_UNITS,
   CABINET_MIN_UNITS,
   CABINET_MAX_UNITS,
+  MARKDOWN_EMPTY_VALUE,
   type Shape2dPort
 } from 'src/config';
 import {
@@ -55,6 +56,7 @@ import { useModelItem } from 'src/hooks/useModelItem';
 import type { ModelItem } from 'src/types';
 import { ColorPicker } from 'src/components/ColorSelector/ColorPicker';
 import { DeviceTypeIcon } from 'src/components/Icons/DeviceTypeIcon';
+import { MarkdownEditor } from 'src/components/MarkdownEditor/MarkdownEditor';
 import { ControlsContainer } from '../components/ControlsContainer';
 import { DeleteButton } from '../components/DeleteButton';
 
@@ -389,6 +391,10 @@ export const NodeControls2d = ({ id }: Props) => {
   const svis = modelItem.svis ?? [];
   const rackUnits = modelItem.rackUnits ?? CABINET_DEFAULT_UNITS;
   const multiPort = focusedPortIds.length > 1;
+  const hasDescription = Boolean(
+    modelItem.description &&
+      modelItem.description !== MARKDOWN_EMPTY_VALUE
+  );
 
   const portSummaries = useMemo(() => {
     return shapePorts.map((port, index) => {
@@ -807,6 +813,84 @@ export const NodeControls2d = ({ id }: Props) => {
             valueLabelDisplay="auto"
             valueLabelFormat={(v) => `${v}%`}
           />
+        </Box>
+        <Box sx={{ mt: 1.25 }}>
+          <Typography
+            sx={{
+              fontSize: 10,
+              fontWeight: 600,
+              letterSpacing: 0.4,
+              color: 'text.secondary',
+              textTransform: 'uppercase',
+              mb: 0.5
+            }}
+          >
+            Opis
+          </Typography>
+          <MarkdownEditor
+            value={modelItem.description}
+            onChange={(text) => {
+              if (modelItem.description !== text) {
+                updateModelItem(viewItem.id, { description: text });
+              }
+            }}
+          />
+          {hasDescription && (
+            <Box sx={{ mt: 1 }}>
+              <Typography
+                sx={{
+                  fontSize: 10,
+                  fontWeight: 600,
+                  letterSpacing: 0.4,
+                  color: 'text.secondary',
+                  textTransform: 'uppercase',
+                  mb: 0.5
+                }}
+              >
+                Wielkość opisu
+              </Typography>
+              <Slider
+                size="small"
+                marks
+                step={0.5}
+                min={3}
+                max={10}
+                value={Math.min(10, Math.max(3, viewItem.labelScale ?? 3))}
+                onChange={(_, value) => {
+                  const labelScale = Array.isArray(value) ? value[0] : value;
+                  updateViewItem(viewItem.id, { labelScale });
+                }}
+                valueLabelDisplay="auto"
+                valueLabelFormat={(v) => `${v}×`}
+              />
+              <Typography
+                sx={{
+                  fontSize: 10,
+                  fontWeight: 600,
+                  letterSpacing: 0.4,
+                  color: 'text.secondary',
+                  textTransform: 'uppercase',
+                  mb: 0.5,
+                  mt: 1
+                }}
+              >
+                Długość linii
+              </Typography>
+              <Slider
+                size="small"
+                marks
+                step={20}
+                min={60}
+                max={320}
+                value={viewItem.labelHeight ?? 140}
+                onChange={(_, value) => {
+                  const labelHeight = Array.isArray(value) ? value[0] : value;
+                  updateViewItem(viewItem.id, { labelHeight });
+                }}
+                valueLabelDisplay="auto"
+              />
+            </Box>
+          )}
         </Box>
       </Box>
 

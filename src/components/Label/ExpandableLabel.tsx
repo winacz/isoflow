@@ -6,6 +6,8 @@ import { Label, Props as LabelProps } from './Label';
 
 type Props = Omit<LabelProps, 'maxHeight'> & {
   onToggleExpand?: (isExpanded: boolean) => void;
+  /** Collapsed content height before the expand control appears. */
+  collapsedMaxHeight?: number;
 };
 
 const STANDARD_LABEL_HEIGHT = 80;
@@ -13,6 +15,7 @@ const STANDARD_LABEL_HEIGHT = 80;
 export const ExpandableLabel = ({
   children,
   onToggleExpand,
+  collapsedMaxHeight = STANDARD_LABEL_HEIGHT,
   ...rest
 }: Props) => {
   const [isExpanded, setIsExpanded] = useState(false);
@@ -26,8 +29,8 @@ export const ExpandableLabel = ({
       return;
     }
     // scrollHeight reflects full content; clientHeight is capped by maxHeight
-    setIsContentTruncated(el.scrollHeight > STANDARD_LABEL_HEIGHT - 4);
-  }, [isExpanded]);
+    setIsContentTruncated(el.scrollHeight > collapsedMaxHeight - 4);
+  }, [isExpanded, collapsedMaxHeight]);
 
   useEffect(() => {
     const el = contentRef.current;
@@ -56,7 +59,7 @@ export const ExpandableLabel = ({
     measureTruncation();
   }, [isExpanded, measureTruncation]);
 
-  const containerMaxHeight = isExpanded ? undefined : STANDARD_LABEL_HEIGHT;
+  const containerMaxHeight = isExpanded ? undefined : collapsedMaxHeight;
   const showExpandControl = isExpanded || isContentTruncated;
 
   return (

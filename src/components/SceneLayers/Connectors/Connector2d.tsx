@@ -9,6 +9,8 @@ import {
   splitConnectorPathByNodeBodies,
   buildConnectorSvgPathD,
   getConnectorRelationSummary,
+  getConnectorPathPreview,
+  stripToEndpointAnchors,
   TRUNK_RAINBOW_COLORS,
   TRUNK_MISMATCH_COLOR,
   CONNECTOR_JUMP_RADIUS_TILES,
@@ -20,6 +22,7 @@ import { useConnector } from 'src/hooks/useConnector';
 import { useScene } from 'src/hooks/useScene';
 import { useModelStore } from 'src/stores/modelStore';
 import { useUiStateStore } from 'src/stores/uiStateStore';
+import { useNodeDragStore } from 'src/stores/nodeDragStore';
 
 interface Props {
   connector: ReturnType<typeof useScene>['connectors'][0];
@@ -91,11 +94,51 @@ export const Connector2d = memo(({
   const strokeBase =
     vlanStroke ?? (isUntaggedLink ? vlan1CableColor ?? '#0a0a0a' : '#0a0a0a');
 
-  const globalTiles = useMemo(() => {
-    return connector.path.tiles.map((tile) => {
-      return connectorPathTileToGlobal(tile, connector.path.rectangle.from);
+  const endpointItemIds = useMemo(() => {
+    return connector.anchors
+      .map((anchor) => {
+        return anchor.ref.item;
+      })
+      .filter((itemId): itemId is string => {
+        return Boolean(itemId);
+      });
+  }, [connector.anchors]);
+
+  // Fingerprint of live drag tiles that affect this cable — avoids model writes.
+  const liveDragKey = useNodeDragStore((state) => {
+    let key = '';
+    endpointItemIds.forEach((itemId) => {
+      const tile = state.tiles[itemId];
+      if (!tile) return;
+      key += `${itemId}:${tile.x},${tile.y};`;
     });
-  }, [connector.path.tiles, connector.path.rectangle.from]);
+    return key;
+  });
+
+  const livePath = useMemo(() => {
+    if (!liveDragKey) return null;
+
+    const tileOverrides = useNodeDragStore.getState().tiles;
+    try {
+      return getConnectorPathPreview({
+        anchors: stripToEndpointAnchors(connector.anchors),
+        view: currentView,
+        modelItems,
+        tileOverrides
+      });
+    } catch {
+      return null;
+    }
+  }, [liveDragKey, connector.anchors, currentView, modelItems]);
+
+  const pathTiles = livePath?.tiles ?? connector.path.tiles;
+  const pathFrom = livePath?.rectangle.from ?? connector.path.rectangle.from;
+
+  const globalTiles = useMemo(() => {
+    return pathTiles.map((tile) => {
+      return connectorPathTileToGlobal(tile, pathFrom);
+    });
+  }, [pathTiles, pathFrom]);
 
   const bounds = useMemo(() => {
     if (globalTiles.length === 0) {
@@ -126,16 +169,6 @@ export const Connector2d = memo(({
       height: bounds.height * TILE_SIZE_2D
     };
   }, [bounds]);
-
-  const endpointItemIds = useMemo(() => {
-    return connector.anchors
-      .map((anchor) => {
-        return anchor.ref.item;
-      })
-      .filter((itemId): itemId is string => {
-        return Boolean(itemId);
-      });
-  }, [connector.anchors]);
 
   const styleRuns = useMemo(() => {
     // Body-crossing dashes are expensive (per-tile vs all nodes) — skip while dragging.

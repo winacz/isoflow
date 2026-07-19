@@ -80,7 +80,7 @@ export const screenToIso = ({
   return tile;
 };
 
-export const screenToTile2d = ({
+export const screenToTile2dContinuous = ({
   mouse,
   zoom,
   scroll,
@@ -94,8 +94,35 @@ export const screenToTile2d = ({
   };
 
   return {
-    x: Math.floor(projectPosition.x / tileSize),
-    y: Math.floor(projectPosition.y / tileSize)
+    x: projectPosition.x / tileSize,
+    y: projectPosition.y / tileSize
+  };
+};
+
+export const screenToTile2d = ({
+  mouse,
+  zoom,
+  scroll,
+  rendererSize
+}: ScreenToIso) => {
+  const continuous = screenToTile2dContinuous({
+    mouse,
+    zoom,
+    scroll,
+    rendererSize
+  });
+
+  return {
+    x: Math.floor(continuous.x),
+    y: Math.floor(continuous.y)
+  };
+};
+
+/** Snap a fractional 2D tile position to the nearest integer grid cell. */
+export const snapTile2dToGrid = (tile: Coords): Coords => {
+  return {
+    x: Math.round(tile.x),
+    y: Math.round(tile.y)
   };
 };
 
@@ -886,10 +913,13 @@ export const getAllAnchors = (connectors: Connector[]) => {
 export const getAnchorTile = (
   anchor: ConnectorAnchor,
   view: View,
-  modelItems?: { id: string; icon?: string }[]
+  modelItems?: { id: string; icon?: string }[],
+  /** Live tiles during node drag (model still has the pre-drag positions). */
+  tileOverrides?: Record<string, Coords>
 ): Coords => {
   if (anchor.ref.item) {
     const viewItem = getItemByIdOrThrow(view.items, anchor.ref.item).value;
+    const tile = tileOverrides?.[anchor.ref.item] ?? viewItem.tile;
 
     if (anchor.ref.port && modelItems) {
       const modelItem = modelItems.find((item) => {
@@ -900,18 +930,18 @@ export const getAnchorTile = (
       });
 
       if (port) {
-        return getShape2dPortWorldTile(viewItem.tile, port.tile);
+        return getShape2dPortWorldTile(tile, port.tile);
       }
     }
 
-    return viewItem.tile;
+    return tile;
   }
 
   if (anchor.ref.anchor) {
     const allAnchors = getAllAnchors(view.connectors ?? []);
     const nextAnchor = getItemByIdOrThrow(allAnchors, anchor.ref.anchor).value;
 
-    return getAnchorTile(nextAnchor, view, modelItems);
+    return getAnchorTile(nextAnchor, view, modelItems, tileOverrides);
   }
 
   if (anchor.ref.tile) {
@@ -1026,11 +1056,13 @@ export const getConnectorPath = ({
 export const getConnectorPathPreview = ({
   anchors,
   view,
-  modelItems
+  modelItems,
+  tileOverrides
 }: {
   anchors: ConnectorAnchor[];
   view: View;
   modelItems?: { id: string; icon?: string }[];
+  tileOverrides?: Record<string, Coords>;
 }): {
   tiles: Coords[];
   rectangle: Rect;
@@ -1042,7 +1074,7 @@ export const getConnectorPathPreview = ({
   }
 
   const anchorPosition = anchors.map((anchor) => {
-    return getAnchorTile(anchor, view, modelItems);
+    return getAnchorTile(anchor, view, modelItems, tileOverrides);
   });
 
   const searchArea = getBoundingBox(anchorPosition, CONNECTOR_SEARCH_OFFSET);

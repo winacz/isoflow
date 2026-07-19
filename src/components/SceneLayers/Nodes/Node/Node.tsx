@@ -4,6 +4,7 @@ import {
   PROJECTED_TILE_SIZE,
   DEFAULT_LABEL_HEIGHT,
   MARKDOWN_EMPTY_VALUE,
+  TILE_SIZE_2D,
   getModelItemSize,
   isShape2dIcon
 } from 'src/config';
@@ -16,6 +17,7 @@ import { ExpandableLabel } from 'src/components/Label/ExpandableLabel';
 import { MarkdownEditor } from 'src/components/MarkdownEditor/MarkdownEditor';
 import { useUiStateStore } from 'src/stores/uiStateStore';
 import { useModelStore } from 'src/stores/modelStore';
+import { useNodeDragStore } from 'src/stores/nodeDragStore';
 
 interface Props {
   node: ViewItem;
@@ -96,25 +98,29 @@ export const Node = ({
   const projectionMode = useUiStateStore((state) => {
     return state.projectionMode;
   });
+  const liveTile = useNodeDragStore((state) => {
+    return state.tiles[node.id];
+  });
 
   const isTwoD = projectionMode === 'TWO_D';
   const isPlanShape = isShape2dIcon(modelItem.icon);
   const shapeSize = getModelItemSize(modelItem);
+  const tile = liveTile ?? node.tile;
 
   const position = useMemo(() => {
     if (isTwoD && shapeSize) {
-      return getShape2dCenterPosition(node.tile, shapeSize);
+      return getShape2dCenterPosition(tile, shapeSize);
     }
 
     if (isTwoD) {
-      return getShape2dCenterPosition(node.tile, { width: 1, height: 1 });
+      return getShape2dCenterPosition(tile, { width: 1, height: 1 });
     }
 
     return getTilePosition({
-      tile: node.tile,
+      tile,
       origin: 'BOTTOM'
     });
-  }, [node.tile, isTwoD, shapeSize]);
+  }, [tile, isTwoD, shapeSize]);
 
   const description = useMemo(() => {
     if (
@@ -126,7 +132,35 @@ export const Node = ({
     return modelItem.description;
   }, [modelItem.description]);
 
-  const showFloatingLabel = !isPlanShape && (modelItem.name || description);
+  // Iso icons: name/description float above the sprite.
+  // 2D plan shapes already show the name on the chassis — only float a
+  // description card (same ExpandableLabel UX as isometric).
+  const showFloatingLabel = isPlanShape
+    ? Boolean(description)
+    : Boolean(modelItem.name || description);
+
+  const labelAnchorBottom =
+    isPlanShape && shapeSize
+      ? (shapeSize.height * TILE_SIZE_2D) / 2
+      : PROJECTED_TILE_SIZE.height / 2;
+
+  const labelScale = isPlanShape
+    ? Math.min(10, Math.max(3, node.labelScale ?? 3))
+    : 1;
+  const labelMaxWidth = isPlanShape
+    ? Math.round(140 * labelScale)
+    : 250;
+  const labelCollapsedHeight = isPlanShape
+    ? Math.round(55 * labelScale)
+    : 80;
+  const labelStemHeight =
+    node.labelHeight ?? (isPlanShape ? 140 : DEFAULT_LABEL_HEIGHT);
+  const titleFontSize = isPlanShape
+    ? Math.round(5.5 * labelScale + 2)
+    : undefined;
+  const bodyFontSize = isPlanShape
+    ? Math.round(4.5 * labelScale + 2)
+    : undefined;
 
   return (
     <Box
@@ -152,22 +186,43 @@ export const Node = ({
           <Box
             sx={{ position: 'absolute' }}
             style={{
-              bottom: PROJECTED_TILE_SIZE.height / 2
+              bottom: labelAnchorBottom
             }}
           >
             <ExpandableLabel
-              maxWidth={250}
+              maxWidth={labelMaxWidth}
               expandDirection="BOTTOM"
-              labelHeight={node.labelHeight ?? DEFAULT_LABEL_HEIGHT}
+              stemDirection={isPlanShape ? 'diagonal' : 'vertical'}
+              labelHeight={labelStemHeight}
+              collapsedMaxHeight={labelCollapsedHeight}
             >
-              <Stack spacing={1}>
+              <Stack spacing={isPlanShape ? 1.25 : 1}>
                 {modelItem.name && (
-                  <Typography fontWeight={600}>{modelItem.name}</Typography>
+                  <Typography
+                    fontWeight={700}
+                    sx={
+                      titleFontSize
+                        ? { fontSize: titleFontSize, lineHeight: 1.25 }
+                        : undefined
+                    }
+                  >
+                    {modelItem.name}
+                  </Typography>
                 )}
-                {modelItem.description &&
-                  modelItem.description !== MARKDOWN_EMPTY_VALUE && (
-                    <MarkdownEditor value={modelItem.description} readOnly />
-                  )}
+                {description && (
+                  <MarkdownEditor
+                    value={description}
+                    readOnly
+                    styles={
+                      bodyFontSize
+                        ? {
+                            fontSize: bodyFontSize,
+                            lineHeight: 1.4
+                          }
+                        : undefined
+                    }
+                  />
+                )}
               </Stack>
             </ExpandableLabel>
           </Box>

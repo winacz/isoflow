@@ -260,7 +260,7 @@ export const VIEW_DEFAULTS: Required<
 };
 
 export const VIEW_ITEM_DEFAULTS: Required<
-  Omit<ViewItem, 'id' | 'tile' | 'parentId' | 'rackUnit'>
+  Omit<ViewItem, 'id' | 'tile' | 'parentId' | 'rackUnit' | 'labelScale'>
 > = {
   labelHeight: 80
 };

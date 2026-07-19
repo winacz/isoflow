@@ -32,10 +32,13 @@ import {
   isCabinetItem,
   findCabinetAtTile,
   resolveCabinetSnap,
-  getMountedChildren
+  getMountedChildren,
+  screenToTile2dContinuous,
+  snapTile2dToGrid
 } from 'src/utils';
 import { getShape2dSize, getModelItemSize } from 'src/config';
 import { useCabinetSnapStore } from 'src/stores/cabinetSnapStore';
+import { useNodeDragStore } from 'src/stores/nodeDragStore';
 
 const isConnectorPathDrag = (items: ItemReference[]) => {
   return items.some((item) => {
@@ -74,6 +77,11 @@ const dragItems = (
       waypoints: ReturnType<typeof collectTileWaypoints>;
       excludeIds: Set<string>;
     };
+    /**
+     * Smooth 2D node drag: follow fractional tiles without collision push.
+     * Grid snap + placement resolve happen on mouseup.
+     */
+    freePlacement?: boolean;
   }
 ) => {
   const modelItems = options?.modelItems ?? [];
@@ -189,15 +197,21 @@ const dragItems = (
         ? getMountedChildren(id, scene.items).map((child) => child.id)
         : [];
 
-      const resolved = resolveShape2dDragOrigin({
-        desired,
-        current,
-        size,
-        items: scene.items,
-        modelItems,
-        excludeItemIds: [...excludeIds, ...childIds],
-        ignoreCabinets: !isCabinet
-      });
+      let resolved: Coords | null;
+      if (options.freePlacement) {
+        // Follow the cursor continuously; snap / collide on mouseup.
+        resolved = desired;
+      } else {
+        resolved = resolveShape2dDragOrigin({
+          desired,
+          current,
+          size,
+          items: scene.items,
+          modelItems,
+          excludeItemIds: [...excludeIds, ...childIds],
+          ignoreCabinets: !isCabinet
+        });
+      }
 
       if (!resolved) continue;
 
@@ -223,6 +237,18 @@ const dragItems = (
       setCabinetHighlight(highlight.cabinetId, highlight.unit);
     } else {
       clearCabinetHighlight();
+    }
+
+    if (options.freePlacement) {
+      // Always publish the latest live tiles (even when back at origin) so
+      // the transient store cannot keep a stale offset.
+      if (
+        Object.keys(nextTiles).length > 0 ||
+        Object.keys(nextMount).length > 0
+      ) {
+        useNodeDragStore.getState().setLive(nextTiles, nextMount);
+      }
+      return;
     }
 
     if (anyMoved || Object.keys(nextMount).length > 0) {
@@ -729,6 +755,7 @@ export const DragItems: ModeActions = {
   entry: ({ uiState, rendererRef, scene }) => {
     if (uiState.mode.type !== 'DRAG_ITEMS' || !uiState.mouse.mousedown) return;
 
+    useNodeDragStore.getState().clear();
     scene.beginHistoryTransaction();
     const renderer = rendererRef;
     renderer.style.userSelect = 'none';
@@ -800,11 +827,12 @@ export const DragItems: ModeActions = {
   },
   exit: ({ rendererRef, scene }) => {
     useCabinetSnapStore.getState().clear();
+    useNodeDragStore.getState().clear();
     scene.endHistoryTransaction();
     const renderer = rendererRef;
     renderer.style.userSelect = 'auto';
   },
-  mousemove: ({ uiState, scene, model }) => {
+  mousemove: ({ uiState, scene, model, rendererSize }) => {
     if (uiState.mode.type !== 'DRAG_ITEMS' || !uiState.mouse.mousedown) return;
 
     const mode = uiState.mode;
@@ -816,6 +844,14 @@ export const DragItems: ModeActions = {
     const isTwoD = uiState.projectionMode === 'TWO_D';
     const orthogonal =
       isTwoD && uiState.mouse.shiftKey && isConnectorPathDrag(mode.items);
+
+    const isNodeFreeDrag =
+      isTwoD &&
+      Boolean(mode.itemOrigins) &&
+      mode.items.length > 0 &&
+      mode.items.every((item) => {
+        return item.type === 'ITEM';
+      });
 
     const excludeIds = new Set<string>();
     const isSegmentDrag = mode.items.some((item) => {
@@ -852,15 +888,31 @@ export const DragItems: ModeActions = {
           }
         : undefined;
 
+    const continuousOpts = isNodeFreeDrag
+      ? {
+          mouse: uiState.mouse.position.screen,
+          zoom: uiState.zoom,
+          scroll: uiState.scroll,
+          rendererSize
+        }
+      : null;
+    const continuousMousedown = continuousOpts
+      ? screenToTile2dContinuous({
+          ...continuousOpts,
+          mouse: uiState.mouse.mousedown.screen
+        })
+      : null;
+
     const dragOpts = {
       isTwoD,
       modelItems: freshModel.items,
       connectors: freshView?.connectors ?? scene.connectors,
       orthogonal,
-      mousedownTile: uiState.mouse.mousedown.tile,
+      mousedownTile: continuousMousedown ?? uiState.mouse.mousedown.tile,
       itemOrigins: mode.itemOrigins,
       anchorOrigins: mode.anchorOrigins,
-      waypointSnap
+      waypointSnap,
+      freePlacement: isNodeFreeDrag
     };
 
     const useAbsolutePathDelta =
@@ -907,9 +959,12 @@ export const DragItems: ModeActions = {
       }
     };
 
+    const origin = continuousMousedown ?? uiState.mouse.mousedown.tile;
+    const rawTile = continuousOpts
+      ? screenToTile2dContinuous(continuousOpts)
+      : uiState.mouse.position.tile;
+
     if (mode.isInitialMovement) {
-      const origin = uiState.mouse.mousedown.tile;
-      const rawTile = uiState.mouse.position.tile;
       const tile = orthogonal ? axisLockTile(rawTile, origin) : rawTile;
       const delta = CoordsUtils.subtract(tile, origin);
 
@@ -924,71 +979,277 @@ export const DragItems: ModeActions = {
       return;
     }
 
-    if (!hasMovedTile(uiState.mouse) || !uiState.mouse.delta?.tile) return;
+    // Node free-drag tracks pixels; path drag still waits for tile steps.
+    if (isNodeFreeDrag) {
+      if (
+        !uiState.mouse.delta?.screen ||
+        CoordsUtils.isEqual(uiState.mouse.delta.screen, CoordsUtils.zero())
+      ) {
+        return;
+      }
+    } else if (!hasMovedTile(uiState.mouse) || !uiState.mouse.delta?.tile) {
+      return;
+    }
 
-    const origin = uiState.mouse.mousedown.tile;
-    const rawTile = uiState.mouse.position.tile;
     const tile = orthogonal ? axisLockTile(rawTile, origin) : rawTile;
     const delta = orthogonal
-      ? axisLockDelta(uiState.mouse.delta.tile)
-      : uiState.mouse.delta.tile;
+      ? axisLockDelta(CoordsUtils.subtract(tile, origin))
+      : isNodeFreeDrag
+        ? CoordsUtils.subtract(tile, origin)
+        : uiState.mouse.delta!.tile;
 
     runDrag(tile, delta);
   },
-  mouseup: ({ uiState, scene }) => {
+  mouseup: ({ uiState, scene, model }) => {
     useCabinetSnapStore.getState().clear();
     if (
       uiState.mode.type === 'DRAG_ITEMS' &&
       uiState.projectionMode === 'TWO_D'
     ) {
       const mode = uiState.mode;
-      const touched = new Set<string>();
+      const freshModel = model.actions.get();
+      const live = useNodeDragStore.getState();
 
-      mode.items.forEach((item) => {
-        if (item.type === 'ITEM') {
-          scene.connectors.forEach((connector) => {
-            if (
-              connector.anchors.some((anchor) => {
-                return anchor.ref.item === item.id;
-              })
-            ) {
-              touched.add(connector.id);
-            }
-          });
-          return;
-        }
-
-        if (item.type === 'CONNECTOR_SEGMENT') {
-          try {
-            touched.add(parseWaypointSegmentId(item.id).connectorId);
-          } catch {
-            // ignore
-          }
-          return;
-        }
-
-        if (item.type === 'CONNECTOR_ANCHOR') {
-          try {
-            touched.add(getAnchorParent(item.id, scene.connectors).id);
-          } catch {
-            // ignore
-          }
-        }
-      });
-
-      touched.forEach((connectorId) => {
-        // Rebuild final A* from current anchors. Do NOT strip waypoints /
-        // rematerialize — that would rewrite the route past locked vias.
-        const connector = scene.connectors.find((candidate) => {
-          return candidate.id === connectorId;
+      // Commit transient free-drag tiles / mounts into the model, then snap.
+      const isNodeDrag =
+        Boolean(mode.itemOrigins) &&
+        mode.items.length > 0 &&
+        mode.items.every((item) => {
+          return item.type === 'ITEM';
         });
-        if (!connector) return;
-        scene.updateConnector(
-          connectorId,
-          { anchors: connector.anchors },
-          { overlapResolve: 'off' }
-        );
-      });
+
+      if (isNodeDrag) {
+        const draggedIds = mode.items.map((item) => item.id);
+        const moveIds = new Set([
+          ...draggedIds,
+          ...Object.keys(live.tiles)
+        ]);
+        draggedIds.forEach((id) => {
+          const modelItem = freshModel.items.find((candidate) => {
+            return candidate.id === id;
+          });
+          if (!modelItem || !isCabinetItem(modelItem)) return;
+          getMountedChildren(id, scene.items).forEach((child) => {
+            moveIds.add(child.id);
+          });
+        });
+        const excludeIds = [...moveIds];
+
+        const finalTiles: Record<string, Coords> = { ...live.tiles };
+        const patches: Record<
+          string,
+          {
+            tile?: Coords;
+            parentId?: string | undefined;
+            rackUnit?: number | undefined;
+          }
+        > = {};
+
+        draggedIds.forEach((id) => {
+          let sceneItem;
+          try {
+            sceneItem = getItemByIdOrThrow(scene.items, id).value;
+          } catch {
+            return;
+          }
+
+          const liveTile = finalTiles[id] ?? sceneItem.tile;
+          const mount = live.mounts[id];
+
+          let parentId = sceneItem.parentId;
+          let rackUnit = sceneItem.rackUnit;
+          if (mount === 'clear') {
+            parentId = undefined;
+            rackUnit = undefined;
+          } else if (mount) {
+            parentId = mount.parentId;
+            rackUnit = mount.rackUnit;
+          }
+
+          const modelItem = freshModel.items.find((candidate) => {
+            return candidate.id === id;
+          });
+          const isCabinet = Boolean(modelItem && isCabinetItem(modelItem));
+          const willBeMounted =
+            parentId !== undefined && rackUnit !== undefined;
+
+          let resolvedTile: Coords;
+          if (willBeMounted) {
+            resolvedTile = snapTile2dToGrid(liveTile);
+          } else {
+            const size = getModelItemSize(modelItem ?? {}) ??
+              getShape2dSize(modelItem?.icon ?? '') ?? {
+                width: 1,
+                height: 1
+              };
+            const childIds = isCabinet
+              ? getMountedChildren(id, scene.items).map((child) => child.id)
+              : [];
+            const desired = snapTile2dToGrid(liveTile);
+            const itemsForCollision = scene.items.map((item) => {
+              return {
+                ...item,
+                tile: finalTiles[item.id] ?? item.tile
+              };
+            });
+            resolvedTile =
+              resolveShape2dDragOrigin({
+                desired,
+                current: liveTile,
+                size,
+                items: itemsForCollision,
+                modelItems: freshModel.items,
+                excludeItemIds: [...excludeIds, ...childIds],
+                ignoreCabinets: !isCabinet
+              }) ?? desired;
+
+            if (isCabinet) {
+              const cabDelta = CoordsUtils.subtract(resolvedTile, liveTile);
+              if (!CoordsUtils.isEqual(cabDelta, CoordsUtils.zero())) {
+                getMountedChildren(id, scene.items).forEach((child) => {
+                  const childLive = finalTiles[child.id] ?? child.tile;
+                  finalTiles[child.id] = CoordsUtils.add(childLive, cabDelta);
+                });
+              }
+            }
+          }
+
+          finalTiles[id] = resolvedTile;
+
+          const patch: {
+            tile?: Coords;
+            parentId?: string | undefined;
+            rackUnit?: number | undefined;
+          } = {};
+
+          if (!CoordsUtils.isEqual(resolvedTile, sceneItem.tile)) {
+            patch.tile = resolvedTile;
+          }
+          if (mount === 'clear') {
+            if (sceneItem.parentId || sceneItem.rackUnit !== undefined) {
+              patch.parentId = undefined;
+              patch.rackUnit = undefined;
+            }
+          } else if (mount) {
+            if (
+              sceneItem.parentId !== mount.parentId ||
+              sceneItem.rackUnit !== mount.rackUnit
+            ) {
+              patch.parentId = mount.parentId;
+              patch.rackUnit = mount.rackUnit;
+            }
+          }
+
+          if (Object.keys(patch).length > 0) {
+            patches[id] = patch;
+          }
+        });
+
+        // Cabinet children / other live tiles not in the primary drag list.
+        Object.entries(finalTiles).forEach(([id, tile]) => {
+          if (patches[id]?.tile) return;
+          let sceneItem;
+          try {
+            sceneItem = getItemByIdOrThrow(scene.items, id).value;
+          } catch {
+            return;
+          }
+          if (!CoordsUtils.isEqual(tile, sceneItem.tile)) {
+            patches[id] = { ...patches[id], tile };
+          }
+        });
+
+        Object.entries(patches).forEach(([id, patch]) => {
+          scene.updateViewItem(id, patch);
+        });
+
+        useNodeDragStore.getState().clear();
+
+        const didMove = draggedIds.some((id) => {
+          const origin = mode.itemOrigins?.[id];
+          if (!origin) return false;
+          const next = finalTiles[id];
+          if (!next) return false;
+          return !CoordsUtils.isEqual(origin, next);
+        });
+
+        // Same as the "Test" button: Porządkuj + Mój algorytm after a move.
+        if (didMove && !uiState.simplePaths) {
+          scene.runTestLayoutForItems(draggedIds);
+        } else {
+          const touched = new Set<string>();
+          draggedIds.forEach((id) => {
+            scene.connectors.forEach((connector) => {
+              if (
+                connector.anchors.some((anchor) => {
+                  return anchor.ref.item === id;
+                })
+              ) {
+                touched.add(connector.id);
+              }
+            });
+          });
+          touched.forEach((connectorId) => {
+            const connector = scene.connectors.find((candidate) => {
+              return candidate.id === connectorId;
+            });
+            if (!connector) return;
+            scene.updateConnector(
+              connectorId,
+              { anchors: connector.anchors },
+              { overlapResolve: 'off' }
+            );
+          });
+        }
+      } else {
+        const touched = new Set<string>();
+
+        mode.items.forEach((item) => {
+          if (item.type === 'ITEM') {
+            scene.connectors.forEach((connector) => {
+              if (
+                connector.anchors.some((anchor) => {
+                  return anchor.ref.item === item.id;
+                })
+              ) {
+                touched.add(connector.id);
+              }
+            });
+            return;
+          }
+
+          if (item.type === 'CONNECTOR_SEGMENT') {
+            try {
+              touched.add(parseWaypointSegmentId(item.id).connectorId);
+            } catch {
+              // ignore
+            }
+            return;
+          }
+
+          if (item.type === 'CONNECTOR_ANCHOR') {
+            try {
+              touched.add(getAnchorParent(item.id, scene.connectors).id);
+            } catch {
+              // ignore
+            }
+          }
+        });
+
+        touched.forEach((connectorId) => {
+          // Rebuild final A* from current anchors. Do NOT strip waypoints /
+          // rematerialize — that would rewrite the route past locked vias.
+          const connector = scene.connectors.find((candidate) => {
+            return candidate.id === connectorId;
+          });
+          if (!connector) return;
+          scene.updateConnector(
+            connectorId,
+            { anchors: connector.anchors },
+            { overlapResolve: 'off' }
+          );
+        });
+      }
     }
 
     scene.endHistoryTransaction();
