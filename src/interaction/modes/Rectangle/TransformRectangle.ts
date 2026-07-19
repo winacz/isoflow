@@ -15,8 +15,72 @@ const normalizeBounds = (from: Coords, to: Coords) => {
   };
 };
 
-/** Keep at least a 1×1 tile rectangle. */
+const clampEdge = (value: number, min: number, max: number) => {
+  if (value > max) return max;
+  if (value < min) return min;
+  return value;
+};
+
+/**
+ * Mid-edge resize — keeps an axis-aligned rectangle.
+ * 2D: screen Y grows down → TOP = minY.
+ * Iso: tile Y grows "up" on screen → TOP = maxY.
+ */
 const applyEdgeResize = (
+  from: Coords,
+  to: Coords,
+  anchor: AnchorPosition,
+  mouse: Coords,
+  isTwoD: boolean
+): { from: Coords; to: Coords } | null => {
+  const b = normalizeBounds(from, to);
+  let { minX, maxX, minY, maxY } = b;
+
+  if (isTwoD) {
+    switch (anchor) {
+      case 'TOP':
+        minY = clampEdge(mouse.y, Number.NEGATIVE_INFINITY, maxY);
+        break;
+      case 'BOTTOM':
+        maxY = clampEdge(mouse.y, minY, Number.POSITIVE_INFINITY);
+        break;
+      case 'LEFT':
+        minX = clampEdge(mouse.x, Number.NEGATIVE_INFINITY, maxX);
+        break;
+      case 'RIGHT':
+        maxX = clampEdge(mouse.x, minX, Number.POSITIVE_INFINITY);
+        break;
+      default:
+        return null;
+    }
+  } else {
+    // Isometric tile space: highY is the visual top edge.
+    switch (anchor) {
+      case 'TOP':
+        maxY = clampEdge(mouse.y, minY, Number.POSITIVE_INFINITY);
+        break;
+      case 'BOTTOM':
+        minY = clampEdge(mouse.y, Number.NEGATIVE_INFINITY, maxY);
+        break;
+      case 'LEFT':
+        minX = clampEdge(mouse.x, Number.NEGATIVE_INFINITY, maxX);
+        break;
+      case 'RIGHT':
+        maxX = clampEdge(mouse.x, minX, Number.POSITIVE_INFINITY);
+        break;
+      default:
+        return null;
+    }
+  }
+
+  return {
+    from: { x: minX, y: minY },
+    to: { x: maxX, y: maxY }
+  };
+};
+
+/** Corner resize in 2D screen/tile space (minY = top). */
+const applyCornerResize2d = (
   from: Coords,
   to: Coords,
   anchor: AnchorPosition,
@@ -26,17 +90,21 @@ const applyEdgeResize = (
   let { minX, maxX, minY, maxY } = b;
 
   switch (anchor) {
-    case 'TOP':
+    case 'TOP_LEFT':
+      minX = mouse.x > maxX ? maxX : mouse.x;
       minY = mouse.y > maxY ? maxY : mouse.y;
       break;
-    case 'BOTTOM':
+    case 'TOP_RIGHT':
+      maxX = mouse.x < minX ? minX : mouse.x;
+      minY = mouse.y > maxY ? maxY : mouse.y;
+      break;
+    case 'BOTTOM_LEFT':
+      minX = mouse.x > maxX ? maxX : mouse.x;
       maxY = mouse.y < minY ? minY : mouse.y;
       break;
-    case 'LEFT':
-      minX = mouse.x > maxX ? maxX : mouse.x;
-      break;
-    case 'RIGHT':
+    case 'BOTTOM_RIGHT':
       maxX = mouse.x < minX ? minX : mouse.x;
+      maxY = mouse.y < minY ? minY : mouse.y;
       break;
     default:
       return null;
@@ -66,6 +134,7 @@ export const TransformRectangle: ModeActions = {
     ).value;
     const anchor = uiState.mode.selectedAnchor;
     const mouse = uiState.mouse.position.tile;
+    const isTwoD = uiState.projectionMode === 'TWO_D';
 
     // Mid-edge drag — axis-aligned rectangle only.
     if (
@@ -74,13 +143,32 @@ export const TransformRectangle: ModeActions = {
       anchor === 'LEFT' ||
       anchor === 'RIGHT'
     ) {
-      const next = applyEdgeResize(rectangle.from, rectangle.to, anchor, mouse);
+      const next = applyEdgeResize(
+        rectangle.from,
+        rectangle.to,
+        anchor,
+        mouse,
+        isTwoD
+      );
       if (!next) return;
       scene.updateRectangle(uiState.mode.id, next);
       return;
     }
 
-    // Corner drag (existing iso / 2D opposite-corner resize).
+    // 2D corners use screen/tile min/max (not iso named anchors).
+    if (isTwoD) {
+      const next = applyCornerResize2d(
+        rectangle.from,
+        rectangle.to,
+        anchor,
+        mouse
+      );
+      if (!next) return;
+      scene.updateRectangle(uiState.mode.id, next);
+      return;
+    }
+
+    // Isometric corner drag — opposite corner stays fixed.
     const rectangleBounds = getBoundingBox([rectangle.to, rectangle.from]);
     const namedBounds = convertBoundsToNamedAnchors(rectangleBounds);
 

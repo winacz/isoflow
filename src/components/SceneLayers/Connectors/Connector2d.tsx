@@ -1,5 +1,5 @@
-import React, { useMemo } from 'react';
-import { useTheme, Box, Typography } from '@mui/material';
+import React, { memo, useMemo } from 'react';
+import { useTheme, Box } from '@mui/material';
 import OpenWithOutlinedIcon from '@mui/icons-material/OpenWithOutlined';
 import { TILE_SIZE_2D, getShape2dPortIfaceName } from 'src/config';
 import {
@@ -10,7 +10,6 @@ import {
   buildConnectorSvgPathD,
   getConnectorRelationSummary,
   TRUNK_RAINBOW_COLORS,
-  TRUNK_RAINBOW_CSS,
   TRUNK_MISMATCH_COLOR,
   CONNECTOR_JUMP_RADIUS_TILES,
   type ConnectorJump
@@ -36,11 +35,9 @@ interface Props {
   softDim?: boolean;
   /** Render-only pixel offset (stack fan-out on badge hover). */
   visualOffset?: { x: number; y: number };
-  /** Show relation / VLAN popup near the cursor tile. */
-  showHoverPopup?: boolean;
 }
 
-export const Connector2d = ({
+export const Connector2d = memo(({
   connector: _connector,
   jumps = [],
   isSelected,
@@ -48,8 +45,7 @@ export const Connector2d = ({
   isHighlighted,
   isDimmed,
   softDim,
-  visualOffset,
-  showHoverPopup = false
+  visualOffset
 }: Props) => {
   const theme = useTheme();
   const { currentView, items } = useScene();
@@ -57,14 +53,19 @@ export const Connector2d = ({
   const modelItems = useModelStore((state) => {
     return state.items;
   });
+  // Mouse only when selected (segment hover handle).
   const mouseTile = useUiStateStore((state) => {
-    return state.mouse.position.tile;
+    return isSelected ? state.mouse.position.tile : null;
   });
+  // Zoom for segment drag handle (selected cable only).
   const zoom = useUiStateStore((state) => {
-    return state.zoom;
+    return isSelected ? state.zoom : 1;
   });
   const selectedWaypointIds = useUiStateStore((state) => {
     return state.selectedWaypointIds;
+  });
+  const vlan1CableColor = useUiStateStore((state) => {
+    return state.vlan1CableColor;
   });
 
   const linkSummary = useMemo(() => {
@@ -86,8 +87,9 @@ export const Connector2d = ({
   const isUntaggedLink =
     linkSummary.linkMode === 'access' && !vlanStroke;
   const rainbowGradId = `trunk-rainbow-${connector.id}`;
-  // Untagged / VLAN 1 cables: solid black. Colored only by non-1 VLAN / trunk / mismatch.
-  const strokeBase = vlanStroke ?? '#0a0a0a';
+  // Untagged / VLAN 1: TEMP override or solid black.
+  const strokeBase =
+    vlanStroke ?? (isUntaggedLink ? vlan1CableColor ?? '#0a0a0a' : '#0a0a0a');
 
   const globalTiles = useMemo(() => {
     return connector.path.tiles.map((tile) => {
@@ -118,21 +120,6 @@ export const Connector2d = ({
     };
   }, [globalTiles, jumps.length]);
 
-  // Cancel SceneLayer zoom so the popup stays readable; grows when zooming out.
-  const popupScreenScale = Math.min(3.2, 1 / Math.max(zoom, 0.25));
-
-  const hoverPopupPos = useMemo(() => {
-    if (!showHoverPopup) return null;
-
-    return {
-      x: (mouseTile.x - bounds.minX) * TILE_SIZE_2D + TILE_SIZE_2D / 2,
-      // Scene-space lift grows when zoomed out so screen gap stays comfortable
-      y:
-        (mouseTile.y - bounds.minY) * TILE_SIZE_2D -
-        Math.round(TILE_SIZE_2D * 0.7 * popupScreenScale)
-    };
-  }, [showHoverPopup, mouseTile, bounds, popupScreenScale]);
-
   const pxSize = useMemo(() => {
     return {
       width: bounds.width * TILE_SIZE_2D,
@@ -151,13 +138,26 @@ export const Connector2d = ({
   }, [connector.anchors]);
 
   const styleRuns = useMemo(() => {
+    // Body-crossing dashes are expensive (per-tile vs all nodes) — skip while dragging.
+    if (softDim || globalTiles.length < 2) {
+      if (globalTiles.length < 2) return [];
+      return [
+        {
+          points: globalTiles.map((tile) => {
+            return { x: tile.x + 0.5, y: tile.y + 0.5 };
+          }),
+          throughNode: false
+        }
+      ];
+    }
+
     return splitConnectorPathByNodeBodies({
       tiles: globalTiles,
       items,
       modelItems,
       endpointItemIds
     });
-  }, [globalTiles, items, modelItems, endpointItemIds]);
+  }, [globalTiles, items, modelItems, endpointItemIds, softDim]);
 
   const anchorPositions = useMemo(() => {
     if (!isSelected) return [];
@@ -166,6 +166,7 @@ export const Connector2d = ({
       const position = getAnchorTile(anchor, currentView, modelItems);
       return {
         id: anchor.id,
+        locked: Boolean(anchor.locked && anchor.ref.tile),
         x: (position.x - bounds.minX) * TILE_SIZE_2D + TILE_SIZE_2D / 2,
         y: (position.y - bounds.minY) * TILE_SIZE_2D + TILE_SIZE_2D / 2
       };
@@ -192,7 +193,7 @@ export const Connector2d = ({
   }, [selectedWaypointIds, connector.anchors, bounds]);
 
   const hoveredSegmentHandle = useMemo(() => {
-    if (!isSelected) return null;
+    if (!isSelected || !mouseTile) return null;
 
     const segment = findWaypointSegmentAtTile({
       connectorId: connector.id,
@@ -277,15 +278,11 @@ export const Connector2d = ({
       style={{
         left: originPx.x + (visualOffset?.x ?? 0),
         top: originPx.y + (visualOffset?.y ?? 0),
-        // Popup lives inside this stacking context — lift the whole cable
-        // above sibling connectors while the hover card is open.
-        zIndex: showHoverPopup
-          ? 50
-          : isHighlighted
-            ? 4
-            : jumps.length > 0 || visualOffset
-              ? 2
-              : 1,
+        zIndex: isHighlighted
+          ? 4
+          : jumps.length > 0 || visualOffset
+            ? 2
+            : 1,
         transition: visualOffset
           ? 'left 0.12s ease, top 0.12s ease'
           : undefined
@@ -361,23 +358,37 @@ export const Connector2d = ({
             </g>
           );
         })}
-        {anchorPositions.map((anchor) => (
-          <g key={anchor.id}>
-            <Circle
-              tile={anchor}
-              radius={10}
-              fill={theme.palette.common.white}
-              fillOpacity={0.7}
-            />
-            <Circle
-              tile={anchor}
-              radius={7}
-              stroke={theme.palette.common.black}
-              fill={theme.palette.common.white}
-              strokeWidth={3}
-            />
-          </g>
-        ))}
+        {anchorPositions.map((anchor) => {
+          const lockedColor = '#ea580c';
+          const stroke = anchor.locked
+            ? lockedColor
+            : theme.palette.common.black;
+          return (
+            <g key={anchor.id}>
+              <Circle
+                tile={anchor}
+                radius={anchor.locked ? 12 : 10}
+                fill={anchor.locked ? lockedColor : theme.palette.common.white}
+                fillOpacity={anchor.locked ? 0.28 : 0.7}
+              />
+              <Circle
+                tile={anchor}
+                radius={anchor.locked ? 8 : 7}
+                stroke={stroke}
+                fill={theme.palette.common.white}
+                strokeWidth={anchor.locked ? 3.5 : 3}
+              />
+              {anchor.locked && (
+                <Circle
+                  tile={anchor}
+                  radius={3.5}
+                  fill={lockedColor}
+                  fillOpacity={1}
+                />
+              )}
+            </g>
+          );
+        })}
         {selectedWaypointPositions.map((anchor) => (
           <g key={`wp-sel-${anchor.id}`}>
             <Circle
@@ -403,13 +414,18 @@ export const Connector2d = ({
             position: 'absolute',
             left: hoveredSegmentHandle.x,
             top: hoveredSegmentHandle.y,
-            transform: 'translate(-50%, -50%)',
-            width: 22,
-            height: 22,
+            // Counter SceneLayer zoom + grow when zoomed out (same idea as stack handles)
+            transform: `translate(-50%, -50%) scale(${Math.min(
+              1.5,
+              Math.max(1, Math.pow(1 / Math.max(zoom, 0.12), 0.35))
+            ) / Math.max(zoom, 0.08)})`,
+            transformOrigin: 'center center',
+            width: 24,
+            height: 24,
             borderRadius: '4px',
             bgcolor: theme.palette.common.white,
             border: `1.5px solid ${handleColor}`,
-            boxShadow: '0 1px 3px rgba(0,0,0,0.18)',
+            boxShadow: '0 1px 4px rgba(0,0,0,0.2)',
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
@@ -425,137 +441,6 @@ export const Connector2d = ({
           />
         </Box>
       )}
-
-      {showHoverPopup && hoverPopupPos && (
-        <Box
-          sx={{
-            position: 'absolute',
-            left: hoverPopupPos.x,
-            top: hoverPopupPos.y,
-            transform: `translate(-50%, -100%) scale(${popupScreenScale})`,
-            transformOrigin: 'bottom center',
-            pointerEvents: 'none',
-            zIndex: 20,
-            minWidth: 340,
-            maxWidth: 480,
-            px: 3,
-            py: 2.25,
-            borderRadius: 2,
-            bgcolor: 'rgba(255,255,255,0.98)',
-            border: '2px solid',
-            borderColor: isMismatchLink ? TRUNK_MISMATCH_COLOR : 'divider',
-            boxShadow: '0 12px 32px rgba(15,23,42,0.22)'
-          }}
-        >
-          <Typography
-            sx={{
-              fontSize: 16,
-              fontWeight: 700,
-              letterSpacing: 0.55,
-              color: isMismatchLink ? TRUNK_MISMATCH_COLOR : 'text.secondary',
-              textTransform: 'uppercase',
-              mb: 1.1
-            }}
-          >
-            {isMismatchLink ? 'Błąd łącza' : 'Połączenie'}
-          </Typography>
-          {linkSummary.endpoints.length === 0 ? (
-            <Typography sx={{ fontSize: 20, color: 'text.secondary' }}>
-              Brak endpointów
-            </Typography>
-          ) : (
-            linkSummary.endpoints.map((endpoint, index) => {
-              return (
-                <Box key={`${endpoint.itemId}-${endpoint.portId}-${index}`}>
-                  {index > 0 && (
-                    <Typography
-                      sx={{
-                        fontSize: 16,
-                        color: 'text.disabled',
-                        textAlign: 'center',
-                        my: 0.6
-                      }}
-                    >
-                      ↕
-                    </Typography>
-                  )}
-                  <Typography
-                    sx={{
-                      fontSize: 22,
-                      fontWeight: 700,
-                      lineHeight: 1.3,
-                      color: 'text.primary'
-                    }}
-                  >
-                    {endpoint.itemName}
-                  </Typography>
-                  <Typography
-                    sx={{
-                      fontSize: 18,
-                      color: 'text.secondary',
-                      fontFamily:
-                        'ui-monospace, SFMono-Regular, Menlo, monospace'
-                    }}
-                  >
-                    {endpoint.portLabel}
-                    {endpoint.type === 'trunk'
-                      ? ' · trunk'
-                      : endpoint.isNonVlanAware
-                        ? ' · host'
-                        : ''}
-                  </Typography>
-                </Box>
-              );
-            })
-          )}
-          {isMismatchLink && (
-            <Typography
-              sx={{
-                mt: 1.1,
-                fontSize: 16,
-                fontWeight: 600,
-                color: TRUNK_MISMATCH_COLOR,
-                lineHeight: 1.4
-              }}
-            >
-              {linkSummary.endpoints.some((endpoint) => {
-                return endpoint.isNonVlanAware;
-              })
-                ? 'Trunk nie może łączyć się z urządzeniem bez VLAN (np. PC).'
-                : 'Trunk nie może łączyć się z portem Access.'}
-            </Typography>
-          )}
-          <Box
-            sx={{
-              mt: 1.4,
-              pt: 1.4,
-              borderTop: '1px solid',
-              borderColor: 'divider',
-              display: 'flex',
-              alignItems: 'center',
-              gap: 1.25
-            }}
-          >
-            <Box
-              sx={{
-                width: 18,
-                height: 18,
-                borderRadius: '50%',
-                flexShrink: 0,
-                bgcolor: isTrunkLink
-                  ? undefined
-                  : linkSummary.vlanColor ??
-                    (isMismatchLink ? TRUNK_MISMATCH_COLOR : '#0a0a0a'),
-                background: isTrunkLink ? TRUNK_RAINBOW_CSS : undefined,
-                border: '1px solid rgba(0,0,0,0.12)'
-              }}
-            />
-            <Typography sx={{ fontSize: 18, fontWeight: 600 }}>
-              {linkSummary.vlanLabel}
-            </Typography>
-          </Box>
-        </Box>
-      )}
     </Box>
   );
-};
+});

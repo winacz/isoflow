@@ -43,6 +43,7 @@ export const Rectangle = ({
       from={from}
       to={to}
       fill={color.value}
+      opacity={fillOpacity}
       cornerRadius={kind === 'building' ? 12 : 22}
       stroke={{
         color: stroke,

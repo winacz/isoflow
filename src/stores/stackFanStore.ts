@@ -33,5 +33,5 @@ export const useStackFanStore = create<StackFanStore>((set) => {
 });
 
 export const getActiveStackKey = (state: StackFanStore) => {
-  return state.pinnedKey ?? state.hoveredKey;
+  return state.pinnedKey;
 };

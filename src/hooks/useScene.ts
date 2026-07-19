@@ -32,6 +32,8 @@ import {
   bundleShape2dRoutes,
   gatherBundleShape2dRoutes,
   pickGatherDirection,
+  diagonalFanShape2dRoutes,
+  stripToEndpointAnchors,
   type TidyInPlaceVariant
 } from 'src/utils';
 import {
@@ -52,6 +54,9 @@ export const useScene = () => {
 
   const currentViewId = useUiStateStore((state) => {
     return state.view;
+  });
+  const uiActions = useUiStateStore((state) => {
+    return state.actions;
   });
   const historyPush = useHistoryStore((state) => {
     return state.push;
@@ -294,14 +299,7 @@ export const useScene = () => {
       });
 
       touched.forEach((connector) => {
-        const endpointAnchors = connector.anchors.filter((anchor) => {
-          return Boolean(anchor.ref.item);
-        });
-
-        const nextAnchors =
-          endpointAnchors.length >= 2
-            ? [endpointAnchors[0], endpointAnchors[endpointAnchors.length - 1]]
-            : connector.anchors;
+        const nextAnchors = stripToEndpointAnchors(connector.anchors);
 
         const newState = reducers.view({
           action: 'UPDATE_CONNECTOR',
@@ -327,12 +325,13 @@ export const useScene = () => {
   );
 
   /**
-   * "Porządkuj": re-seat selected leaf nodes in port order around their
-   * switch, then rebuild cable routes so they run in parallel.
+   * "Porządkuj": only swap selected nodes among their current slots
+   * (same footprint) to cut straight-line crossings — never invents new
+   * positions. Afterwards drop free waypoints and rebuild routes.
    */
   const tidyItems = useCallback(
     (ids: string[]) => {
-      if (ids.length === 0) return;
+      if (ids.length < 2) return;
 
       const state = getState();
       const view = getItemByIdOrThrow(state.model.views, currentViewId).value;
@@ -340,7 +339,7 @@ export const useScene = () => {
         return ids.includes(item.id);
       });
 
-      if (selectedItems.length === 0) return;
+      if (selectedItems.length < 2) return;
 
       const targets = tidyShape2dItems({
         selectedItems,
@@ -508,6 +507,175 @@ export const useScene = () => {
   );
 
   /**
+   * "Mój algorytm": diagonal fan from switch/hub toward selected leaves,
+   * nearest-to-diagonal first, no shared grid edges between cables.
+   */
+  const routeDiagonalFanForItems = useCallback(
+    (ids: string[]) => {
+      if (ids.length === 0) return;
+
+      const state = getState();
+      const view = getItemByIdOrThrow(state.model.views, currentViewId).value;
+      const selectedItems = (view.items ?? []).filter((item) => {
+        return ids.includes(item.id);
+      });
+
+      if (selectedItems.length === 0) return;
+
+      const routes = diagonalFanShape2dRoutes({
+        selectedItems,
+        allItems: view.items ?? [],
+        modelItems: state.model.items,
+        connectors: view.connectors ?? []
+      });
+
+      if (Object.keys(routes).length === 0) return;
+
+      beginHistoryTransaction();
+
+      Object.entries(routes).forEach(([connectorId, tiles]) => {
+        const connector = (view.connectors ?? []).find((candidate) => {
+          return candidate.id === connectorId;
+        });
+        if (!connector) return;
+
+        const endpointAnchors = connector.anchors.filter((anchor) => {
+          return Boolean(anchor.ref.item);
+        });
+        if (endpointAnchors.length < 2) return;
+
+        const anchors = [
+          endpointAnchors[0],
+          ...tiles.map((tile) => {
+            return { id: generateId(), ref: { tile } };
+          }),
+          endpointAnchors[endpointAnchors.length - 1]
+        ];
+
+        const newState = reducers.view({
+          action: 'UPDATE_CONNECTOR',
+          payload: {
+            id: connectorId,
+            anchors,
+            overlapResolve: 'off'
+          },
+          ctx: { viewId: currentViewId, state: getState() }
+        });
+        setState(newState, { skipHistory: true });
+      });
+
+      endHistoryTransaction();
+    },
+    [
+      beginHistoryTransaction,
+      endHistoryTransaction,
+      getState,
+      setState,
+      currentViewId
+    ]
+  );
+
+  /**
+   * "Test": 1) Porządkuj (swap selected nodes so links don't cross)
+   *         2) Mój algorytm (diagonal fan routes) on the new layout.
+   */
+  const runTestLayoutForItems = useCallback(
+    (ids: string[]) => {
+      if (ids.length === 0) return;
+
+      beginHistoryTransaction();
+
+      // --- 1. Porządkuj: swap nodes among existing slots ---
+      if (ids.length >= 2) {
+        const state = getState();
+        const view = getItemByIdOrThrow(state.model.views, currentViewId).value;
+        const selectedItems = (view.items ?? []).filter((item) => {
+          return ids.includes(item.id);
+        });
+
+        if (selectedItems.length >= 2) {
+          const targets = tidyShape2dItems({
+            selectedItems,
+            allItems: view.items ?? [],
+            modelItems: state.model.items,
+            connectors: view.connectors ?? []
+          });
+
+          Object.entries(targets).forEach(([id, tile]) => {
+            const newState = reducers.view({
+              action: 'UPDATE_VIEWITEM',
+              payload: { id, tile },
+              ctx: { viewId: currentViewId, state: getState() }
+            });
+            setState(newState, { skipHistory: true });
+          });
+        }
+      }
+
+      // --- 2. Mój algorytm: fan routes from the (possibly swapped) layout ---
+      const stateAfterTidy = getState();
+      const viewAfterTidy = getItemByIdOrThrow(
+        stateAfterTidy.model.views,
+        currentViewId
+      ).value;
+      const selectedAfterTidy = (viewAfterTidy.items ?? []).filter((item) => {
+        return ids.includes(item.id);
+      });
+
+      if (selectedAfterTidy.length > 0) {
+        const routes = diagonalFanShape2dRoutes({
+          selectedItems: selectedAfterTidy,
+          allItems: viewAfterTidy.items ?? [],
+          modelItems: stateAfterTidy.model.items,
+          connectors: viewAfterTidy.connectors ?? []
+        });
+
+        Object.entries(routes).forEach(([connectorId, routeTiles]) => {
+          const connector = (viewAfterTidy.connectors ?? []).find(
+            (candidate) => {
+              return candidate.id === connectorId;
+            }
+          );
+          if (!connector) return;
+
+          const endpointAnchors = connector.anchors.filter((anchor) => {
+            return Boolean(anchor.ref.item);
+          });
+          if (endpointAnchors.length < 2) return;
+
+          const anchors = [
+            endpointAnchors[0],
+            ...routeTiles.map((tile) => {
+              return { id: generateId(), ref: { tile } };
+            }),
+            endpointAnchors[endpointAnchors.length - 1]
+          ];
+
+          const newState = reducers.view({
+            action: 'UPDATE_CONNECTOR',
+            payload: {
+              id: connectorId,
+              anchors,
+              overlapResolve: 'off'
+            },
+            ctx: { viewId: currentViewId, state: getState() }
+          });
+          setState(newState, { skipHistory: true });
+        });
+      }
+
+      endHistoryTransaction();
+    },
+    [
+      beginHistoryTransaction,
+      endHistoryTransaction,
+      getState,
+      setState,
+      currentViewId
+    ]
+  );
+
+  /**
    * Drop intermediate waypoints on cables touching the given nodes and
    * rebuild paths (fresh A* between port endpoints).
    */
@@ -531,19 +699,7 @@ export const useScene = () => {
       beginHistoryTransaction();
 
       touched.forEach((connector) => {
-        const endpointAnchors = connector.anchors.filter((anchor) => {
-          return Boolean(anchor.ref.item);
-        });
-
-        const nextAnchors =
-          endpointAnchors.length >= 2
-            ? [endpointAnchors[0], endpointAnchors[endpointAnchors.length - 1]]
-            : connector.anchors.length >= 2
-              ? [
-                  connector.anchors[0],
-                  connector.anchors[connector.anchors.length - 1]
-                ]
-              : connector.anchors;
+        const nextAnchors = stripToEndpointAnchors(connector.anchors);
 
         const newState = reducers.view({
           action: 'UPDATE_CONNECTOR',
@@ -580,6 +736,54 @@ export const useScene = () => {
     [getState, setState, currentViewId]
   );
 
+  const setSimplePathsMode = useCallback(
+    (enabled: boolean) => {
+      uiActions.setSimplePaths(enabled);
+
+      const state = getState();
+      const view = getItemByIdOrThrow(state.model.views, currentViewId).value;
+      const list = view.connectors ?? [];
+      if (list.length === 0) return;
+
+      beginHistoryTransaction();
+      list.forEach((connector) => {
+        const itemEnds = connector.anchors.filter((anchor) => {
+          return Boolean(anchor.ref.item);
+        });
+        const ends =
+          itemEnds.length >= 2
+            ? [itemEnds[0], itemEnds[itemEnds.length - 1]]
+            : connector.anchors.length > 2
+              ? [
+                  connector.anchors[0],
+                  connector.anchors[connector.anchors.length - 1]
+                ]
+              : connector.anchors;
+
+        const newState = reducers.view({
+          action: 'UPDATE_CONNECTOR',
+          payload: {
+            id: connector.id,
+            anchors: ends,
+            overlapResolve: 'off',
+            simplePaths: enabled
+          },
+          ctx: { viewId: currentViewId, state: getState() }
+        });
+        setState(newState, { skipHistory: true });
+      });
+      endHistoryTransaction();
+    },
+    [
+      uiActions,
+      beginHistoryTransaction,
+      endHistoryTransaction,
+      getState,
+      setState,
+      currentViewId
+    ]
+  );
+
   const createConnector = useCallback(
     (newConnector: Connector) => {
       const newState = reducers.view({
@@ -601,6 +805,9 @@ export const useScene = () => {
         removedTile?: { x: number; y: number };
         ignoreWaypoints?: boolean;
         materializeBends?: boolean;
+        /** Cheap orthogonal preview during drag — finalize on mouseup. */
+        fastPath?: boolean;
+        simplePaths?: boolean;
       }
     ) => {
       const newState = reducers.view({
@@ -763,7 +970,10 @@ export const useScene = () => {
     layoutViewItems,
     tidyItems,
     tidyItemsInPlace,
+    routeDiagonalFanForItems,
+    runTestLayoutForItems,
     regenerateRoutesForItems,
+    setSimplePathsMode,
     deleteViewItem,
     createConnector,
     updateConnector,

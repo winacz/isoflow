@@ -51,15 +51,26 @@ export const GRID_2D_VISUAL_STEP = 5;
 export const SHAPE_2D_LAYOUT_GAP = 3;
 
 /**
- * 16-port switch footprint (tiles) — card layout:
- * - top ~1/3: header (name + icon)
- * - divider at ~1/3 height
- * - lower band: two RJ45 rows
+ * Fixed RACK 1U chassis width in tiles.
+ * Sized for commercial densities (~48–52 ports), e.g. 6×8 + 2 SFP.
  */
-export const SWITCH_2D_SIZE: Size = { width: 50, height: 25 };
+export const RACK_1U_WIDTH_TILES = 60;
+export const RACK_1U_HEIGHT_TILES = 9;
 
-/** PC card — same visual language, single NIC port. */
-export const PC_2D_SIZE: Size = { width: 20, height: 16 };
+/**
+ * Built-in 16-port switch — same 1U height as RACK; width follows ports.
+ * Layout: header band + two RJ45 rows (same Y as device templates).
+ */
+export const SWITCH_2D_SIZE: Size = {
+  width: 19,
+  height: RACK_1U_HEIGHT_TILES
+};
+
+/** PC card — same 1U height as RACK; single NIC at switch port scale. */
+export const PC_2D_SIZE: Size = {
+  width: 12,
+  height: RACK_1U_HEIGHT_TILES
+};
 
 export type Shape2dPortSide = 'TOP' | 'BOTTOM' | 'LEFT' | 'RIGHT';
 export type Shape2dPortMedia = 'RJ45' | 'SFP';
@@ -74,13 +85,6 @@ export interface Shape2dPort {
   label?: string;
   sectionId?: string;
 }
-
-/**
- * Fixed RACK 1U chassis width in tiles.
- * Sized for commercial densities (~48–52 ports), e.g. 6×8 + 2 SFP.
- */
-export const RACK_1U_WIDTH_TILES = 60;
-export const RACK_1U_HEIGHT_TILES = 9;
 
 /** Footprint of a cabinet for the given rack-unit height. */
 export const getCabinetSize = (rackUnits = CABINET_DEFAULT_UNITS): Size => {
@@ -101,14 +105,14 @@ export const SWITCH_2D_PORTS: Shape2dPort[] = [
   ...Array.from({ length: 8 }, (_, index) => {
     return {
       id: `port-top-${index + 1}`,
-      tile: { x: 3 + index * 5, y: 11 },
+      tile: { x: 2 + index * 2, y: 4 },
       side: 'TOP' as const
     };
   }),
   ...Array.from({ length: 8 }, (_, index) => {
     return {
       id: `port-bottom-${index + 1}`,
-      tile: { x: 3 + index * 5, y: 19 },
+      tile: { x: 2 + index * 2, y: 7 },
       side: 'BOTTOM' as const
     };
   })
@@ -117,7 +121,7 @@ export const SWITCH_2D_PORTS: Shape2dPort[] = [
 export const PC_2D_PORTS: Shape2dPort[] = [
   {
     id: 'port-1',
-    tile: { x: 9, y: 12 },
+    tile: { x: 5, y: 7 },
     side: 'BOTTOM'
   }
 ];
@@ -310,7 +314,10 @@ export const INITIAL_UI_STATE = {
     offset: CoordsUtils.zero()
   },
   projectionMode: 'ISOMETRIC' as const,
-  showGrid: true
+  showGrid: true,
+  diagramBackgroundColor: null as string | null,
+  vlan1CableColor: null as string | null,
+  simplePaths: false
 };
 export const INITIAL_SCENE_STATE = {
   connectors: {},

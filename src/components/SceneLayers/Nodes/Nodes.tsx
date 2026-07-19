@@ -47,8 +47,8 @@ export const Nodes = ({ nodes }: Props) => {
   const selectedItemIds = useUiStateStore((state) => {
     return state.selectedItemIds;
   });
-  const focusedPortId = useUiStateStore((state) => {
-    return state.focusedPortId;
+  const focusedPortIds = useUiStateStore((state) => {
+    return state.focusedPortIds;
   });
   const projectionMode = useUiStateStore((state) => {
     return state.projectionMode;
@@ -97,14 +97,13 @@ export const Nodes = ({ nodes }: Props) => {
     if (itemControls.type === 'ITEM') {
       const ids = new Set<string>([itemControls.id]);
 
-      // Port focus: only the peer(s) on cables attached to that RJ45.
-      if (focusedPortId) {
+      // Port focus: only the peer(s) on cables attached to those RJ45s.
+      if (focusedPortIds.length > 0) {
         connectors.forEach((connector) => {
-          if (
-            !connectorUsesPort(connector, itemControls.id, focusedPortId)
-          ) {
-            return;
-          }
+          const usesFocused = focusedPortIds.some((portId) => {
+            return connectorUsesPort(connector, itemControls.id, portId);
+          });
+          if (!usesFocused) return;
           getEndpointItemIds(connector).forEach((id) => {
             ids.add(id);
           });
@@ -133,7 +132,7 @@ export const Nodes = ({ nodes }: Props) => {
     itemControls,
     selectedItemIds,
     connectors,
-    focusedPortId
+    focusedPortIds
   ]);
 
   return (

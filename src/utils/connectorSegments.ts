@@ -610,6 +610,10 @@ export const untangleAnchorHairpins = (
     if (!anchor.ref.tile || index === 0 || index === anchors.length - 1) {
       return anchor;
     }
+    // Locked vias are fixed — never snap them away.
+    if (anchor.locked) {
+      return anchor;
+    }
 
     const prev = positions[index - 1];
     const curr = positions[index];
@@ -776,8 +780,70 @@ export const moveWaypointSegment = (
 /**
  * Rebuild middle tile WPs as a clean L/U (max 2 elbows) between the
  * connector ends — avoids A* staircases when Shift is held.
+ *
+ * Locked middle waypoints split the cable into regions; only the region
+ * that contains the dragged anchor is rebuilt.
  */
 export const applyOrthogonalBendAnchors = ({
+  anchors,
+  draggedAnchorId,
+  hint,
+  view,
+  modelItems
+}: {
+  anchors: ConnectorAnchor[];
+  draggedAnchorId: string;
+  hint: Coords;
+  view: View;
+  modelItems?: { id: string; icon?: string }[];
+}): ConnectorAnchor[] => {
+  if (anchors.length < 2) {
+    return anchors;
+  }
+
+  const dragIndex = anchors.findIndex((anchor) => {
+    return anchor.id === draggedAnchorId;
+  });
+  if (dragIndex < 0) {
+    return anchors;
+  }
+
+  // Dragging a locked via itself is a no-op (caller usually skips anyway).
+  if (anchors[dragIndex]?.locked && anchors[dragIndex]?.ref.tile) {
+    return anchors;
+  }
+
+  // Region bounds: previous locked mid (or start) … next locked mid (or end).
+  let regionStart = 0;
+  let regionEnd = anchors.length - 1;
+  anchors.forEach((anchor, index) => {
+    if (index === 0 || index === anchors.length - 1) return;
+    if (!(anchor.locked && anchor.ref.tile)) return;
+    if (index < dragIndex) {
+      regionStart = index;
+    }
+    if (index > dragIndex && regionEnd === anchors.length - 1) {
+      regionEnd = index;
+    }
+  });
+
+  const region = anchors.slice(regionStart, regionEnd + 1);
+  const rebuiltRegion = rebuildOrthogonalRegion({
+    anchors: region,
+    draggedAnchorId,
+    hint,
+    view,
+    modelItems
+  });
+
+  return [
+    ...anchors.slice(0, regionStart),
+    ...rebuiltRegion,
+    ...anchors.slice(regionEnd + 1)
+  ];
+};
+
+const rebuildOrthogonalRegion = ({
   anchors,
   draggedAnchorId,
   hint,
@@ -816,7 +882,8 @@ export const applyOrthogonalBendAnchors = ({
           ? { x: hint.x, y: fromTile.y }
           : hint;
 
-    // Keep a single sliding WP on the straight run
+    // Keep a single sliding WP on the straight run (preserve lock flags
+    // on region endpoints — they are never mid tiles here).
     return [
       first,
       {
@@ -829,7 +896,13 @@ export const applyOrthogonalBendAnchors = ({
 
   const reusableIds = anchors
     .filter((anchor) => {
-      return Boolean(anchor.ref.tile) && anchor.id !== draggedAnchorId;
+      return (
+        Boolean(anchor.ref.tile) &&
+        anchor.id !== draggedAnchorId &&
+        anchor.id !== first.id &&
+        anchor.id !== last.id &&
+        !anchor.locked
+      );
     })
     .map((anchor) => {
       return anchor.id;

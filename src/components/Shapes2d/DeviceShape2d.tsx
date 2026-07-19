@@ -1,8 +1,9 @@
-import React, { useMemo } from 'react';
+import React, { useMemo, useId } from 'react';
 import { Box, Typography } from '@mui/material';
 import {
   TILE_SIZE_2D,
   SHAPE_2D_PC_ID,
+  CABINET_EAR_TILES,
   getShape2dSize,
   getShape2dPorts,
   getShape2dPortIfaceName
@@ -28,8 +29,8 @@ interface Props {
   connectedPortIds?: ReadonlySet<string> | string[];
   /** Port ids on a trunk mismatch link (red border). */
   mismatchPortIds?: ReadonlySet<string> | string[];
-  /** Currently focused port (sidebar / click) — gentle highlight. */
-  focusedPortId?: string | null;
+  /** Currently focused ports (sidebar / Ctrl+click) — gentle highlight. */
+  focusedPortIds?: ReadonlySet<string> | string[] | null;
   /** Peer ports on this device (other end of cables from the selected node). */
   peerHighlightPortIds?: ReadonlySet<string> | string[];
   /** All model items — used to resolve shared VLAN colors. */
@@ -59,7 +60,7 @@ export const DeviceShape2d = ({
   svis,
   connectedPortIds,
   mismatchPortIds,
-  focusedPortId = null,
+  focusedPortIds = null,
   peerHighlightPortIds,
   modelItems,
   centered = true,
@@ -78,15 +79,21 @@ export const DeviceShape2d = ({
   const cellSize = Math.min(tileW, tileH);
   const isRack = templateLayout?.formFactor === 'RACK';
   const isPc = shapeId === SHAPE_2D_PC_ID;
-  const portTileSize = isPc
-    ? cellSize * 5.2
-    : cellSize * (isRack ? 2.25 : 2.7);
-  const earW = Math.max(3, Math.round(tileW * 0.35));
+  const portTileSize = cellSize * 2.25;
+  /** Overlay cabinet rails; join flush to chassis sides. */
+  const earW = isRack
+    ? Math.round(CABINET_EAR_TILES * tileW)
+    : Math.max(3, Math.round(tileW * 0.35));
+  const mountHoleW = Math.max(12, Math.round(earW * 0.72));
+  const mountHoleH = Math.max(6, Math.round(mountHoleW * 0.42));
+  const earRadius = Math.max(4, Math.round(earW * 0.28));
+  const earMaskUid = useId().replace(/:/g, '');
   const chassisTint = parseDeviceColor(color);
   /** Header band ≈ top third of the chassis (name + icon + divider). */
   const headerBandH = pxHeight / 3;
   const headerIconSize = Math.max(36, Math.round(headerBandH * 0.45));
   const headerNameSize = Math.max(18, Math.round(headerBandH * 0.28));
+  const chassisRadius = Math.max(2, Math.round(cellSize * 0.12));
 
   const ports = useMemo(() => {
     if (layoutOverride) return layoutOverride.ports;
@@ -116,6 +123,13 @@ export const DeviceShape2d = ({
       : new Set(peerHighlightPortIds);
   }, [peerHighlightPortIds]);
 
+  const focusedSet = useMemo(() => {
+    if (!focusedPortIds) return null;
+    return focusedPortIds instanceof Set
+      ? focusedPortIds
+      : new Set(focusedPortIds);
+  }, [focusedPortIds]);
+
   const sviRows = useMemo(() => {
     if (isPc || !svis?.length) return [];
     return svis.map((svi) => {
@@ -143,19 +157,23 @@ export const DeviceShape2d = ({
         top: centered ? -pxHeight / 2 : 0,
         pointerEvents: 'none',
         boxSizing: 'border-box',
-        overflow: 'hidden'
+        overflow: isRack ? 'visible' : 'hidden'
       }}
     >
+      {/* Chassis — square left/right edges when rack so ears join flush */}
       <Box
         sx={{
           position: 'absolute',
           inset: 0,
           bgcolor: '#ffffff',
           border: `${Math.max(1, Math.round(cellSize * 0.05))}px solid #7a8ba3`,
-          borderRadius: Math.max(2, Math.round(cellSize * 0.12)),
+          borderRadius: isRack
+            ? `0`
+            : chassisRadius,
           boxSizing: 'border-box',
           boxShadow: '0 1px 2px rgba(0,0,0,0.06)',
-          overflow: 'hidden'
+          overflow: 'hidden',
+          zIndex: 1
         }}
       >
         {chassisTint.alpha > 0.01 && (
@@ -165,67 +183,108 @@ export const DeviceShape2d = ({
               inset: 0,
               bgcolor: chassisTint.css,
               pointerEvents: 'none',
-              // Keep chassis tint under ports (ports paint their own glass face).
               zIndex: 0
             }}
           />
         )}
       </Box>
 
-      {isRack && (
-        <>
-          <Box
-            sx={{
-              position: 'absolute',
-              left: Math.max(1, Math.round(cellSize * 0.05)),
-              top: tileH * 0.85,
-              width: earW,
-              height: pxHeight - tileH * 1.7,
-              bgcolor: '#d8dee8',
-              borderRadius: '1px',
-              border: '1px solid #a8b4c4',
-              boxSizing: 'border-box',
-              '&::before, &::after': {
-                content: '""',
+      {/* Rack ears — joined to chassis, rounded outer corners, 2 holes/ear */}
+      {isRack &&
+        (['left', 'right'] as const).map((side) => {
+          const cx = earW / 2;
+          const hw = mountHoleW / 2;
+          const hh = mountHoleH / 2;
+          const fracs = [0.25, 0.75];
+          const maskId = `rack-ear-mask-${side}-${earMaskUid}`;
+          const gradId = `rack-ear-grad-${side}-${earMaskUid}`;
+          // Overlap chassis by 1px so there is no seam gap
+          const joinOverlap = 1;
+          const rx = earRadius;
+
+          return (
+            <Box
+              key={side}
+              component="svg"
+              width={earW + joinOverlap}
+              height={pxHeight}
+              viewBox={`0 0 ${earW + joinOverlap} ${pxHeight}`}
+              sx={{
                 position: 'absolute',
-                left: '50%',
-                width: Math.max(2, earW * 0.32),
-                height: Math.max(2, earW * 0.32),
-                borderRadius: '50%',
-                bgcolor: '#8b97a8',
-                transform: 'translateX(-50%)'
-              },
-              '&::before': { top: '16%' },
-              '&::after': { bottom: '16%' }
-            }}
-          />
-          <Box
-            sx={{
-              position: 'absolute',
-              right: Math.max(1, Math.round(cellSize * 0.05)),
-              top: tileH * 0.85,
-              width: earW,
-              height: pxHeight - tileH * 1.7,
-              bgcolor: '#d8dee8',
-              borderRadius: '1px',
-              border: '1px solid #a8b4c4',
-              boxSizing: 'border-box',
-              '&::before, &::after': {
-                content: '""',
-                position: 'absolute',
-                left: '50%',
-                width: Math.max(2, earW * 0.32),
-                height: Math.max(2, earW * 0.32),
-                borderRadius: '50%',
-                bgcolor: '#8b97a8',
-                transform: 'translateX(-50%)'
-              },
-              '&::before': { top: '16%' },
-              '&::after': { bottom: '16%' }
-            }}
-          />
-        </>
-      )}
+                left: side === 'left' ? -(earW) : undefined,
+                right: side === 'right' ? -(earW) : undefined,
+                top: 0,
+                zIndex: 0,
+                pointerEvents: 'none',
+                display: 'block',
+                overflow: 'visible'
+              }}
+            >
+              <defs>
+                <linearGradient id={gradId} x1="0" y1="0" x2="1" y2="0">
+                  <stop offset="0%" stopColor="#4a5560" />
+                  <stop offset="50%" stopColor="#3a424c" />
+                  <stop offset="100%" stopColor="#2d343c" />
+                </linearGradient>
+                <mask id={maskId}>
+                  <rect
+                    width={earW + joinOverlap}
+                    height={pxHeight}
+                    fill="white"
+                  />
+                  {fracs.map((frac) => {
+                    const cy = pxHeight * frac;
+                    // Center holes in the visible ear (not the overlap strip)
+                    const holeCx =
+                      side === 'left'
+                        ? cx
+                        : joinOverlap + cx;
+                    return (
+                      <rect
+                        key={frac}
+                        x={holeCx - hw}
+                        y={cy - hh}
+                        width={mountHoleW}
+                        height={mountHoleH}
+                        rx={hh}
+                        ry={hh}
+                        fill="black"
+                      />
+                    );
+                  })}
+                </mask>
+              </defs>
+              {/* Rounded only on the outer edge; inner edge flush with chassis */}
+              <path
+                d={
+                  side === 'left'
+                    ? [
+                        `M ${earW + joinOverlap} 0`,
+                        `L ${rx} 0`,
+                        `Q 0 0 0 ${rx}`,
+                        `L 0 ${pxHeight - rx}`,
+                        `Q 0 ${pxHeight} ${rx} ${pxHeight}`,
+                        `L ${earW + joinOverlap} ${pxHeight}`,
+                        'Z'
+                      ].join(' ')
+                    : [
+                        `M 0 0`,
+                        `L ${earW + joinOverlap - rx} 0`,
+                        `Q ${earW + joinOverlap} 0 ${earW + joinOverlap} ${rx}`,
+                        `L ${earW + joinOverlap} ${pxHeight - rx}`,
+                        `Q ${earW + joinOverlap} ${pxHeight} ${earW + joinOverlap - rx} ${pxHeight}`,
+                        `L 0 ${pxHeight}`,
+                        'Z'
+                      ].join(' ')
+                }
+                fill={`url(#${gradId})`}
+                stroke="#1e293b"
+                strokeWidth={1}
+                mask={`url(#${maskId})`}
+              />
+            </Box>
+          );
+        })}
       <Box
         sx={{
           position: 'absolute',
@@ -234,9 +293,10 @@ export const DeviceShape2d = ({
           width: pxWidth - tileW * 0.8,
           height: headerBandH,
           display: 'flex',
-          flexDirection: 'column',
-          justifyContent: 'center',
-          gap: `${Math.max(2, Math.round(headerBandH * 0.06))}px`,
+          flexDirection: 'row',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          gap: `${Math.max(6, Math.round(tileW * 0.15))}px`,
           px: `${Math.max(3, tileW * 0.18)}px`,
           boxSizing: 'border-box',
           zIndex: 1,
@@ -246,60 +306,80 @@ export const DeviceShape2d = ({
         <Box
           sx={{
             display: 'flex',
-            alignItems: 'center',
-            gap: `${Math.max(8, Math.round(headerIconSize * 0.28))}px`,
+            flexDirection: 'column',
+            justifyContent: 'center',
+            gap: `${Math.max(2, Math.round(headerBandH * 0.06))}px`,
             minWidth: 0,
-            flexShrink: 0
+            flexShrink: 1
           }}
         >
-          <DeviceTypeIcon
-            iconId={shapeId}
-            sx={{
-              fontSize: headerIconSize,
-              width: headerIconSize,
-              height: headerIconSize,
-              color: '#334155',
-              flexShrink: 0
-            }}
-          />
-          <Typography
-            sx={{
-              color: '#1f2937',
-              fontSize: headerNameSize,
-              fontWeight: 700,
-              letterSpacing: 0.2,
-              lineHeight: 1.15,
-              userSelect: 'none',
-              whiteSpace: 'nowrap',
-              overflow: 'hidden',
-              textOverflow: 'ellipsis',
-              minWidth: 0
-            }}
-          >
-            {name}
-          </Typography>
-        </Box>
-        {subtitle && (
-          <Typography
-            sx={{
-              color: '#6b7280',
-              fontSize: Math.max(11, Math.round(headerBandH * 0.12)),
-              fontWeight: 500,
-              lineHeight: 1.2,
-              userSelect: 'none'
-            }}
-          >
-            {subtitle}
-          </Typography>
-        )}
-        {sviRows.length > 0 && (
           <Box
             sx={{
               display: 'flex',
-              flexDirection: 'column',
-              gap: `${Math.max(1, Math.round(tileH * 0.06))}px`,
-              minHeight: 0,
-              overflow: 'hidden'
+              alignItems: 'center',
+              gap: `${Math.max(8, Math.round(headerIconSize * 0.28))}px`,
+              minWidth: 0,
+              flexShrink: 0
+            }}
+          >
+            <DeviceTypeIcon
+              iconId={shapeId}
+              sx={{
+                fontSize: headerIconSize,
+                width: headerIconSize,
+                height: headerIconSize,
+                color: '#334155',
+                flexShrink: 0
+              }}
+            />
+            <Typography
+              sx={{
+                color: '#1f2937',
+                fontSize: headerNameSize,
+                fontWeight: 700,
+                letterSpacing: 0.2,
+                lineHeight: 1.15,
+                userSelect: 'none',
+                whiteSpace: 'nowrap',
+                overflow: 'hidden',
+                textOverflow: 'ellipsis',
+                minWidth: 0
+              }}
+            >
+              {name}
+            </Typography>
+          </Box>
+          {subtitle && (
+            <Typography
+              sx={{
+                color: '#6b7280',
+                fontSize: Math.max(11, Math.round(headerBandH * 0.12)),
+                fontWeight: 500,
+                lineHeight: 1.2,
+                userSelect: 'none'
+              }}
+            >
+              {subtitle}
+            </Typography>
+          )}
+        </Box>
+
+        {/* SVIs: 2 rows, fill column-by-column to the right */}
+        {sviRows.length > 0 && (
+          <Box
+            sx={{
+              display: 'grid',
+              gridTemplateRows: 'auto auto',
+              gridAutoFlow: 'column',
+              gridAutoColumns: 'max-content',
+              columnGap: `${Math.max(4, Math.round(tileW * 0.1))}px`,
+              rowGap: `${Math.max(2, Math.round(tileH * 0.08))}px`,
+              alignItems: 'center',
+              justifyItems: 'stretch',
+              flexShrink: 0,
+              maxWidth: '62%',
+              overflow: 'hidden',
+              py: `${Math.max(1, Math.round(tileH * 0.04))}px`
             }}
           >
             {sviRows.map((svi) => {
@@ -309,28 +389,30 @@ export const DeviceShape2d = ({
                   title={`SVI VLAN ${svi.vlan}${svi.ip ? ` · ${svi.ip}` : ''}`}
                   sx={{
                     display: 'flex',
-                    alignItems: 'center',
-                    gap: `${Math.max(2, Math.round(tileW * 0.08))}px`,
-                    px: `${Math.max(2, Math.round(tileW * 0.1))}px`,
-                    py: `${Math.max(1, Math.round(tileH * 0.05))}px`,
-                    borderRadius: Math.max(2, Math.round(cellSize * 0.08)),
+                    flexDirection: svi.ip ? 'column' : 'row',
+                    alignItems: svi.ip ? 'flex-start' : 'center',
+                    gap: svi.ip
+                      ? 0
+                      : `${Math.max(2, Math.round(tileW * 0.06))}px`,
+                    px: `${Math.max(5, Math.round(tileW * 0.12))}px`,
+                    py: `${Math.max(2, Math.round(tileH * 0.06))}px`,
+                    borderRadius: 9999,
                     bgcolor: svi.color,
                     border: '1px solid rgba(0,0,0,0.12)',
+                    boxShadow: '0 1px 2px rgba(15,23,42,0.12)',
                     minWidth: 0,
-                    flexShrink: 0
+                    maxWidth: Math.max(72, Math.round(tileW * 2.8))
                   }}
                 >
                   <Typography
                     sx={{
                       color: '#fff',
-                      fontSize: Math.max(9, tileH * 0.42),
+                      fontSize: Math.max(8, tileH * 0.32),
                       fontWeight: 700,
-                      lineHeight: 1.1,
+                      lineHeight: 1.15,
                       letterSpacing: 0.2,
-                      textShadow: '0 1px 1px rgba(0,0,0,0.35)',
                       userSelect: 'none',
-                      whiteSpace: 'nowrap',
-                      flexShrink: 0
+                      whiteSpace: 'nowrap'
                     }}
                   >
                     VLAN {svi.vlan}
@@ -339,17 +421,17 @@ export const DeviceShape2d = ({
                     <Typography
                       sx={{
                         color: '#fff',
-                        fontSize: Math.max(9, tileH * 0.42),
+                        fontSize: Math.max(7, tileH * 0.26),
                         fontWeight: 600,
                         fontFamily:
                           'ui-monospace, SFMono-Regular, Menlo, monospace',
                         lineHeight: 1.1,
-                        textShadow: '0 1px 1px rgba(0,0,0,0.35)',
+                        opacity: 0.92,
                         userSelect: 'none',
                         whiteSpace: 'nowrap',
                         overflow: 'hidden',
                         textOverflow: 'ellipsis',
-                        minWidth: 0
+                        maxWidth: '100%'
                       }}
                     >
                       {svi.ip}
@@ -430,7 +512,7 @@ export const DeviceShape2d = ({
               statusColor={statusColor}
               isTrunk={isTrunk}
               hasMismatch={Boolean(mismatchSet?.has(port.id))}
-              isFocused={focusedPortId === port.id}
+              isFocused={Boolean(focusedSet?.has(port.id))}
               isPeerHighlight={Boolean(peerHighlightSet?.has(port.id))}
               isConnected={Boolean(connectedSet?.has(port.id))}
               media={port.media ?? 'RJ45'}

@@ -128,6 +128,46 @@ export const getStackHandleOffsetsPx = (
 };
 
 /**
+ * Connectors that share a path edge with `primaryId` at `tile`
+ * (the overlapping stack under the cursor). Always includes `primaryId`.
+ */
+export const findOverlappingConnectorIdsAtTile = (
+  paths: { id: string; tiles: Coords[] }[],
+  tile: Coords,
+  primaryId: string
+): string[] => {
+  const edgeOwners = new Map<string, Set<string>>();
+
+  paths.forEach((path) => {
+    if (path.tiles.length < 2) return;
+
+    pathEdges(path.tiles).forEach((key) => {
+      let owners = edgeOwners.get(key);
+      if (!owners) {
+        owners = new Set();
+        edgeOwners.set(key, owners);
+      }
+      owners.add(path.id);
+    });
+  });
+
+  const ids = new Set<string>([primaryId]);
+  const tileK = tileKey(tile);
+
+  edgeOwners.forEach((owners, key) => {
+    if (owners.size < 2 || !owners.has(primaryId)) return;
+    const ends = parseEdgeKey(key);
+    if (!ends) return;
+    if (tileKey(ends.a) !== tileK && tileKey(ends.b) !== tileK) return;
+    owners.forEach((id) => {
+      ids.add(id);
+    });
+  });
+
+  return [...ids].sort();
+};
+
+/**
  * Find places where ≥2 connectors share the same grid edge and place one
  * badge per connected cluster of shared edges (so stacked runs show ×N once).
  */

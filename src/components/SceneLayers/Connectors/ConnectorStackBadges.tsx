@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef } from 'react';
 import { Box } from '@mui/material';
 import OpenWithOutlinedIcon from '@mui/icons-material/OpenWithOutlined';
 import { useScene } from 'src/hooks/useScene';
@@ -17,26 +17,37 @@ import {
   STACK_OVERLAP_COLORS
 } from 'src/utils';
 import { TILE_SIZE_2D } from 'src/config';
+import type { ItemReference } from 'src/types';
 
-const HANDLE_SPACING_PX = Math.round(TILE_SIZE_2D * 0.85);
-const HANDLE_SIZE = 36;
-const BADGE_SIZE = Math.max(28, Math.round(TILE_SIZE_2D * 0.72));
-const HANDLE_LIFT_PX = BADGE_SIZE * 0.5 + HANDLE_SIZE * 0.75 + 8;
+const HANDLE_SPACING_PX = Math.round(TILE_SIZE_2D * 0.7);
+const HANDLE_SIZE = 28;
+const BADGE_SIZE = Math.max(24, Math.round(TILE_SIZE_2D * 0.58));
+const HANDLE_LIFT_PX = BADGE_SIZE * 0.45 + HANDLE_SIZE * 0.65 + 6;
+const BADGE_DRAG_THRESHOLD_PX = 4;
+
+/**
+ * Counter SceneLayer zoom so UI stays readable when zoomed out.
+ * Mild growth only — badge stays compact; handles slightly larger far out.
+ */
+const counterZoom = (zoom: number) => {
+  return 1 / Math.max(zoom, 0.08);
+};
+
+const handleZoomBoost = (zoom: number) => {
+  // zoom 1 → 1×, 0.5 → ~1.2×, 0.25 → ~1.45× (capped)
+  return Math.min(1.5, Math.max(1, Math.pow(1 / Math.max(zoom, 0.12), 0.35)));
+};
 
 const stackKey = (tile: { x: number; y: number }) => {
   return `${tile.x},${tile.y}`;
 };
 
-const chebyshev = (
-  a: { x: number; y: number },
-  b: { x: number; y: number }
-) => {
-  return Math.max(Math.abs(a.x - b.x), Math.abs(a.y - b.y));
-};
-
 /**
  * Interactive stack badges — must sit ABOVE the interaction capture layer
  * so hover/click reach the DOM.
+ *
+ * Drag the count badge to move all stacked cables together.
+ * Click (no drag) to pin/unpin individual grab handles.
  */
 export const ConnectorStackBadges = () => {
   const scene = useScene();
@@ -44,24 +55,22 @@ export const ConnectorStackBadges = () => {
   const modelItems = useModelStore((state) => {
     return state.items;
   });
-  const mouse = useUiStateStore((state) => {
-    return state.mouse;
-  });
-  const mode = useUiStateStore((state) => {
-    return state.mode;
+  const zoom = useUiStateStore((state) => {
+    return state.zoom;
   });
   const uiActions = useUiStateStore((state) => {
     return state.actions;
   });
 
-  const hoveredKey = useStackFanStore((state) => {
-    return state.hoveredKey;
-  });
+  const badgeScale = useMemo(() => {
+    return counterZoom(zoom);
+  }, [zoom]);
+  const handleScale = useMemo(() => {
+    return counterZoom(zoom) * handleZoomBoost(zoom);
+  }, [zoom]);
+
   const pinnedKey = useStackFanStore((state) => {
     return state.pinnedKey;
-  });
-  const setHoveredKey = useStackFanStore((state) => {
-    return state.setHoveredKey;
   });
   const setPinnedKey = useStackFanStore((state) => {
     return state.setPinnedKey;
@@ -73,19 +82,20 @@ export const ConnectorStackBadges = () => {
     return state.setHighlightedConnectorId;
   });
 
-  const activeKey = pinnedKey ?? hoveredKey;
+  const pendingBadgeDragRef = useRef<{
+    key: string;
+    tile: { x: number; y: number };
+    connectorIds: string[];
+    startX: number;
+    startY: number;
+    started: boolean;
+  } | null>(null);
 
   useEffect(() => {
-    if (mode.type !== 'DRAG_ITEMS') {
-      clearPinned();
-    }
-  }, [mode.type, clearPinned]);
-
-  useEffect(() => {
-    if (!activeKey) {
+    if (!pinnedKey) {
       setHighlightedConnectorId(null);
     }
-  }, [activeKey, setHighlightedConnectorId]);
+  }, [pinnedKey, setHighlightedConnectorId]);
 
   const stackBadges = useMemo(() => {
     return findConnectorStackBadges(
@@ -98,97 +108,104 @@ export const ConnectorStackBadges = () => {
     );
   }, [connectors]);
 
-  // Tile proximity — works even when the interaction overlay covers the badge
-  useEffect(() => {
-    if (pinnedKey) return;
-
-    const radius = hoveredKey ? 2 : 1;
-    const near = stackBadges.find((badge) => {
-      return chebyshev(badge.tile, mouse.position.tile) <= radius;
-    });
-
-    const nextKey = near ? stackKey(near.tile) : null;
-    if (nextKey !== hoveredKey) {
-      setHoveredKey(nextKey);
-    }
-  }, [
-    mouse.position.tile.x,
-    mouse.position.tile.y,
-    stackBadges,
-    hoveredKey,
-    pinnedKey,
-    setHoveredKey
-  ]);
-
-  const grabStackedConnector = useCallback(
-    (connectorId: string, badgeTile: { x: number; y: number }) => {
-      const sceneConnector = connectors.find((con) => {
-        return con.id === connectorId;
-      });
-      if (!sceneConnector) return;
-
-      const segment = findWaypointSegmentNearTile({
-        connectorId,
-        anchors: sceneConnector.anchors,
-        path: sceneConnector.path,
-        tile: badgeTile
-      });
-
-      uiActions.setItemControls({ type: 'CONNECTOR', id: connectorId });
-      uiActions.setMouse({
-        ...mouse,
-        mousedown: {
-          screen: { ...mouse.position.screen },
-          tile: { ...badgeTile }
-        },
-        delta: null
-      });
-
-      if (!segment) {
+  const togglePin = useCallback(
+    (key: string) => {
+      if (pinnedKey === key) {
+        clearPinned();
         return;
       }
+      setPinnedKey(key);
+    },
+    [pinnedKey, clearPinned, setPinnedKey]
+  );
 
-      const prepared = prepareWaypointSegmentDrag({
-        anchors: sceneConnector.anchors,
-        path: sceneConnector.path,
-        hit: segment,
-        view: currentView,
-        modelItems
-      });
-
-      if (segment.materializeAtPort || segment.materializeBothPorts) {
-        scene.updateConnector(
-          connectorId,
-          { anchors: prepared.anchors },
-          { overlapResolve: 'off' }
-        );
-      }
-
+  const grabStackedConnectors = useCallback(
+    (connectorIds: string[], badgeTile: { x: number; y: number }) => {
+      const dragItems: ItemReference[] = [];
       const anchorOrigins: Record<string, { x: number; y: number }> = {};
-      prepared.anchors.forEach((anchor) => {
-        if (
-          (anchor.id === prepared.startAnchorId ||
-            anchor.id === prepared.endAnchorId) &&
-          anchor.ref.tile
-        ) {
-          anchorOrigins[anchor.id] = { ...anchor.ref.tile };
+      let primaryConnectorId: string | null = null;
+
+      connectorIds.forEach((connectorId) => {
+        const sceneConnector = connectors.find((con) => {
+          return con.id === connectorId;
+        });
+        if (!sceneConnector) return;
+
+        const segment = findWaypointSegmentNearTile({
+          connectorId,
+          anchors: sceneConnector.anchors,
+          path: sceneConnector.path,
+          tile: badgeTile
+        });
+        if (!segment) return;
+
+        const prepared = prepareWaypointSegmentDrag({
+          anchors: sceneConnector.anchors,
+          path: sceneConnector.path,
+          hit: segment,
+          view: currentView,
+          modelItems
+        });
+
+        if (segment.materializeAtPort || segment.materializeBothPorts) {
+          scene.updateConnector(
+            connectorId,
+            { anchors: prepared.anchors },
+            { overlapResolve: 'off' }
+          );
+        }
+
+        prepared.anchors.forEach((anchor) => {
+          if (
+            (anchor.id === prepared.startAnchorId ||
+              anchor.id === prepared.endAnchorId) &&
+            anchor.ref.tile
+          ) {
+            anchorOrigins[anchor.id] = { ...anchor.ref.tile };
+          }
+        });
+
+        dragItems.push({
+          type: 'CONNECTOR_SEGMENT',
+          id: encodeWaypointSegmentId(
+            connectorId,
+            prepared.startAnchorId,
+            prepared.endAnchorId
+          )
+        });
+
+        if (!primaryConnectorId) {
+          primaryConnectorId = connectorId;
         }
       });
+
+      if (dragItems.length === 0) return;
+
+      if (primaryConnectorId) {
+        uiActions.setItemControls({
+          type: 'CONNECTOR',
+          id: primaryConnectorId
+        });
+      }
+
+      // Keep mousedown from badge press when present (stable drag origin).
+      const mouse = uiActions.getMouse();
+      if (!mouse.mousedown) {
+        uiActions.setMouse({
+          ...mouse,
+          mousedown: {
+            screen: { ...mouse.position.screen },
+            tile: { ...badgeTile }
+          },
+          delta: null
+        });
+      }
 
       setPinnedKey(stackKey(badgeTile));
       uiActions.setMode({
         type: 'DRAG_ITEMS',
         showCursor: true,
-        items: [
-          {
-            type: 'CONNECTOR_SEGMENT',
-            id: encodeWaypointSegmentId(
-              connectorId,
-              prepared.startAnchorId,
-              prepared.endAnchorId
-            )
-          }
-        ],
+        items: dragItems,
         isInitialMovement: true,
         anchorOrigins
       });
@@ -197,18 +214,62 @@ export const ConnectorStackBadges = () => {
       connectors,
       currentView,
       modelItems,
-      mouse,
       scene,
       setPinnedKey,
       uiActions
     ]
   );
 
+  const grabStackedConnector = useCallback(
+    (connectorId: string, badgeTile: { x: number; y: number }) => {
+      grabStackedConnectors([connectorId], badgeTile);
+    },
+    [grabStackedConnectors]
+  );
+
+  useEffect(() => {
+    const onMove = (e: MouseEvent) => {
+      const pending = pendingBadgeDragRef.current;
+      if (!pending || pending.started) return;
+
+      const dx = e.clientX - pending.startX;
+      const dy = e.clientY - pending.startY;
+      if (Math.hypot(dx, dy) < BADGE_DRAG_THRESHOLD_PX) return;
+
+      pending.started = true;
+      grabStackedConnectors(pending.connectorIds, pending.tile);
+    };
+
+    const onUp = () => {
+      const pending = pendingBadgeDragRef.current;
+      pendingBadgeDragRef.current = null;
+      if (!pending || pending.started) return;
+
+      // Click without drag — clear press state, then pin/unpin handles.
+      const mouse = uiActions.getMouse();
+      if (mouse.mousedown) {
+        uiActions.setMouse({
+          ...mouse,
+          mousedown: null,
+          delta: null
+        });
+      }
+      togglePin(pending.key);
+    };
+
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup', onUp);
+    return () => {
+      window.removeEventListener('mousemove', onMove);
+      window.removeEventListener('mouseup', onUp);
+    };
+  }, [grabStackedConnectors, togglePin, uiActions]);
+
   return (
     <>
       {stackBadges.map((badge) => {
         const key = stackKey(badge.tile);
-        const isActive = activeKey === key;
+        const isPinned = pinnedKey === key;
         const severity = classifyStackOverlap({
           connectorIds: badge.connectorIds,
           connectors,
@@ -219,7 +280,7 @@ export const ConnectorStackBadges = () => {
           tile: badge.tile,
           origin: 'CENTER'
         });
-        const handleOffsets = isActive
+        const handleOffsets = isPinned
           ? getStackHandleOffsetsPx(
               badge.connectorIds,
               badge.along,
@@ -231,85 +292,86 @@ export const ConnectorStackBadges = () => {
         return (
           <Box
             key={`stack-${key}`}
-            onMouseEnter={() => {
-              setHoveredKey(key);
-            }}
-            onMouseLeave={() => {
-              if (!pinnedKey && hoveredKey === key) {
-                setHoveredKey(null);
-              }
-              setHighlightedConnectorId(null);
-            }}
             sx={{
               position: 'absolute',
               left: center.x,
               top: center.y,
               transform: 'translate(-50%, -50%)',
               pointerEvents: 'auto',
-              zIndex: 5
+              zIndex: isPinned ? 6 : 5
             }}
           >
+            {/* Count badge — drag all cables; click to pin handles */}
             <Box
-              sx={{
-                position: 'absolute',
-                left: '50%',
-                top: '50%',
-                transform: 'translate(-50%, -50%)',
-                width: isActive
-                  ? Math.max(
-                      BADGE_SIZE + 12,
-                      HANDLE_SPACING_PX * badge.count + HANDLE_SIZE
-                    )
-                  : BADGE_SIZE + 12,
-                height: isActive
-                  ? BADGE_SIZE + HANDLE_LIFT_PX + HANDLE_SIZE
-                  : BADGE_SIZE + 12,
-                borderRadius: '50%',
-                // Expand hit area upward so leaving toward handles keeps hover
-                marginTop: isActive ? `-${HANDLE_LIFT_PX * 0.35}px` : 0
-              }}
-            />
+              title="Przeciągnij wszystkie kable · kliknij, aby wybrać osobno"
+              onMouseDown={(e) => {
+                if (e.button !== 0) return;
+                e.preventDefault();
+                e.stopPropagation();
 
-            <Box
-              title={
-                severity === 'sameVlan'
-                  ? 'Nakładające się kable — ten sam VLAN'
-                  : 'Nakładające się kable — różne VLAN / trunk'
-              }
+                const mouse = uiActions.getMouse();
+                uiActions.setMouse({
+                  ...mouse,
+                  mousedown: {
+                    screen: { ...mouse.position.screen },
+                    tile: { ...badge.tile }
+                  },
+                  delta: null
+                });
+
+                pendingBadgeDragRef.current = {
+                  key,
+                  tile: { ...badge.tile },
+                  connectorIds: [...badge.connectorIds],
+                  startX: e.clientX,
+                  startY: e.clientY,
+                  started: false
+                };
+              }}
               sx={{
                 position: 'relative',
-                zIndex: 1,
+                zIndex: 2,
                 minWidth: BADGE_SIZE,
                 height: BADGE_SIZE,
                 px: 0.75,
                 borderRadius: '999px',
-                bgcolor: isActive ? colors.bgActive : colors.bg,
+                bgcolor: isPinned ? colors.bgActive : colors.bg,
                 border: `2px solid ${colors.border}`,
-                boxShadow: isActive
+                boxShadow: isPinned
                   ? `0 2px 8px ${colors.shadow}`
                   : `0 1px 4px ${colors.shadow}`,
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'center',
-                fontSize: Math.max(13, Math.round(BADGE_SIZE * 0.42)),
+                fontSize: Math.max(11, Math.round(BADGE_SIZE * 0.4)),
                 fontWeight: 800,
                 fontFamily: 'ui-sans-serif, system-ui, sans-serif',
                 color: '#fff',
                 lineHeight: 1,
                 userSelect: 'none',
-                cursor: 'default',
-                transform: isActive ? 'scale(1.08)' : 'scale(1)',
+                cursor: 'grab',
+                transform: `scale(${badgeScale * (isPinned ? 1.06 : 1)})`,
+                transformOrigin: 'center center',
                 transition:
                   'transform 0.12s ease, background-color 0.12s ease',
-                pointerEvents: 'none'
+                pointerEvents: 'auto',
+                '&:active': {
+                  cursor: 'grabbing'
+                }
               }}
             >
               {badge.count}
             </Box>
 
-            {isActive &&
+            {isPinned &&
               badge.connectorIds.map((connectorId) => {
                 const off = handleOffsets[connectorId] ?? { x: 0, y: 0 };
+                // Offsets are in unscaled scene px; scale with handles so
+                // they stay near the badge on screen.
+                const screenOff = {
+                  x: off.x * handleScale,
+                  y: off.y * handleScale
+                };
 
                 return (
                   <Box
@@ -328,30 +390,29 @@ export const ConnectorStackBadges = () => {
                     title="Przeciągnij kabel"
                     sx={{
                       position: 'absolute',
-                      left: `calc(50% + ${off.x}px)`,
-                      top: `calc(50% + ${off.y}px)`,
-                      transform: 'translate(-50%, -50%)',
+                      left: `calc(50% + ${screenOff.x}px)`,
+                      top: `calc(50% + ${screenOff.y}px)`,
+                      transform: `translate(-50%, -50%) scale(${handleScale})`,
+                      transformOrigin: 'center center',
                       width: HANDLE_SIZE,
                       height: HANDLE_SIZE,
-                      borderRadius: '6px',
+                      borderRadius: '5px',
                       bgcolor: '#fff',
                       border: '2px solid #1e3a5f',
-                      boxShadow: '0 2px 6px rgba(0,0,0,0.28)',
+                      boxShadow: '0 2px 5px rgba(0,0,0,0.25)',
                       display: 'flex',
                       alignItems: 'center',
                       justifyContent: 'center',
                       cursor: 'grab',
                       zIndex: 4,
-                      transition: 'left 0.12s ease, top 0.12s ease',
                       '&:hover': {
                         borderColor: '#dc2626',
-                        boxShadow: '0 3px 8px rgba(220, 38, 38, 0.4)',
-                        transform: 'translate(-50%, -50%) scale(1.08)'
+                        boxShadow: '0 3px 8px rgba(220, 38, 38, 0.35)'
                       }
                     }}
                   >
                     <OpenWithOutlinedIcon
-                      sx={{ fontSize: 22, color: '#1e3a5f' }}
+                      sx={{ fontSize: 18, color: '#1e3a5f' }}
                     />
                   </Box>
                 );

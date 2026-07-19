@@ -10,6 +10,8 @@ import { ToolMenu } from 'src/components/ToolMenu/ToolMenu';
 import { useUiStateStore } from 'src/stores/uiStateStore';
 import { MainMenu } from 'src/components/MainMenu/MainMenu';
 import { ZoomControls } from 'src/components/ZoomControls/ZoomControls';
+import { BackgroundColorLab } from 'src/components/BackgroundColorLab/BackgroundColorLab';
+import { ConnectorRelationPanel } from 'src/components/ConnectorRelationPanel/ConnectorRelationPanel';
 import { DebugUtils } from 'src/components/DebugUtils/DebugUtils';
 import { useResizeObserver } from 'src/hooks/useResizeObserver';
 import { ContextMenuManager } from 'src/components/ContextMenu/ContextMenuManager';
@@ -105,6 +107,8 @@ export const UiOverlay = () => {
   const isTwoD = projectionMode === 'TWO_D';
   const showItemControls =
     Boolean(itemControls) || (isTwoD && selectedItemIds.length >= 2);
+  const selectedConnectorId =
+    itemControls?.type === 'CONNECTOR' ? itemControls.id : null;
   // 2D sidebar needs room for device creator + port previews
   const itemControlsWidth = isTwoD
     ? Math.min(420, Math.max(360, Math.round(rendererSize.width * 0.28)))
@@ -175,6 +179,28 @@ export const UiOverlay = () => {
             }}
           >
             <ZoomControls />
+          </Box>
+        )}
+
+        {/* Bottom-left: cable relation (while selected) + TEMP color lab */}
+        {availableTools.includes('ZOOM_CONTROLS') && (
+          <Box
+            sx={{
+              position: 'absolute',
+              display: 'flex',
+              flexDirection: 'row',
+              alignItems: 'flex-end',
+              gap: 1
+            }}
+            style={{
+              left: appPadding.x,
+              top: rendererSize.height - appPadding.y * 2 - spacing(22)
+            }}
+          >
+            {isTwoD && selectedConnectorId && (
+              <ConnectorRelationPanel connectorId={selectedConnectorId} />
+            )}
+            <BackgroundColorLab />
           </Box>
         )}
 

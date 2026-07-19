@@ -45,6 +45,9 @@ export const Renderer = ({ showGrid, backgroundColor }: RendererProps) => {
   const projectionMode = useUiStateStore((state) => {
     return state.projectionMode;
   });
+  const diagramBackgroundColor = useUiStateStore((state) => {
+    return state.diagramBackgroundColor;
+  });
   const uiStateActions = useUiStateStore((state) => {
     return state.actions;
   });
@@ -136,9 +139,10 @@ export const Renderer = ({ showGrid, backgroundColor }: RendererProps) => {
         height: '100%',
         zIndex: 0,
         bgcolor: (theme) => {
-          if (isTwoD) return backgroundColor ?? DIAGRAM_BG_2D;
-
-          return backgroundColor ?? theme.customVars.customPalette.diagramBg;
+          const override = diagramBackgroundColor ?? backgroundColor;
+          if (override) return override;
+          if (isTwoD) return DIAGRAM_BG_2D;
+          return theme.customVars.customPalette.diagramBg;
         }
       }}
     >

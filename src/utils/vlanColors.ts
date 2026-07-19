@@ -260,21 +260,26 @@ export const getMismatchPortIdsForItem = ({
 /**
  * Peer (opposite-end) ports on `itemId` when another device is selected.
  * - Node selected: all remote ports of cables touching that node.
- * - Specific port focused: only peers of cables on that RJ45.
+ * - Specific ports focused: only peers of cables on those RJ45s.
  */
 export const getPeerHighlightedPortIdsForItem = ({
   itemId,
   selectedItemId,
-  focusedPortId,
+  focusedPortIds,
   connectors
 }: {
   itemId: string;
   selectedItemId: string | null;
-  focusedPortId?: string | null;
+  focusedPortIds?: ReadonlySet<string> | string[] | null;
   connectors: { anchors: { ref: { item?: string; port?: string } }[] }[];
 }): Set<string> => {
   const portIds = new Set<string>();
   if (!selectedItemId || selectedItemId === itemId) return portIds;
+
+  const focused =
+    !focusedPortIds || focusedPortIds instanceof Set
+      ? focusedPortIds
+      : new Set(focusedPortIds);
 
   connectors.forEach((connector) => {
     const ends = connector.anchors.filter((anchor) => {
@@ -287,7 +292,7 @@ export const getPeerHighlightedPortIdsForItem = ({
     });
     if (!local?.ref.port) return;
 
-    if (focusedPortId && local.ref.port !== focusedPortId) return;
+    if (focused && focused.size > 0 && !focused.has(local.ref.port)) return;
 
     ends.forEach((anchor) => {
       if (anchor.ref.item === itemId && anchor.ref.port) {

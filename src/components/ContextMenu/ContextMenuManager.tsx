@@ -4,9 +4,16 @@ import {
   getTilePosition,
   getTilePosition2d,
   CoordsUtils,
-  getItemByIdOrThrow
+  getItemByIdOrThrow,
+  getConnectorGlobalTiles,
+  findOverlappingConnectorIdsAtTile,
+  isLockedTileWaypoint,
+  lockWaypointAtTile,
+  unlockWaypointAtTile,
+  stripToEndpointAnchors
 } from 'src/utils';
 import { useScene } from 'src/hooks/useScene';
+import { useModelStore } from 'src/stores/modelStore';
 import { ContextMenu } from './ContextMenu';
 
 interface Props {
@@ -15,6 +22,9 @@ interface Props {
 
 export const ContextMenuManager = ({ anchorEl }: Props) => {
   const scene = useScene();
+  const modelItems = useModelStore((state) => {
+    return state.items;
+  });
   const zoom = useUiStateStore((state) => {
     return state.zoom;
   });
@@ -37,38 +47,137 @@ export const ContextMenuManager = ({ anchorEl }: Props) => {
     if (!contextMenu) return [];
 
     if (contextMenu.item.type === 'CONNECTOR') {
-      return [
-        {
-          label: 'Resetuj waypointy',
+      type SceneConnector = (typeof scene.connectors)[number];
+      let connector: SceneConnector;
+      try {
+        connector = getItemByIdOrThrow(
+          scene.connectors,
+          contextMenu.item.id
+        ).value;
+      } catch {
+        return [];
+      }
+
+      const tile = contextMenu.tile;
+      const stackedIds = findOverlappingConnectorIdsAtTile(
+        scene.connectors.map((con) => {
+          return {
+            id: con.id,
+            tiles: getConnectorGlobalTiles(con)
+          };
+        }),
+        tile,
+        connector.id
+      );
+      const stackedConnectors = stackedIds
+        .map((id) => {
+          try {
+            return getItemByIdOrThrow(scene.connectors, id).value;
+          } catch {
+            return null;
+          }
+        })
+        .filter((con): con is SceneConnector => {
+          return Boolean(con);
+        });
+
+      const lockedHere = stackedConnectors.some((con) => {
+        return con.anchors.some((anchor) => {
+          return (
+            isLockedTileWaypoint(anchor) &&
+            CoordsUtils.isEqual(anchor.ref.tile!, tile)
+          );
+        });
+      });
+
+      const items: { label: string; onClick: () => void }[] = [];
+
+      if (lockedHere) {
+        items.push({
+          label:
+            stackedConnectors.length > 1
+              ? `Odblokuj waypoint (${stackedConnectors.length})`
+              : 'Odblokuj waypoint',
           onClick: () => {
             try {
-              const connector = getItemByIdOrThrow(
-                scene.connectors,
-                contextMenu.item.id
-              ).value;
-
-              if (connector.anchors.length <= 2) {
-                onClose();
-                return;
-              }
-
-              const nextAnchors = [
-                connector.anchors[0],
-                connector.anchors[connector.anchors.length - 1]
-              ];
-
-              scene.updateConnector(
-                connector.id,
-                { anchors: nextAnchors },
-                { overlapResolve: 'off' }
-              );
+              scene.beginHistoryTransaction();
+              stackedConnectors.forEach((con) => {
+                const next = unlockWaypointAtTile({
+                  anchors: con.anchors,
+                  tile
+                });
+                if (next) {
+                  scene.updateConnector(
+                    con.id,
+                    { anchors: next },
+                    { overlapResolve: 'off' }
+                  );
+                }
+              });
+              scene.endHistoryTransaction();
             } catch {
-              // Connector may have been removed
+              // ignore
             }
             onClose();
           }
+        });
+      } else {
+        items.push({
+          label:
+            stackedConnectors.length > 1
+              ? `Blokuj waypoint (${stackedConnectors.length})`
+              : 'Blokuj waypoint',
+          onClick: () => {
+            try {
+              scene.beginHistoryTransaction();
+              stackedConnectors.forEach((con) => {
+                const next = lockWaypointAtTile({
+                  anchors: con.anchors,
+                  tile,
+                  path: con.path,
+                  view: scene.currentView,
+                  modelItems
+                });
+                scene.updateConnector(
+                  con.id,
+                  { anchors: next },
+                  { overlapResolve: 'off' }
+                );
+              });
+              scene.endHistoryTransaction();
+            } catch {
+              // ignore
+            }
+            onClose();
+          }
+        });
+      }
+
+      items.push({
+        label: 'Resetuj waypointy',
+        onClick: () => {
+          try {
+            if (connector.anchors.length <= 2) {
+              onClose();
+              return;
+            }
+
+            // Keep locked waypoints — only drop free mid WPs.
+            const nextAnchors = stripToEndpointAnchors(connector.anchors);
+
+            scene.updateConnector(
+              connector.id,
+              { anchors: nextAnchors },
+              { overlapResolve: 'off' }
+            );
+          } catch {
+            // Connector may have been removed
+          }
+          onClose();
         }
-      ];
+      });
+
+      return items;
     }
 
     if (contextMenu.item.type === 'RECTANGLE') {
@@ -105,7 +214,7 @@ export const ContextMenuManager = ({ anchorEl }: Props) => {
     }
 
     return [];
-  }, [contextMenu, onClose, scene]);
+  }, [contextMenu, onClose, scene, modelItems]);
 
   if (!contextMenu || menuItems.length === 0) {
     return null;

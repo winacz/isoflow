@@ -15,10 +15,17 @@ import { IconButton } from 'src/components/IconButton/IconButton';
 import { UiElement } from 'src/components/UiElement/UiElement';
 import { useScene } from 'src/hooks/useScene';
 import { TEXTBOX_DEFAULTS } from 'src/config';
-import { generateId } from 'src/utils';
+import { generateId, removeMidWaypointsByIds } from 'src/utils';
 
 export const ToolMenu = () => {
-  const { createTextBox, undo } = useScene();
+  const {
+    createTextBox,
+    undo,
+    connectors,
+    updateConnector,
+    beginHistoryTransaction,
+    endHistoryTransaction
+  } = useScene();
   const canUndo = useHistoryStore((state) => {
     return state.canUndo;
   });
@@ -30,6 +37,9 @@ export const ToolMenu = () => {
   });
   const editorMode = useUiStateStore((state) => {
     return state.editorMode;
+  });
+  const selectedWaypointIds = useUiStateStore((state) => {
+    return state.selectedWaypointIds;
   });
   const uiStateStoreActions = useUiStateStore((state) => {
     return state.actions;
@@ -49,33 +59,80 @@ export const ToolMenu = () => {
   useEffect(() => {
     if (!isEditable) return undefined;
 
+    const isTypingTarget = (e: KeyboardEvent) => {
+      const target = e.target as HTMLElement | null;
+      const tag = target?.tagName?.toLowerCase();
+      return (
+        tag === 'input' ||
+        tag === 'textarea' ||
+        Boolean(target?.isContentEditable)
+      );
+    };
+
     const onKeyDown = (e: KeyboardEvent) => {
+      if (isTypingTarget(e)) return;
+
       const isUndo =
         (e.ctrlKey || e.metaKey) &&
         !e.shiftKey &&
         e.key.toLowerCase() === 'z';
 
-      if (!isUndo) return;
+      if (isUndo) {
+        e.preventDefault();
+        undo();
+        return;
+      }
 
-      const target = e.target as HTMLElement | null;
-      const tag = target?.tagName?.toLowerCase();
+      const isDelete = e.key === 'Delete' || e.key === 'Backspace';
       if (
-        tag === 'input' ||
-        tag === 'textarea' ||
-        target?.isContentEditable
+        !isDelete ||
+        !isTwoD ||
+        selectedWaypointIds.length === 0 ||
+        e.ctrlKey ||
+        e.metaKey ||
+        e.altKey
       ) {
         return;
       }
 
       e.preventDefault();
-      undo();
+
+      const toRemove = new Set(selectedWaypointIds);
+      let changed = false;
+
+      beginHistoryTransaction();
+      connectors.forEach((connector) => {
+        const next = removeMidWaypointsByIds(connector.anchors, toRemove);
+        if (!next) return;
+        changed = true;
+        updateConnector(
+          connector.id,
+          { anchors: next },
+          { overlapResolve: 'off' }
+        );
+      });
+      endHistoryTransaction();
+
+      if (changed) {
+        uiStateStoreActions.setSelectedWaypointIds([]);
+      }
     };
 
     window.addEventListener('keydown', onKeyDown);
     return () => {
       window.removeEventListener('keydown', onKeyDown);
     };
-  }, [isEditable, undo]);
+  }, [
+    isEditable,
+    isTwoD,
+    undo,
+    selectedWaypointIds,
+    connectors,
+    updateConnector,
+    beginHistoryTransaction,
+    endHistoryTransaction,
+    uiStateStoreActions
+  ]);
 
   const createTextBoxProxy = useCallback(() => {
     const textBoxId = generateId();

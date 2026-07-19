@@ -8,6 +8,8 @@ interface Props {
   to: Coords;
   origin?: Coords;
   fill?: string;
+  /** 0–1 fill opacity (stroke stays full strength). */
+  opacity?: number;
   cornerRadius?: number;
   stroke?: {
     width: number;
@@ -19,6 +21,7 @@ export const IsoTileArea = ({
   from,
   to,
   fill = 'none',
+  opacity = 1,
   cornerRadius = 0,
   stroke
 }: Props) => {
@@ -36,12 +39,15 @@ export const IsoTileArea = ({
     };
   }, [stroke]);
 
+  const fillOpacity = Math.min(1, Math.max(0, opacity));
+
   return (
     <Svg viewboxSize={pxSize} style={css}>
       <rect
         width={pxSize.width}
         height={pxSize.height}
         fill={fill}
+        fillOpacity={fillOpacity}
         rx={cornerRadius}
         {...strokeParams}
       />

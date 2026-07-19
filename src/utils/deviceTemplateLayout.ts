@@ -91,7 +91,8 @@ const numberSection = (
 
 /**
  * Lay out a switch template into a tile footprint + port handles.
- * RACK always uses fixed RACK_1U_WIDTH_TILES (does not grow).
+ * - RACK: fixed RACK_1U_WIDTH_TILES bay (cabinet slot), equalized side margins
+ * - DIN/CUSTOM: width grows with ports; height always 1U (same as RACK)
  */
 export const layoutDeviceTemplate = (
   template: DeviceTemplate
@@ -99,25 +100,37 @@ export const layoutDeviceTemplate = (
   const sections = template.sections;
   const sectionWidths = sections.map(sectionWidthTiles);
   const gaps = Math.max(0, sections.length - 1) * SECTION_GAP;
-  const contentWidth =
-    sectionWidths.reduce((sum, w) => sum + w, 0) + gaps + SIDE_MARGIN * 2;
+  const sectionsSpan =
+    sectionWidths.reduce((sum, w) => sum + w, 0) + gaps;
+
+  /**
+   * Bounding box of port tiles: first port at section start, last port at
+   * sectionsSpan - PORT_PITCH (trailing pitch pad after the final column).
+   * Internal section pads + gaps stay inside this span.
+   */
+  const portSpan = Math.max(1, sectionsSpan - (PORT_PITCH - 1));
 
   const isRack = template.formFactor === 'RACK';
-  const overflow = isRack && contentWidth > RACK_1U_WIDTH_TILES;
+  // Overflow only when ports cannot fit even with zero side margin.
+  const overflow = isRack && portSpan > RACK_1U_WIDTH_TILES;
+
+  // RACK: fixed bay width (cabinet slot). DIN/CUSTOM: grow with ports.
+  // Height is always 1U for every form factor.
+  const bay = isRack
+    ? overflow
+      ? portSpan + SIDE_MARGIN * 2
+      : RACK_1U_WIDTH_TILES
+    : Math.max(8, portSpan + SIDE_MARGIN * 2);
+  const margin = isRack
+    ? Math.max(0, Math.floor((bay - portSpan) / 2))
+    : SIDE_MARGIN;
 
   const size: Size = {
-    width: isRack ? RACK_1U_WIDTH_TILES : Math.max(8, contentWidth),
+    width: bay,
     height: RACK_1U_HEIGHT_TILES
   };
 
-  // Center sections in fixed RACK when there is spare width
-  let cursorX = SIDE_MARGIN;
-  if (isRack && !overflow) {
-    cursorX = Math.max(
-      SIDE_MARGIN,
-      Math.floor((RACK_1U_WIDTH_TILES - (contentWidth - SIDE_MARGIN * 2)) / 2)
-    );
-  }
+  let cursorX = isRack ? margin : SIDE_MARGIN;
 
   const ports: Shape2dPort[] = [];
   const sectionDividers: number[] = [];

@@ -17,9 +17,16 @@ import { TILE_SIZE_2D, getShape2dSize } from 'src/config';
 
 export const Cursor = () => {
   const theme = useTheme();
-  const tile = useUiStateStore((state) => {
-    return state.mouse.position.tile;
+  // Primitive key — the tile object is recreated on every mouse event,
+  // which would re-render the cursor even when it stays on the same tile.
+  const tileKey = useUiStateStore((state) => {
+    const { tile: t } = state.mouse.position;
+    return `${t.x},${t.y}`;
   });
+  const tile = useMemo(() => {
+    const [x, y] = tileKey.split(',');
+    return { x: Number(x), y: Number(y) };
+  }, [tileKey]);
   const zoom = useUiStateStore((state) => {
     return state.zoom;
   });

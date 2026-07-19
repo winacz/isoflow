@@ -3,7 +3,8 @@ import { createStore, useStore } from 'zustand';
 import {
   CoordsUtils,
   getStartingMode,
-  clamp
+  clamp,
+  setSimplePathsEnabled
 } from 'src/utils';
 import {
   incrementZoom,
@@ -21,6 +22,8 @@ import {
 const smoothZoom = createSmoothZoomController();
 
 const initialState = () => {
+  setSimplePathsEnabled(INITIAL_UI_STATE.simplePaths);
+
   return createStore<UiStateStore>((set, get) => {
     return {
       zoom: INITIAL_UI_STATE.zoom,
@@ -46,9 +49,12 @@ const initialState = () => {
       itemControls: null,
       selectedItemIds: [],
       selectedWaypointIds: [],
-      focusedPortId: null,
+      focusedPortIds: [],
       enableDebugTools: false,
       showGrid: INITIAL_UI_STATE.showGrid,
+      diagramBackgroundColor: INITIAL_UI_STATE.diagramBackgroundColor,
+      vlan1CableColor: INITIAL_UI_STATE.vlan1CableColor,
+      simplePaths: INITIAL_UI_STATE.simplePaths,
       actions: {
         setView: (view) => {
           set({ view });
@@ -71,7 +77,7 @@ const initialState = () => {
             },
             itemControls: null,
             selectedItemIds: [],
-            focusedPortId: null,
+            focusedPortIds: [],
             zoom: 1
           });
         },
@@ -86,7 +92,7 @@ const initialState = () => {
             isMainMenuOpen,
             itemControls: null,
             selectedItemIds: [],
-            focusedPortId: null
+            focusedPortIds: []
           });
         },
         incrementZoom: () => {
@@ -139,7 +145,7 @@ const initialState = () => {
           set({
             itemControls,
             selectedItemIds: [],
-            focusedPortId: null
+            focusedPortIds: []
           });
         },
         setSelectedItemIds: (ids) => {
@@ -159,7 +165,7 @@ const initialState = () => {
               selectedItemIds: unique,
               selectedWaypointIds: [],
               itemControls: null,
-              focusedPortId: null
+              focusedPortIds: []
             });
             return;
           }
@@ -167,7 +173,7 @@ const initialState = () => {
           set({
             selectedItemIds: [],
             itemControls: null,
-            focusedPortId: null
+            focusedPortIds: []
           });
         },
         setSelectedWaypointIds: (ids) => {
@@ -185,14 +191,37 @@ const initialState = () => {
         clearSelectedItemIds: () => {
           get().actions.setSelectedItemIds([]);
         },
-        setFocusedPortId: (focusedPortId) => {
-          set({ focusedPortId });
+        setFocusedPortIds: (portIds) => {
+          set({
+            focusedPortIds: [...new Set(portIds.filter(Boolean))]
+          });
+        },
+        setFocusedPortId: (portId) => {
+          set({
+            focusedPortIds: portId ? [portId] : []
+          });
+        },
+        toggleFocusedPortId: (portId) => {
+          if (!portId) return;
+          const current = get().focusedPortIds;
+          if (current.includes(portId)) {
+            set({
+              focusedPortIds: current.filter((id) => {
+                return id !== portId;
+              })
+            });
+            return;
+          }
+          set({ focusedPortIds: [...current, portId] });
         },
         setContextMenu: (contextMenu) => {
           set({ contextMenu });
         },
         setMouse: (mouse) => {
           set({ mouse });
+        },
+        getMouse: () => {
+          return get().mouse;
         },
         setEnableDebugTools: (enableDebugTools) => {
           set({ enableDebugTools });
@@ -208,6 +237,21 @@ const initialState = () => {
         },
         toggleShowGrid: () => {
           set({ showGrid: !get().showGrid });
+        },
+        setDiagramBackgroundColor: (diagramBackgroundColor) => {
+          set({ diagramBackgroundColor });
+        },
+        setVlan1CableColor: (vlan1CableColor) => {
+          set({ vlan1CableColor });
+        },
+        setSimplePaths: (simplePaths) => {
+          setSimplePathsEnabled(simplePaths);
+          set({ simplePaths });
+        },
+        toggleSimplePaths: () => {
+          const next = !get().simplePaths;
+          setSimplePathsEnabled(next);
+          set({ simplePaths: next });
         }
       }
     };

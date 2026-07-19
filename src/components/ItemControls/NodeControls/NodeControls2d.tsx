@@ -89,11 +89,12 @@ type PortRowProps = {
   port: Shape2dPort;
   index: number;
   isExpanded: boolean;
+  isSelected: boolean;
   isPc: boolean;
   config: PortConfig;
   vlanColor: string;
   isTrunk: boolean;
-  onToggle: (portId: string, expanded: boolean) => void;
+  onToggle: (portId: string, expanded: boolean, additive: boolean) => void;
   onUpdatePort: (portId: string, patch: Partial<PortConfig>) => void;
   onApplyVlanNumber: (portId: string, vlan: string) => void;
   onApplyVlanColor: (portId: string, color: string, vlan: string | undefined) => void;
@@ -106,6 +107,7 @@ const PortRow = memo(
     port,
     index,
     isExpanded,
+    isSelected,
     isPc,
     config,
     vlanColor,
@@ -131,23 +133,33 @@ const PortRow = memo(
         elevation={0}
         expanded={isExpanded}
         TransitionProps={{ unmountOnExit: true }}
-        onChange={(_, expanded) => {
-          onToggle(port.id, expanded);
+        onChange={() => {
+          // Expansion is driven by summary onClick (supports Ctrl multi-select).
         }}
         ref={(el: HTMLDivElement | null) => {
           setPortRef(port.id, el);
         }}
         sx={{
           border: '1px solid',
-          borderColor: isExpanded ? 'primary.main' : 'divider',
+          borderColor: isSelected || isExpanded ? 'primary.main' : 'divider',
           borderRadius: '4px !important',
           overflow: 'hidden',
-          bgcolor: 'background.paper',
+          bgcolor: isSelected ? 'action.selected' : 'background.paper',
           '&:before': { display: 'none' }
         }}
       >
         <AccordionSummary
           expandIcon={<ExpandMoreIcon sx={{ fontSize: 16 }} />}
+          onClick={(e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            const additive = e.ctrlKey || e.metaKey;
+            if (additive) {
+              onToggle(port.id, false, true);
+              return;
+            }
+            onToggle(port.id, !isExpanded, false);
+          }}
           sx={{
             minHeight: 30,
             px: 1,
@@ -348,8 +360,8 @@ export const NodeControls2d = ({ id }: Props) => {
   const uiStateActions = useUiStateStore((state) => {
     return state.actions;
   });
-  const focusedPortId = useUiStateStore((state) => {
-    return state.focusedPortId;
+  const focusedPortIds = useUiStateStore((state) => {
+    return state.focusedPortIds;
   });
   const viewItem = useViewItem(id);
   const modelItem = useModelItem(id);
@@ -358,7 +370,7 @@ export const NodeControls2d = ({ id }: Props) => {
   });
   const [portsOpen, setPortsOpen] = useState(false);
   const [expandedPortId, setExpandedPortId] = useState<string | null>(
-    focusedPortId
+    focusedPortIds.length === 1 ? focusedPortIds[0] : null
   );
   const [expandedSviId, setExpandedSviId] = useState<string | null>(null);
   const portRefs = useRef<Record<string, HTMLDivElement | null>>({});
@@ -376,6 +388,7 @@ export const NodeControls2d = ({ id }: Props) => {
   const [sidebarTab, setSidebarTab] = useState<'ports' | 'svi'>('ports');
   const svis = modelItem.svis ?? [];
   const rackUnits = modelItem.rackUnits ?? CABINET_DEFAULT_UNITS;
+  const multiPort = focusedPortIds.length > 1;
 
   const portSummaries = useMemo(() => {
     return shapePorts.map((port, index) => {
@@ -394,20 +407,63 @@ export const NodeControls2d = ({ id }: Props) => {
     });
   }, [shapePorts, modelItem.ports, isPc, modelItems]);
 
+  const multiPortDraft = useMemo(() => {
+    if (!multiPort) {
+      return { name: '', vlan: '', mixedName: false, mixedVlan: false };
+    }
+    const configs = focusedPortIds.map((portId) => {
+      return {
+        ...defaultPortConfig(),
+        ...(modelItem.ports?.[portId] ?? {})
+      };
+    });
+    const names = configs.map((c) => {
+      return c.name ?? '';
+    });
+    const vlans = configs.map((c) => {
+      return c.vlan ?? '';
+    });
+    const mixedName = names.some((n) => {
+      return n !== names[0];
+    });
+    const mixedVlan = vlans.some((v) => {
+      return v !== vlans[0];
+    });
+    return {
+      name: mixedName ? '' : names[0],
+      vlan: mixedVlan ? '' : vlans[0],
+      mixedName,
+      mixedVlan
+    };
+  }, [multiPort, focusedPortIds, modelItem.ports]);
+
   useEffect(() => {
-    if (!focusedPortId) return;
+    if (focusedPortIds.length === 0) return;
 
     setSidebarTab('ports');
     setPortsOpen(true);
-    setExpandedPortId(focusedPortId);
 
-    const el = portRefs.current[focusedPortId];
+    if (focusedPortIds.length === 1) {
+      const portId = focusedPortIds[0];
+      setExpandedPortId(portId);
+      const el = portRefs.current[portId];
+      if (el) {
+        requestAnimationFrame(() => {
+          el.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+        });
+      }
+      return;
+    }
+
+    // Multi-select: collapse single accordion, scroll to first selected.
+    setExpandedPortId(null);
+    const el = portRefs.current[focusedPortIds[0]];
     if (el) {
       requestAnimationFrame(() => {
         el.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
       });
     }
-  }, [focusedPortId]);
+  }, [focusedPortIds]);
 
   const updatePort = useCallback(
     (portId: string, patch: Partial<PortConfig>) => {
@@ -421,6 +477,19 @@ export const NodeControls2d = ({ id }: Props) => {
           }
         }
       });
+    },
+    [modelItem.ports, updateModelItem, viewItem.id]
+  );
+
+  const updatePorts = useCallback(
+    (portIds: string[], patch: Partial<PortConfig>) => {
+      if (portIds.length === 0) return;
+      const nextPorts = { ...(modelItem.ports ?? {}) };
+      portIds.forEach((portId) => {
+        const current = nextPorts[portId] ?? defaultPortConfig();
+        nextPorts[portId] = { ...current, ...patch };
+      });
+      updateModelItem(viewItem.id, { ports: nextPorts });
     },
     [modelItem.ports, updateModelItem, viewItem.id]
   );
@@ -464,8 +533,38 @@ export const NodeControls2d = ({ id }: Props) => {
     ]
   );
 
+  const applyVlanNumberMulti = useCallback(
+    (vlan: string) => {
+      const shared = findSharedVlanColor(vlan, modelItems);
+      const nextColor = isVlan1(vlan) ? '' : shared || '';
+
+      beginHistoryTransaction();
+      updatePorts(focusedPortIds, {
+        vlan,
+        vlanColor: nextColor
+      });
+      if (nextColor && !isVlan1(vlan)) {
+        setVlanColorAcrossModel(vlan, nextColor);
+      }
+      endHistoryTransaction();
+    },
+    [
+      beginHistoryTransaction,
+      endHistoryTransaction,
+      focusedPortIds,
+      modelItems,
+      setVlanColorAcrossModel,
+      updatePorts
+    ]
+  );
+
   const onTogglePort = useCallback(
-    (portId: string, expanded: boolean) => {
+    (portId: string, expanded: boolean, additive: boolean) => {
+      if (additive) {
+        uiStateActions.toggleFocusedPortId(portId);
+        setExpandedPortId(null);
+        return;
+      }
       setExpandedPortId(expanded ? portId : null);
       uiStateActions.setFocusedPortId(expanded ? portId : null);
     },
@@ -770,6 +869,74 @@ export const NodeControls2d = ({ id }: Props) => {
                   </Typography>
                 </AccordionSummary>
                 <AccordionDetails sx={{ px: 0, pt: 0, pb: 0 }}>
+                  {multiPort && (
+                    <Box
+                      sx={{
+                        mb: 0.75,
+                        p: 1,
+                        borderRadius: 1,
+                        border: '1px solid',
+                        borderColor: 'primary.main',
+                        bgcolor: 'action.hover'
+                      }}
+                    >
+                      <Typography
+                        sx={{
+                          fontSize: 11,
+                          fontWeight: 700,
+                          mb: 0.75
+                        }}
+                      >
+                        Zaznaczono {focusedPortIds.length} portów
+                      </Typography>
+                      <Typography
+                        sx={{
+                          fontSize: 10,
+                          color: 'text.secondary',
+                          mb: 1
+                        }}
+                      >
+                        Ctrl+klik na porcie lub na liście — dodaj/usuń z
+                        zaznaczenia.
+                      </Typography>
+                      <Stack spacing={1}>
+                        <TextField
+                          label="Nazwa"
+                          size="small"
+                          fullWidth
+                          sx={fieldSx}
+                          placeholder={
+                            multiPortDraft.mixedName
+                              ? '(różne wartości)'
+                              : undefined
+                          }
+                          value={multiPortDraft.name}
+                          onChange={(e) => {
+                            updatePorts(focusedPortIds, {
+                              name: e.target.value
+                            });
+                          }}
+                        />
+                        {!isPc && (
+                          <TextField
+                            label="VLAN"
+                            size="small"
+                            fullWidth
+                            sx={fieldSx}
+                            placeholder={
+                              multiPortDraft.mixedVlan
+                                ? '(różne wartości)'
+                                : undefined
+                            }
+                            value={multiPortDraft.vlan}
+                            onChange={(e) => {
+                              applyVlanNumberMulti(e.target.value);
+                            }}
+                          />
+                        )}
+                      </Stack>
+                    </Box>
+                  )}
                   <Stack spacing={0.4}>
                     {portSummaries.map(
                       ({ port, index, config, vlanColor, isTrunk }) => {
@@ -778,7 +945,10 @@ export const NodeControls2d = ({ id }: Props) => {
                             key={port.id}
                             port={port}
                             index={index}
-                            isExpanded={expandedPortId === port.id}
+                            isExpanded={
+                              !multiPort && expandedPortId === port.id
+                            }
+                            isSelected={focusedPortIds.includes(port.id)}
                             isPc={isPc}
                             config={config}
                             vlanColor={vlanColor}
@@ -997,6 +1167,37 @@ export const NodeControls2d = ({ id }: Props) => {
               </Typography>
             </AccordionSummary>
             <AccordionDetails sx={{ px: 0, pt: 0, pb: 0 }}>
+              {multiPort && (
+                <Box
+                  sx={{
+                    mb: 0.75,
+                    p: 1,
+                    borderRadius: 1,
+                    border: '1px solid',
+                    borderColor: 'primary.main',
+                    bgcolor: 'action.hover'
+                  }}
+                >
+                  <Typography sx={{ fontSize: 11, fontWeight: 700, mb: 0.75 }}>
+                    Zaznaczono {focusedPortIds.length} portów
+                  </Typography>
+                  <TextField
+                    label="Nazwa"
+                    size="small"
+                    fullWidth
+                    sx={fieldSx}
+                    placeholder={
+                      multiPortDraft.mixedName
+                        ? '(różne wartości)'
+                        : undefined
+                    }
+                    value={multiPortDraft.name}
+                    onChange={(e) => {
+                      updatePorts(focusedPortIds, { name: e.target.value });
+                    }}
+                  />
+                </Box>
+              )}
               <Stack spacing={0.4}>
                 {portSummaries.map(
                   ({ port, index, config, vlanColor, isTrunk }) => {
@@ -1005,7 +1206,8 @@ export const NodeControls2d = ({ id }: Props) => {
                         key={port.id}
                         port={port}
                         index={index}
-                        isExpanded={expandedPortId === port.id}
+                        isExpanded={!multiPort && expandedPortId === port.id}
+                        isSelected={focusedPortIds.includes(port.id)}
                         isPc={isPc}
                         config={config}
                         vlanColor={vlanColor}

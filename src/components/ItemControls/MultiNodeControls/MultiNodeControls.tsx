@@ -6,7 +6,10 @@ import {
   GridViewOutlined,
   RouteOutlined,
   AutoFixHighOutlined,
-  SwapHorizOutlined
+  SwapHorizOutlined,
+  TimelineOutlined,
+  ScienceOutlined,
+  StraightOutlined
 } from '@mui/icons-material';
 import { useScene } from 'src/hooks/useScene';
 import { useUiStateStore } from 'src/stores/uiStateStore';
@@ -29,6 +32,9 @@ export const MultiNodeControls = () => {
   const selectedItemIds = useUiStateStore((state) => {
     return state.selectedItemIds;
   });
+  const simplePaths = useUiStateStore((state) => {
+    return state.simplePaths;
+  });
   const clearSelectedItemIds = useUiStateStore((state) => {
     return state.actions.clearSelectedItemIds;
   });
@@ -36,7 +42,10 @@ export const MultiNodeControls = () => {
     layoutViewItems,
     tidyItems,
     tidyItemsInPlace,
-    regenerateRoutesForItems
+    routeDiagonalFanForItems,
+    runTestLayoutForItems,
+    regenerateRoutesForItems,
+    setSimplePathsMode
   } = useScene();
 
   // Cycle algorithms on every press ("porządkuj w wybranym miejscu").
@@ -113,6 +122,30 @@ export const MultiNodeControls = () => {
           <Button
             size="small"
             variant="outlined"
+            startIcon={<TimelineOutlined />}
+            onClick={() => {
+              routeDiagonalFanForItems(selectedItemIds);
+            }}
+            disabled={simplePaths}
+            sx={{ justifyContent: 'flex-start', textTransform: 'none' }}
+          >
+            Mój algorytm
+          </Button>
+          <Button
+            size="small"
+            variant="outlined"
+            startIcon={<ScienceOutlined />}
+            onClick={() => {
+              runTestLayoutForItems(selectedItemIds);
+            }}
+            disabled={simplePaths}
+            sx={{ justifyContent: 'flex-start', textTransform: 'none' }}
+          >
+            Test
+          </Button>
+          <Button
+            size="small"
+            variant="outlined"
             startIcon={<SwapHorizOutlined />}
             onClick={() => {
               const variant =
@@ -130,6 +163,17 @@ export const MultiNodeControls = () => {
             sx={{ justifyContent: 'flex-start', textTransform: 'none' }}
           >
             Porządkuj w miejscu ({TIDY_IN_PLACE_LABELS[nextVariant]})
+          </Button>
+          <Button
+            size="small"
+            variant={simplePaths ? 'contained' : 'outlined'}
+            startIcon={<StraightOutlined />}
+            onClick={() => {
+              setSimplePathsMode(!simplePaths);
+            }}
+            sx={{ justifyContent: 'flex-start', textTransform: 'none' }}
+          >
+            {simplePaths ? 'Włącz obliczanie' : 'Wyłącz obliczanie'}
           </Button>
           <Button
             size="small"

@@ -182,8 +182,11 @@ export interface UiState {
   selectedItemIds: string[];
   /** 2D: waypoint (tile anchor) ids selected via marquee over cables only. */
   selectedWaypointIds: string[];
-  /** 2D: port id to expand in the device sidebar when an ITEM is selected. */
-  focusedPortId: string | null;
+  /**
+   * 2D: selected port ids on the focused device (sidebar + canvas highlight).
+   * Last entry is the primary port (expanded accordion / cable peer filter).
+   */
+  focusedPortIds: string[];
   contextMenu: ContextMenu | null;
   zoom: number;
   scroll: Scroll;
@@ -193,6 +196,21 @@ export interface UiState {
   projectionMode: ProjectionMode;
   /** Whether the background grid is drawn (logical snap grid is always active). */
   showGrid: boolean;
+  /**
+   * Temporary canvas background override (experiment UI).
+   * `null` = use default theme / DIAGRAM_BG_2D.
+   */
+  diagramBackgroundColor: string | null;
+  /**
+   * Temporary stroke for untagged / VLAN 1 cables.
+   * `null` = default black (#0a0a0a).
+   */
+  vlan1CableColor: string | null;
+  /**
+   * 2D: disable fancy pathfinding — cables are plain endpoint↔endpoint L/U.
+   * Through-node dash coloring still applies.
+   */
+  simplePaths: boolean;
 }
 
 export interface UiStateActions {
@@ -215,14 +233,26 @@ export interface UiStateActions {
   toggleSelectedItemId: (id: string) => void;
   clearSelectedItemIds: () => void;
   setSelectedWaypointIds: (ids: string[]) => void;
+  setFocusedPortIds: (portIds: string[]) => void;
+  /** Replace selection with a single port (or clear). */
   setFocusedPortId: (portId: string | null) => void;
+  /** Ctrl/Cmd toggle a port in the multi-selection. */
+  toggleFocusedPortId: (portId: string) => void;
   setContextMenu: (contextMenu: ContextMenu | null) => void;
   setMouse: (mouse: Mouse) => void;
+  /** Imperative read — lets event handlers avoid subscribing to every mousemove. */
+  getMouse: () => Mouse;
   setRendererEl: (el: HTMLDivElement) => void;
   setEnableDebugTools: (enabled: boolean) => void;
   setProjectionMode: (projectionMode: ProjectionMode) => void;
   setShowGrid: (showGrid: boolean) => void;
   toggleShowGrid: () => void;
+  /** Temporary: override diagram canvas background, or null to reset. */
+  setDiagramBackgroundColor: (color: string | null) => void;
+  /** Temporary: override VLAN 1 / untagged cable color, or null to reset. */
+  setVlan1CableColor: (color: string | null) => void;
+  setSimplePaths: (enabled: boolean) => void;
+  toggleSimplePaths: () => void;
 }
 
 export type UiStateStore = UiState & {

@@ -60,25 +60,25 @@ export const Node = ({
     });
   }, [connectors, modelItems, node.id]);
 
-  const focusedPortId = useUiStateStore((state) => {
-    return state.focusedPortId;
+  const focusedPortIds = useUiStateStore((state) => {
+    return state.focusedPortIds;
   });
   const itemControls = useUiStateStore((state) => {
     return state.itemControls;
   });
   const selectedItemId =
     itemControls?.type === 'ITEM' ? itemControls.id : null;
-  const nodeFocusedPortId =
-    selectedItemId === node.id ? focusedPortId : null;
+  const nodeFocusedPortIds =
+    selectedItemId === node.id ? focusedPortIds : null;
 
   const peerHighlightPortIds = useMemo(() => {
     return getPeerHighlightedPortIdsForItem({
       itemId: node.id,
       selectedItemId,
-      focusedPortId: selectedItemId ? focusedPortId : null,
+      focusedPortIds: selectedItemId ? focusedPortIds : null,
       connectors
     });
-  }, [node.id, selectedItemId, focusedPortId, connectors]);
+  }, [node.id, selectedItemId, focusedPortIds, connectors]);
 
   const { iconComponent } = useIcon(
     modelItem.icon,
@@ -87,7 +87,7 @@ export const Node = ({
     connectedPortIds,
     modelItem.color,
     mismatchPortIds,
-    nodeFocusedPortId,
+    nodeFocusedPortIds,
     modelItem.svis,
     modelItem.rackUnits,
     node.id,

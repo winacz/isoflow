@@ -251,7 +251,9 @@ export const layoutShape2dItems = ({
 
 type TidyConnector = {
   id: string;
-  anchors: { ref: { item?: string; port?: string } }[];
+  anchors: {
+    ref: { item?: string; port?: string; tile?: Coords };
+  }[];
 };
 
 type LeafAssignment = {
@@ -262,47 +264,58 @@ type LeafAssignment = {
   side: 'TOP' | 'BOTTOM';
 };
 
-/**
- * "Porządkuj": keep switches anchored, re-seat their cabled leaf nodes (PCs)
- * in rows above/below the switch, ordered left-to-right to match the switch
- * port order. Cables then run in parallel without crossing.
- * Returns new top-left tiles for moved leaves only.
- */
-export const tidyShape2dItems = ({
-  selectedItems,
-  allItems,
-  modelItems,
+type TidyEdgeEndpoint = {
+  itemId: string;
+  /** Port offset from the item's top-left, if the cable is port-attached. */
+  portLocal: Coords | null;
+};
+
+type TidyEdge = {
+  a: TidyEdgeEndpoint;
+  b: TidyEdgeEndpoint;
+};
+
+const orientation = (p: Coords, q: Coords, r: Coords) => {
+  const value = (q.y - p.y) * (r.x - q.x) - (q.x - p.x) * (r.y - q.y);
+  if (value === 0) return 0;
+  return value > 0 ? 1 : 2;
+};
+
+const onSegment = (p: Coords, q: Coords, r: Coords) => {
+  return (
+    q.x <= Math.max(p.x, r.x) &&
+    q.x >= Math.min(p.x, r.x) &&
+    q.y <= Math.max(p.y, r.y) &&
+    q.y >= Math.min(p.y, r.y)
+  );
+};
+
+/** Straight-segment intersection (RJ45↔RJ45 crossing estimate — no pathfinding). */
+const segmentsIntersect = (a1: Coords, a2: Coords, b1: Coords, b2: Coords) => {
+  const o1 = orientation(a1, a2, b1);
+  const o2 = orientation(a1, a2, b2);
+  const o3 = orientation(b1, b2, a1);
+  const o4 = orientation(b1, b2, a2);
+
+  if (o1 !== o2 && o3 !== o4) return true;
+  if (o1 === 0 && onSegment(a1, b1, a2)) return true;
+  if (o2 === 0 && onSegment(a1, b2, a2)) return true;
+  if (o3 === 0 && onSegment(b1, a1, b2)) return true;
+  if (o4 === 0 && onSegment(b1, a2, b2)) return true;
+
+  return false;
+};
+
+const collectTidyEdges = ({
   connectors,
-  gap = SHAPE_2D_LAYOUT_GAP
+  selectedIds,
+  iconById
 }: {
-  selectedItems: ViewItem[];
-  allItems: ViewItem[];
-  modelItems: { id: string; icon?: string }[];
   connectors: TidyConnector[];
-  gap?: number;
-}): Record<string, Coords> => {
-  const selectedIds = new Set(
-    selectedItems.map((item) => {
-      return item.id;
-    })
-  );
-  const itemById = new Map(
-    allItems.map((item) => {
-      return [item.id, item] as const;
-    })
-  );
-  const iconById = new Map(
-    modelItems.map((item) => {
-      return [item.id, item.icon] as const;
-    })
-  );
-
-  const isSwitch = (id: string) => {
-    return iconById.get(id) === SHAPE_2D_SWITCH_ID;
-  };
-
-  // Collect leaf → switch assignments from cables (first cable wins per leaf).
-  const assignments = new Map<string, LeafAssignment>();
+  selectedIds: Set<string>;
+  iconById: Map<string, string | undefined>;
+}): TidyEdge[] => {
+  const edges: TidyEdge[] = [];
 
   connectors.forEach((connector) => {
     const endpointAnchors = connector.anchors.filter((anchor) => {
@@ -312,132 +325,279 @@ export const tidyShape2dItems = ({
 
     const first = endpointAnchors[0];
     const last = endpointAnchors[endpointAnchors.length - 1];
+    if (!first.ref.item || !last.ref.item) return;
+    if (first.ref.item === last.ref.item) return;
+    if (!selectedIds.has(first.ref.item) && !selectedIds.has(last.ref.item)) {
+      return;
+    }
 
-    const firstIsSwitch = Boolean(first.ref.item && isSwitch(first.ref.item));
-    const lastIsSwitch = Boolean(last.ref.item && isSwitch(last.ref.item));
+    const toEndpoint = (anchor: typeof first): TidyEdgeEndpoint => {
+      const itemId = anchor.ref.item!;
+      const port = getShape2dPorts(iconById.get(itemId) ?? '').find(
+        (candidate) => {
+          return candidate.id === anchor.ref.port;
+        }
+      );
 
-    if (firstIsSwitch === lastIsSwitch) return;
+      return {
+        itemId,
+        portLocal: port ? { ...port.tile } : null
+      };
+    };
 
-    const switchAnchor = firstIsSwitch ? first : last;
-    const leafAnchor = firstIsSwitch ? last : first;
+    edges.push({ a: toEndpoint(first), b: toEndpoint(last) });
+  });
 
-    if (!switchAnchor.ref.item || !leafAnchor.ref.item) return;
+  return edges;
+};
 
-    const leafId = leafAnchor.ref.item;
-    const switchId = switchAnchor.ref.item;
+/**
+ * "Porządkuj": only permute selected nodes among their existing slots
+ * (same footprint). Never invents new positions — so repeated clicks cannot
+ * stack nodes.
+ *
+ * 1) Leaves of the same switch: assign slots by X to switch-port order
+ *    (uncross the star using only current positions as slots).
+ * 2) Same-footprint 2-opt swaps to cut any remaining straight-line crossings.
+ */
+export const tidyShape2dItems = ({
+  selectedItems,
+  allItems,
+  modelItems,
+  connectors
+}: {
+  selectedItems: ViewItem[];
+  allItems: ViewItem[];
+  modelItems: { id: string; icon?: string }[];
+  connectors: TidyConnector[];
+  gap?: number;
+}): Record<string, Coords> => {
+  if (selectedItems.length < 2) return {};
 
-    // Only re-seat leaves that are selected; the switch anchors the layout.
+  const selectedIds = new Set(
+    selectedItems.map((item) => {
+      return item.id;
+    })
+  );
+  const iconById = new Map(
+    modelItems.map((item) => {
+      return [item.id, item.icon] as const;
+    })
+  );
+
+  const sizeOf = (id: string): Size => {
+    return (
+      getShape2dSize(iconById.get(id) ?? '') ?? { width: 1, height: 1 }
+    );
+  };
+
+  const isSwitch = (id: string) => {
+    return iconById.get(id) === SHAPE_2D_SWITCH_ID;
+  };
+
+  const edges = collectTidyEdges({ connectors, selectedIds, iconById });
+  if (edges.length === 0) return {};
+
+  // Working tile map — only swap among current slots of selected nodes.
+  const tiles = new Map<string, Coords>();
+  allItems.forEach((item) => {
+    tiles.set(item.id, { ...item.tile });
+  });
+
+  // --- Phase 1: uncross switch stars by reassigning existing leaf slots ---
+  type LeafLink = {
+    leafId: string;
+    switchId: string;
+    portWorldX: number;
+    sizeKey: string;
+  };
+
+  const leafLinks: LeafLink[] = [];
+  connectors.forEach((connector) => {
+    const ends = connector.anchors.filter((anchor) => {
+      return Boolean(anchor.ref.item);
+    });
+    if (ends.length < 2) return;
+    const first = ends[0];
+    const last = ends[ends.length - 1];
+    if (!first.ref.item || !last.ref.item) return;
+
+    const firstSwitch = isSwitch(first.ref.item);
+    const lastSwitch = isSwitch(last.ref.item);
+    if (firstSwitch === lastSwitch) return;
+
+    const switchAnchor = firstSwitch ? first : last;
+    const leafAnchor = firstSwitch ? last : first;
+    const leafId = leafAnchor.ref.item!;
+    const switchId = switchAnchor.ref.item!;
     if (!selectedIds.has(leafId)) return;
-    if (assignments.has(leafId)) return;
+    if (leafLinks.some((link) => link.leafId === leafId)) return;
 
-    const switchItem = itemById.get(switchId);
+    const switchItem = allItems.find((item) => item.id === switchId);
     if (!switchItem) return;
-
     const ports = getShape2dPorts(iconById.get(switchId) ?? '');
     const port = ports.find((candidate) => {
       return candidate.id === switchAnchor.ref.port;
     });
-    if (!port || (port.side !== 'TOP' && port.side !== 'BOTTOM')) return;
+    if (!port) return;
 
-    assignments.set(leafId, {
+    const switchTile = tiles.get(switchId) ?? switchItem.tile;
+    const size = sizeOf(leafId);
+    leafLinks.push({
       leafId,
       switchId,
-      portWorldX: switchItem.tile.x + port.tile.x,
-      side: port.side
+      portWorldX: switchTile.x + port.tile.x,
+      sizeKey: `${size.width}x${size.height}`
     });
   });
 
-  if (assignments.size === 0) return {};
-
-  // Group per switch and side.
-  const groups = new Map<string, LeafAssignment[]>();
-  assignments.forEach((assignment) => {
-    const key = `${assignment.switchId}:${assignment.side}`;
-    const group = groups.get(key) ?? [];
-    group.push(assignment);
-    groups.set(key, group);
+  // Group by switch + footprint so we only swap compatible slots.
+  const starGroups = new Map<string, LeafLink[]>();
+  leafLinks.forEach((link) => {
+    const key = `${link.switchId}::${link.sizeKey}`;
+    const group = starGroups.get(key) ?? [];
+    group.push(link);
+    starGroups.set(key, group);
   });
 
-  const targets: Record<string, Coords> = {};
-  const movedIds = [...assignments.keys()];
-  // Moved leaves are excluded from collision tests (they are being re-seated).
-  const excludeItemIds = [...new Set([...selectedIds, ...movedIds])];
+  starGroups.forEach((group) => {
+    if (group.length < 2) return;
 
-  groups.forEach((group, key) => {
-    const [switchId, side] = key.split(':') as [string, 'TOP' | 'BOTTOM'];
-    const switchItem = itemById.get(switchId);
-    if (!switchItem) return;
+    // Existing slots (current leaf tiles), ordered left→right.
+    const slots = group
+      .map((link) => {
+        return { ...tiles.get(link.leafId)! };
+      })
+      .sort((a, b) => {
+        if (a.x !== b.x) return a.x - b.x;
+        return a.y - b.y;
+      });
 
-    const switchSize = getShape2dSize(iconById.get(switchId) ?? '') ?? {
-      width: 1,
-      height: 1
+    // Leaves ordered by the switch port they connect to.
+    const orderedLeaves = [...group].sort((a, b) => {
+      if (a.portWorldX !== b.portWorldX) return a.portWorldX - b.portWorldX;
+      return a.leafId.localeCompare(b.leafId);
+    });
+
+    orderedLeaves.forEach((link, index) => {
+      tiles.set(link.leafId, { ...slots[index] });
+    });
+  });
+
+  // --- Phase 2: 2-opt same-size swaps for remaining crossings ---
+  if (edges.length > 0 && selectedItems.length >= 2) {
+    const pointFor = (endpoint: TidyEdgeEndpoint): Coords | null => {
+      const tile = tiles.get(endpoint.itemId);
+      if (!tile) return null;
+
+      if (endpoint.portLocal) {
+        return {
+          x: tile.x + endpoint.portLocal.x,
+          y: tile.y + endpoint.portLocal.y
+        };
+      }
+
+      const size = sizeOf(endpoint.itemId);
+      return {
+        x: tile.x + size.width / 2,
+        y: tile.y + size.height / 2
+      };
     };
 
-    // Order leaves to match the switch port order (left → right).
-    const ordered = [...group].sort((a, b) => {
-      if (a.portWorldX !== b.portWorldX) return a.portWorldX - b.portWorldX;
-      const tileA = itemById.get(a.leafId)?.tile.x ?? 0;
-      const tileB = itemById.get(b.leafId)?.tile.x ?? 0;
-      return tileA - tileB;
-    });
+    const totalWireLength = () => {
+      return edges.reduce((sum, edge) => {
+        const pa = pointFor(edge.a);
+        const pb = pointFor(edge.b);
+        if (!pa || !pb) return sum;
+        return sum + Math.abs(pa.x - pb.x) + Math.abs(pa.y - pb.y);
+      }, 0);
+    };
 
-    const footprints = ordered.map((assignment) => {
-      const viewItem = itemById.get(assignment.leafId)!;
-      return getFootprint(viewItem, modelItems);
-    });
-
-    const rowWidth =
-      footprints.reduce((sum, footprint) => {
-        return sum + footprint.width;
-      }, 0) +
-      gap * (footprints.length - 1);
-
-    const rowHeight = Math.max(
-      ...footprints.map((footprint) => {
-        return footprint.height;
-      })
-    );
-
-    // Center the row on the switch.
-    const startX =
-      switchItem.tile.x + Math.round((switchSize.width - rowWidth) / 2);
-
-    const baseY =
-      side === 'BOTTOM'
-        ? switchItem.tile.y + switchSize.height + gap
-        : switchItem.tile.y - gap - rowHeight;
-
-    // Nudge the row away from the switch until every slot is free.
-    const directionY = side === 'BOTTOM' ? 1 : -1;
-    const maxAttempts = 30;
-
-    for (let attempt = 0; attempt <= maxAttempts; attempt += 1) {
-      const y = baseY + directionY * attempt;
-      const candidate: Record<string, Coords> = {};
-      let x = startX;
-
-      ordered.forEach((assignment, index) => {
-        candidate[assignment.leafId] = { x, y };
-        x += footprints[index].width + gap;
-      });
-
-      const allFree = ordered.every((assignment, index) => {
-        return isShape2dPlacementFree({
-          origin: candidate[assignment.leafId],
-          size: {
-            width: footprints[index].width,
-            height: footprints[index].height
-          } as Size,
-          items: allItems,
-          modelItems,
-          excludeItemIds
+    const totalCrossings = () => {
+      const points = edges
+        .map((edge) => {
+          const pa = pointFor(edge.a);
+          const pb = pointFor(edge.b);
+          return pa && pb ? ([pa, pb] as const) : null;
+        })
+        .filter((entry): entry is readonly [Coords, Coords] => {
+          return Boolean(entry);
         });
-      });
 
-      if (allFree || attempt === maxAttempts) {
-        Object.assign(targets, candidate);
-        break;
+      let count = 0;
+      for (let i = 0; i < points.length; i += 1) {
+        for (let j = i + 1; j < points.length; j += 1) {
+          const [a1, a2] = points[i];
+          const [b1, b2] = points[j];
+          // Shared endpoint is a join, not a crossing.
+          if (
+            (a1.x === b1.x && a1.y === b1.y) ||
+            (a1.x === b2.x && a1.y === b2.y) ||
+            (a2.x === b1.x && a2.y === b1.y) ||
+            (a2.x === b2.x && a2.y === b2.y)
+          ) {
+            continue;
+          }
+          if (segmentsIntersect(a1, a2, b1, b2)) {
+            count += 1;
+          }
+        }
       }
+      return count;
+    };
+
+    const cost = () => {
+      return totalCrossings() * 10000 + totalWireLength();
+    };
+
+    const swapGroups = new Map<string, string[]>();
+    selectedItems.forEach((item) => {
+      const size = sizeOf(item.id);
+      const groupKey = `${size.width}x${size.height}`;
+      const group = swapGroups.get(groupKey) ?? [];
+      group.push(item.id);
+      swapGroups.set(groupKey, group);
+    });
+
+    let best = cost();
+    let improved = true;
+    let guard = 0;
+
+    while (improved && guard < 80) {
+      improved = false;
+      guard += 1;
+
+      swapGroups.forEach((group) => {
+        for (let i = 0; i < group.length; i += 1) {
+          for (let j = i + 1; j < group.length; j += 1) {
+            const idA = group[i];
+            const idB = group[j];
+            const tileA = tiles.get(idA)!;
+            const tileB = tiles.get(idB)!;
+
+            tiles.set(idA, tileB);
+            tiles.set(idB, tileA);
+
+            const candidate = cost();
+            if (candidate < best) {
+              best = candidate;
+              improved = true;
+            } else {
+              tiles.set(idA, tileA);
+              tiles.set(idB, tileB);
+            }
+          }
+        }
+      });
+    }
+  }
+
+  const targets: Record<string, Coords> = {};
+  selectedItems.forEach((item) => {
+    const next = tiles.get(item.id);
+    if (!next) return;
+    if (next.x !== item.tile.x || next.y !== item.tile.y) {
+      targets[item.id] = { ...next };
     }
   });
 
@@ -469,48 +629,6 @@ export const TIDY_IN_PLACE_VARIANTS: TidyInPlaceVariant[] = [
 
 /** Uniform stub length (tiles) before cables gather into a centered bundle. */
 export const GATHER_STUB_LENGTH = 5;
-
-type TidyEdgeEndpoint = {
-  itemId: string;
-  /** Port offset from the item's top-left, if the cable is port-attached. */
-  portLocal: Coords | null;
-};
-
-type TidyEdge = {
-  a: TidyEdgeEndpoint;
-  b: TidyEdgeEndpoint;
-};
-
-const orientation = (p: Coords, q: Coords, r: Coords) => {
-  const value = (q.y - p.y) * (r.x - q.x) - (q.x - p.x) * (r.y - q.y);
-  if (value === 0) return 0;
-  return value > 0 ? 1 : 2;
-};
-
-const onSegment = (p: Coords, q: Coords, r: Coords) => {
-  return (
-    q.x <= Math.max(p.x, r.x) &&
-    q.x >= Math.min(p.x, r.x) &&
-    q.y <= Math.max(p.y, r.y) &&
-    q.y >= Math.min(p.y, r.y)
-  );
-};
-
-/** Straight-segment intersection (used as a crossing estimate for cables). */
-const segmentsIntersect = (a1: Coords, a2: Coords, b1: Coords, b2: Coords) => {
-  const o1 = orientation(a1, a2, b1);
-  const o2 = orientation(a1, a2, b2);
-  const o3 = orientation(b1, b2, a1);
-  const o4 = orientation(b1, b2, a2);
-
-  if (o1 !== o2 && o3 !== o4) return true;
-  if (o1 === 0 && onSegment(a1, b1, a2)) return true;
-  if (o2 === 0 && onSegment(a1, b2, a2)) return true;
-  if (o3 === 0 && onSegment(b1, a1, b2)) return true;
-  if (o4 === 0 && onSegment(b1, a2, b2)) return true;
-
-  return false;
-};
 
 /**
  * "Porządkuj w miejscu": positions (slots) of the selected nodes stay fixed;
@@ -1395,3 +1513,430 @@ export const pickGatherDirection = ({
 
   return dx >= 0 ? 'right' : 'left';
 };
+
+const edgeKey = (a: Coords, b: Coords) => {
+  if (a.x < b.x || (a.x === b.x && a.y <= b.y)) {
+    return `${a.x},${a.y}|${b.x},${b.y}`;
+  }
+  return `${b.x},${b.y}|${a.x},${a.y}`;
+};
+
+const markPathEdges = (path: Coords[], used: Set<string>) => {
+  for (let i = 1; i < path.length; i += 1) {
+    used.add(edgeKey(path[i - 1], path[i]));
+  }
+};
+
+const pathUsesBusyEdge = (path: Coords[], used: Set<string>) => {
+  for (let i = 1; i < path.length; i += 1) {
+    if (used.has(edgeKey(path[i - 1], path[i]))) return true;
+  }
+  return false;
+};
+
+/** Orthogonal L/U fill between two tiles (inclusive). */
+const orthoFill = (from: Coords, to: Coords, horizontalFirst: boolean) => {
+  const tiles: Coords[] = [{ ...from }];
+  let x = from.x;
+  let y = from.y;
+
+  const runX = () => {
+    while (x !== to.x) {
+      x += Math.sign(to.x - x);
+      tiles.push({ x, y });
+    }
+  };
+  const runY = () => {
+    while (y !== to.y) {
+      y += Math.sign(to.y - y);
+      tiles.push({ x, y });
+    }
+  };
+
+  if (horizontalFirst) {
+    runX();
+    runY();
+  } else {
+    runY();
+    runX();
+  }
+
+  return tiles;
+};
+
+/** Bend corners only (drop collinear mids) — used as connector waypoints. */
+const pathBendWaypoints = (path: Coords[]): Coords[] => {
+  if (path.length < 3) return [];
+
+  const bends: Coords[] = [];
+  for (let i = 1; i < path.length - 1; i += 1) {
+    const prev = path[i - 1];
+    const cur = path[i];
+    const next = path[i + 1];
+    const inDx = Math.sign(cur.x - prev.x);
+    const inDy = Math.sign(cur.y - prev.y);
+    const outDx = Math.sign(next.x - cur.x);
+    const outDy = Math.sign(next.y - cur.y);
+    if (inDx !== outDx || inDy !== outDy) {
+      bends.push({ ...cur });
+    }
+  }
+  return bends;
+};
+
+/** Polyline through connector anchors (ports resolved via item tiles when possible). */
+const connectorAnchorPolyline = (
+  connector: TidyConnector,
+  itemById: Map<string, ViewItem>,
+  iconById: Map<string, string | undefined>
+): Coords[] => {
+  const points: Coords[] = [];
+  connector.anchors.forEach((anchor) => {
+    if (anchor.ref.tile) {
+      points.push({ ...anchor.ref.tile });
+      return;
+    }
+    if (!anchor.ref.item) return;
+    const item = itemById.get(anchor.ref.item);
+    if (!item) return;
+    if (anchor.ref.port) {
+      const port = getShape2dPorts(iconById.get(anchor.ref.item) ?? '').find(
+        (candidate) => {
+          return candidate.id === anchor.ref.port;
+        }
+      );
+      if (port) {
+        points.push({
+          x: item.tile.x + port.tile.x,
+          y: item.tile.y + port.tile.y
+        });
+        return;
+      }
+    }
+    points.push({ ...item.tile });
+  });
+  return cleanRouteTiles(points);
+};
+
+/**
+ * Perpendicular distance from point P to the infinite diagonal line through
+ * origin with direction (sx, sy) where |sx|=|sy|=1.
+ */
+const perpDistToDiagonal = (
+  origin: Coords,
+  sx: number,
+  sy: number,
+  point: Coords
+) => {
+  // Line: (origin) + t*(sx,sy). Distance = |cross| / sqrt(2)
+  const dx = point.x - origin.x;
+  const dy = point.y - origin.y;
+  return Math.abs(dx * sy - dy * sx) / Math.SQRT2;
+};
+
+/**
+ * "Mój algorytm": from the hub (switch / other side), leave on a diagonal
+ * toward the selected leaves, connect nearest-to-diagonal leaf first, then
+ * the next, etc. Paths share no grid edges (no overlapping lines).
+ *
+ * Returns mid waypoints per connector, ordered from the connector's FIRST
+ * endpoint anchor to its LAST.
+ */
+export const diagonalFanShape2dRoutes = ({
+  selectedItems,
+  allItems,
+  modelItems,
+  connectors
+}: {
+  selectedItems: ViewItem[];
+  allItems: ViewItem[];
+  modelItems: { id: string; icon?: string }[];
+  connectors: TidyConnector[];
+}): Record<string, Coords[]> => {
+  const selectedIds = new Set(
+    selectedItems.map((item) => {
+      return item.id;
+    })
+  );
+  const itemById = new Map(
+    allItems.map((item) => {
+      return [item.id, item] as const;
+    })
+  );
+  const iconById = new Map(
+    modelItems.map((item) => {
+      return [item.id, item.icon] as const;
+    })
+  );
+
+  const isSwitch = (id: string) => {
+    return iconById.get(id) === SHAPE_2D_SWITCH_ID;
+  };
+
+  type FanCable = {
+    connectorId: string;
+    /** True when connector's first endpoint is the leaf. */
+    leafFirst: boolean;
+    leafId: string;
+    hubId: string;
+    leafPort: Coords;
+    hubPort: Coords;
+  };
+
+  const cables: FanCable[] = [];
+
+  connectors.forEach((connector) => {
+    const ends = connector.anchors.filter((anchor) => {
+      return Boolean(anchor.ref.item);
+    });
+    if (ends.length < 2) return;
+
+    const first = ends[0];
+    const last = ends[ends.length - 1];
+    if (!first.ref.item || !last.ref.item) return;
+    if (first.ref.item === last.ref.item) return;
+
+    const a = first.ref.item;
+    const b = last.ref.item;
+    const aSel = selectedIds.has(a);
+    const bSel = selectedIds.has(b);
+
+    // Need exactly one selected leaf (or prefer switch as hub).
+    let hubId: string;
+    let leafId: string;
+    let hubAnchor = first;
+    let leafAnchor = last;
+    let leafFirst = false;
+
+    if (isSwitch(a) !== isSwitch(b)) {
+      if (isSwitch(a)) {
+        hubId = a;
+        leafId = b;
+        hubAnchor = first;
+        leafAnchor = last;
+        leafFirst = false;
+      } else {
+        hubId = b;
+        leafId = a;
+        hubAnchor = last;
+        leafAnchor = first;
+        leafFirst = true;
+      }
+      if (!selectedIds.has(leafId)) return;
+    } else if (aSel !== bSel) {
+      // Non-switch hub: the non-selected side.
+      if (aSel) {
+        leafId = a;
+        hubId = b;
+        leafAnchor = first;
+        hubAnchor = last;
+        leafFirst = true;
+      } else {
+        leafId = b;
+        hubId = a;
+        leafAnchor = last;
+        hubAnchor = first;
+        leafFirst = false;
+      }
+    } else {
+      return;
+    }
+
+    const leafItem = itemById.get(leafId);
+    const hubItem = itemById.get(hubId);
+    if (!leafItem || !hubItem) return;
+
+    const leafPortDef = getShape2dPorts(iconById.get(leafId) ?? '').find(
+      (candidate) => {
+        return candidate.id === leafAnchor.ref.port;
+      }
+    );
+    const hubPortDef = getShape2dPorts(iconById.get(hubId) ?? '').find(
+      (candidate) => {
+        return candidate.id === hubAnchor.ref.port;
+      }
+    );
+
+    const leafPort = leafPortDef
+      ? {
+          x: leafItem.tile.x + leafPortDef.tile.x,
+          y: leafItem.tile.y + leafPortDef.tile.y
+        }
+      : {
+          x: leafItem.tile.x,
+          y: leafItem.tile.y
+        };
+
+    const hubPort = hubPortDef
+      ? {
+          x: hubItem.tile.x + hubPortDef.tile.x,
+          y: hubItem.tile.y + hubPortDef.tile.y
+        }
+      : {
+          x: hubItem.tile.x,
+          y: hubItem.tile.y
+        };
+
+    cables.push({
+      connectorId: connector.id,
+      leafFirst,
+      leafId,
+      hubId,
+      leafPort,
+      hubPort
+    });
+  });
+
+  if (cables.length === 0) return {};
+
+  const groups = new Map<string, FanCable[]>();
+  cables.forEach((cable) => {
+    const list = groups.get(cable.hubId) ?? [];
+    list.push(cable);
+    groups.set(cable.hubId, list);
+  });
+
+  const routes: Record<string, Coords[]> = {};
+  const usedEdges = new Set<string>();
+
+  // Respect waypoints already on the diagram (other cables / prior runs).
+  const rerouteIds = new Set(
+    cables.map((cable) => {
+      return cable.connectorId;
+    })
+  );
+  connectors.forEach((connector) => {
+    if (rerouteIds.has(connector.id)) return;
+    const poly = connectorAnchorPolyline(connector, itemById, iconById);
+    markPathEdges(poly, usedEdges);
+  });
+
+  groups.forEach((group, hubId) => {
+    const hubItem = itemById.get(hubId);
+    if (!hubItem) return;
+
+    const hubSize = getShape2dSize(iconById.get(hubId) ?? '') ?? {
+      width: 1,
+      height: 1
+    };
+    const hubCenter = {
+      x: hubItem.tile.x + hubSize.width / 2,
+      y: hubItem.tile.y + hubSize.height / 2
+    };
+
+    let leafCx = 0;
+    let leafCy = 0;
+    group.forEach((cable) => {
+      leafCx += cable.leafPort.x;
+      leafCy += cable.leafPort.y;
+    });
+    leafCx /= group.length;
+    leafCy /= group.length;
+
+    // Diagonal toward the leaf cluster ("na skos").
+    let sx = Math.sign(leafCx - hubCenter.x);
+    let sy = Math.sign(leafCy - hubCenter.y);
+    if (sx === 0) sx = leafCx >= hubCenter.x ? 1 : -1;
+    if (sy === 0) sy = leafCy >= hubCenter.y ? 1 : -1;
+
+    // Connect closest-to-hub first, then farther leaves.
+    // Lane stacking puts later (farther) cables BELOW closer ones.
+    const remaining = [...group];
+    const ordered: FanCable[] = [];
+
+    while (remaining.length > 0) {
+      let bestIndex = 0;
+      let bestScore = Number.POSITIVE_INFINITY;
+
+      remaining.forEach((cable, index) => {
+        const manh =
+          Math.abs(cable.leafPort.x - cable.hubPort.x) +
+          Math.abs(cable.leafPort.y - cable.hubPort.y);
+        const perp = perpDistToDiagonal(cable.hubPort, sx, sy, cable.leafPort);
+        // Prefer nearer ports first; break ties by diagonal proximity.
+        const score = manh * 1000 + perp;
+        if (score < bestScore) {
+          bestScore = score;
+          bestIndex = index;
+        }
+      });
+
+      ordered.push(remaining[bestIndex]);
+      remaining.splice(bestIndex, 1);
+    }
+
+    // Stack bus rows toward the hub, so the diagonal lands on the lane row
+    // BEFORE the leaf port; the final stub then runs away from the hub into
+    // the port (no overshoot / "leci wyżej i wraca").
+    const laneDirY = Math.sign(hubCenter.y - leafCy) || 1;
+
+    /**
+     * Route hub→leaf with the long horizontal "magistrala" on the leaf-side
+     * lane row (leaf.y + laneDirY * k). Lane 0 stays on the port row → straight
+     * horizontal into the node. Higher lanes ride a parallel row and reach the
+     * port with a short vertical stub → cables never stack near the nodes.
+     */
+    const buildLaneRoute = (cable: FanCable, k: number): Coords[] => {
+      const start = { ...cable.hubPort };
+      const end = { ...cable.leafPort };
+      const laneY = end.y + laneDirY * k;
+
+      const path: Coords[] = [{ ...start }];
+      let cur = { ...start };
+
+      // Diagonal toward (leaf column, lane row).
+      let guard = 0;
+      while (guard < 800 && cur.x !== end.x && cur.y !== laneY) {
+        guard += 1;
+        cur = {
+          x: cur.x + Math.sign(end.x - cur.x),
+          y: cur.y + Math.sign(laneY - cur.y)
+        };
+        path.push({ ...cur });
+      }
+      // Straighten onto the lane row.
+      while (cur.y !== laneY) {
+        cur = { x: cur.x, y: cur.y + Math.sign(laneY - cur.y) };
+        path.push({ ...cur });
+      }
+      // Horizontal magistrala along the lane row to the leaf column.
+      while (cur.x !== end.x) {
+        cur = { x: cur.x + Math.sign(end.x - cur.x), y: cur.y };
+        path.push({ ...cur });
+      }
+      // Short stub into the leaf port (none for lane 0).
+      while (cur.y !== end.y) {
+        cur = { x: cur.x, y: cur.y + Math.sign(end.y - cur.y) };
+        path.push({ ...cur });
+      }
+
+      return cleanRouteTiles(path);
+    };
+
+    ordered.forEach((cable, orderIndex) => {
+      // Nearest-to-hub keeps lane 0 (straight to port); farther cables stack.
+      let path = buildLaneRoute(cable, orderIndex);
+
+      // Deterministic lanes rarely collide, but bump the offset if they do.
+      if (pathUsesBusyEdge(path, usedEdges)) {
+        for (let extra = 1; extra <= group.length + 2; extra += 1) {
+          const candidate = buildLaneRoute(cable, orderIndex + extra);
+          if (!pathUsesBusyEdge(candidate, usedEdges)) {
+            path = candidate;
+            break;
+          }
+        }
+      }
+
+      markPathEdges(path, usedEdges);
+
+      const bends = pathBendWaypoints(path);
+      routes[cable.connectorId] = cable.leafFirst
+        ? [...bends].reverse()
+        : bends;
+    });
+  });
+
+  return routes;
+};
+

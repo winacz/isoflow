@@ -1,7 +1,7 @@
 import { ConnectorAnchor, Coords, View } from 'src/types';
 import { getShape2dSize } from 'src/config';
 import { getAnchorTile, isTileInShape2dBounds } from './renderer';
-import { untangleAnchorHairpins } from './connectorSegments';
+import { isLockedTileWaypoint } from './connectorBendWaypoints';
 
 type ModelItemRef = { id: string; icon?: string };
 
@@ -17,9 +17,10 @@ const isReverseStub = (from: Coords, mid: Coords, to: Coords) => {
 };
 
 /**
- * After a device moves, keep middle tile waypoints so cable shape is preserved
- * (horizontals shorten at the moving port). Only drop WPs that would cause
- * spaghetti: inside the moved footprint, or a reverse stub next to a port.
+ * After a device moves, keep middle tile waypoints so cable shape beyond the
+ * nearest via is preserved. Only drop WPs that would cause spaghetti: inside
+ * the moved footprint, or a reverse stub next to the moving port.
+ * Locked waypoints are never removed.
  */
 export const pruneAnchorsAfterNodeMove = ({
   anchors,
@@ -52,6 +53,29 @@ export const pruneAnchorsAfterNodeMove = ({
     height: 1
   };
 
+  const startIsMoved = anchors[0]?.ref.item === movedItemId;
+  const endIsMoved =
+    anchors[anchors.length - 1]?.ref.item === movedItemId;
+
+  // Index of the first mid tile WP from the moved port (the only segment
+  // that should re-route). Everything from that WP toward the other end stays.
+  let nearestMidFromMoved = -1;
+  if (startIsMoved) {
+    for (let i = 1; i < anchors.length - 1; i += 1) {
+      if (anchors[i]?.ref.tile) {
+        nearestMidFromMoved = i;
+        break;
+      }
+    }
+  } else if (endIsMoved) {
+    for (let i = anchors.length - 2; i >= 1; i -= 1) {
+      if (anchors[i]?.ref.tile) {
+        nearestMidFromMoved = i;
+        break;
+      }
+    }
+  }
+
   const positions = anchors.map((anchor) => {
     try {
       return getAnchorTile(anchor, view, modelItems);
@@ -65,8 +89,22 @@ export const pruneAnchorsAfterNodeMove = ({
       return true;
     }
 
+    if (isLockedTileWaypoint(anchor)) {
+      return true;
+    }
+
     if (!anchor.ref.tile) {
       return true;
+    }
+
+    // Free WPs beyond the nearest via (away from the moved node) stay put.
+    if (nearestMidFromMoved >= 0) {
+      if (startIsMoved && index > nearestMidFromMoved) {
+        return true;
+      }
+      if (endIsMoved && !startIsMoved && index < nearestMidFromMoved) {
+        return true;
+      }
     }
 
     if (isTileInShape2dBounds(anchor.ref.tile, movedItem.tile, size)) {
@@ -80,8 +118,16 @@ export const pruneAnchorsAfterNodeMove = ({
       return true;
     }
 
-    // Drop WP if it hairpins against either endpoint (moving port side)
-    if (isReverseStub(prev, curr, next) || isReverseStub(next, curr, prev)) {
+    // Only prune hairpins on the moved side of the nearest via.
+    const onMovedSide =
+      nearestMidFromMoved < 0 ||
+      (startIsMoved && index <= nearestMidFromMoved) ||
+      (endIsMoved && !startIsMoved && index >= nearestMidFromMoved);
+
+    if (
+      onMovedSide &&
+      (isReverseStub(prev, curr, next) || isReverseStub(next, curr, prev))
+    ) {
       return false;
     }
 
@@ -92,5 +138,5 @@ export const pruneAnchorsAfterNodeMove = ({
     return [anchors[0], anchors[anchors.length - 1]];
   }
 
-  return untangleAnchorHairpins(kept, view, modelItems);
+  return kept;
 };

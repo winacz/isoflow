@@ -6,8 +6,7 @@ import {
   findConnectorJumpsById,
   findConnectorStackBadges,
   getConnectorGlobalTiles,
-  getStackFanOffsetsPx,
-  CoordsUtils
+  getStackFanOffsetsPx
 } from 'src/utils';
 import { TILE_SIZE_2D } from 'src/config';
 import { Connector } from './Connector';
@@ -52,8 +51,8 @@ export const Connectors = ({ connectors }: Props) => {
   const projectionMode = useUiStateStore((state) => {
     return state.projectionMode;
   });
-  const focusedPortId = useUiStateStore((state) => {
-    return state.focusedPortId;
+  const focusedPortIds = useUiStateStore((state) => {
+    return state.focusedPortIds;
   });
 
   const activeStackKey = useStackFanStore(getActiveStackKey);
@@ -79,12 +78,11 @@ export const Connectors = ({ connectors }: Props) => {
     selectedConnectorId || (projectionMode === 'TWO_D' && selectedItemId)
   );
   const softDim = mode.type === 'DRAG_ITEMS';
-  const mouseTile = useUiStateStore((state) => {
-    return state.mouse.position.tile;
-  });
 
   const pathInputs = useMemo(() => {
     if (projectionMode !== 'TWO_D') return [];
+    // Jump detection is O(cables²×segments) — skip during drag.
+    if (softDim) return [];
 
     return connectors.map((connector) => {
       return {
@@ -92,37 +90,13 @@ export const Connectors = ({ connectors }: Props) => {
         tiles: getConnectorGlobalTiles(connector)
       };
     });
-  }, [connectors, projectionMode]);
-
-  /** Popup only for the active (selected) cable while the cursor is on its path. */
-  const hoverPopupConnectorId = useMemo(() => {
-    if (projectionMode !== 'TWO_D') return null;
-    if (!selectedConnectorId) return null;
-    if (mode.type === 'DRAG_ITEMS') return null;
-
-    const selected = pathInputs.find((entry) => {
-      return entry.id === selectedConnectorId;
-    });
-    if (!selected) return null;
-
-    const onPath = selected.tiles.some((tile) => {
-      return CoordsUtils.isEqual(tile, mouseTile);
-    });
-
-    return onPath ? selectedConnectorId : null;
-  }, [
-    projectionMode,
-    selectedConnectorId,
-    mode.type,
-    pathInputs,
-    mouseTile
-  ]);
+  }, [connectors, projectionMode, softDim]);
 
   const jumpsByConnectorId = useMemo(() => {
-    if (projectionMode !== 'TWO_D') return {};
+    if (projectionMode !== 'TWO_D' || softDim) return {};
 
     return findConnectorJumpsById(pathInputs);
-  }, [pathInputs, projectionMode]);
+  }, [pathInputs, projectionMode, softDim]);
 
   const fanOffsets = useMemo(() => {
     if (projectionMode !== 'TWO_D' || !activeStackKey) return {};
@@ -146,8 +120,14 @@ export const Connectors = ({ connectors }: Props) => {
         const isSelected = selectedConnectorId === connector.id;
         const isRelatedToItem = Boolean(
           selectedItemId &&
-            (focusedPortId
-              ? connectorUsesPort(connector, selectedItemId, focusedPortId)
+            (focusedPortIds.length > 0
+              ? focusedPortIds.some((portId) => {
+                  return connectorUsesPort(
+                    connector,
+                    selectedItemId,
+                    portId
+                  );
+                })
               : connectorTouchesItem(connector, selectedItemId))
         );
         const offset = fanOffsets[connector.id];
@@ -173,7 +153,6 @@ export const Connectors = ({ connectors }: Props) => {
               isDimmed={isDimmed}
               softDim={softDim}
               visualOffset={offset}
-              showHoverPopup={hoverPopupConnectorId === connector.id}
             />
           );
         }

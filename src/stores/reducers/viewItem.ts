@@ -31,8 +31,10 @@ export const updateViewItem = (
       );
 
       const connectors = draft.model.views[view.index].connectors;
+
       if (connectors) {
-        // Node drag: drop middle WPs and re-route endpoints only.
+        // Drop free mid WPs while dragging — cable follows the node freely
+        // (locked vias stay). Mouseup rebuilds the final route.
         connectorsToUpdate.forEach((connector) => {
           const entry = getItemByIdOrThrow(connectors, connector.id);
           connectors[entry.index] = {
@@ -42,31 +44,17 @@ export const updateViewItem = (
         });
       }
 
-      // Rebuild paths from endpoints only (ignore old WPs while dragging).
-      // Bend waypoints are rematerialized on drag mouseup.
-      let updatedConnectors = connectorsToUpdate.reduce((acc, connector) => {
+      // Preview path only while dragging; mouseup rebuilds final A*.
+      const updatedConnectors = connectorsToUpdate.reduce((acc, connector) => {
         return syncConnector(
           connector.id,
           { viewId, state: acc },
           {
             overlapResolve: 'off',
-            ignoreWaypoints: true,
-            materializeBends: false
+            fastPath: true
           }
         );
       }, draft);
-
-      updatedConnectors = connectorsToUpdate.reduce((acc, connector) => {
-        return syncConnector(
-          connector.id,
-          { viewId, state: acc },
-          {
-            overlapResolve: 'off',
-            ignoreWaypoints: true,
-            materializeBends: false
-          }
-        );
-      }, updatedConnectors);
 
       draft.model.views[view.index].connectors =
         updatedConnectors.model.views[view.index].connectors;
@@ -75,11 +63,15 @@ export const updateViewItem = (
     }
   });
 
-  const newView = getItemByIdOrThrow(newState.model.views, viewId);
-  const issues = validateView(newView.value, { model: newState.model });
+  // Tile drags re-sync connectors every frame — skip full-view validation
+  // (O(connectors) per move). Still validate on structural updates.
+  if (!updates.tile || Object.keys(updates).some((key) => key !== 'tile' && key !== 'id')) {
+    const newView = getItemByIdOrThrow(newState.model.views, viewId);
+    const issues = validateView(newView.value, { model: newState.model });
 
-  if (issues.length > 0) {
-    throw new Error(issues[0].message);
+    if (issues.length > 0) {
+      throw new Error(issues[0].message);
+    }
   }
 
   return newState;

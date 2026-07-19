@@ -27,6 +27,17 @@ export const getOrthogonalHint = () => {
   return orthogonalHint;
 };
 
+/** When true, cables are straight port↔port previews (no A* / mid waypoints). */
+let simplePathsEnabled = false;
+
+export const setSimplePathsEnabled = (enabled: boolean) => {
+  simplePathsEnabled = enabled;
+};
+
+export const isSimplePathsEnabled = () => {
+  return simplePathsEnabled;
+};
+
 /** Lock a tile to horizontal or vertical movement from `origin`. */
 export const axisLockTile = (tile: Coords, origin: Coords): Coords => {
   const dx = Math.abs(tile.x - origin.x);

@@ -1,5 +1,5 @@
 import React, { useMemo } from 'react';
-import { Coords, AnchorPosition } from 'src/types';
+import { Coords, AnchorPosition, TileOrigin } from 'src/types';
 import { Svg } from 'src/components/Svg/Svg';
 import { TRANSFORM_CONTROLS_COLOR } from 'src/config';
 import { useIsoProjection } from 'src/hooks/useIsoProjection';
@@ -19,6 +19,13 @@ interface Props {
 
 const strokeWidth = 2;
 
+const EDGE_ORIGINS: Record<'TOP' | 'BOTTOM' | 'LEFT' | 'RIGHT', TileOrigin> = {
+  TOP: 'TOP',
+  BOTTOM: 'BOTTOM',
+  LEFT: 'LEFT',
+  RIGHT: 'RIGHT'
+};
+
 export const TransformControls = ({ from, to, onAnchorMouseDown }: Props) => {
   const { css, pxSize } = useIsoProjection({
     from,
@@ -37,19 +44,44 @@ export const TransformControls = ({ from, to, onAnchorMouseDown }: Props) => {
       'TOP_LEFT'
     ];
 
-    return cornerKeys.map((key, i) => {
+    const cornerAnchors = cornerKeys.map((key, i) => {
       const position = getTilePosition({
         tile: namedCorners[key],
         origin: outermostCornerPositions[i]
       });
 
       return {
+        key,
         position,
         onMouseDown: () => {
           onAnchorMouseDown(key);
         }
       };
     });
+
+    const edgeKeys: Array<'TOP' | 'BOTTOM' | 'LEFT' | 'RIGHT'> = [
+      'TOP',
+      'BOTTOM',
+      'LEFT',
+      'RIGHT'
+    ];
+
+    const edgeAnchors = edgeKeys.map((key) => {
+      const position = getTilePosition({
+        tile: namedCorners[key],
+        origin: EDGE_ORIGINS[key]
+      });
+
+      return {
+        key,
+        position,
+        onMouseDown: () => {
+          onAnchorMouseDown(key);
+        }
+      };
+    });
+
+    return [...cornerAnchors, ...edgeAnchors];
   }, [onAnchorMouseDown, from, to]);
 
   return (
@@ -73,9 +105,13 @@ export const TransformControls = ({ from, to, onAnchorMouseDown }: Props) => {
         </g>
       </Svg>
 
-      {anchors.map(({ position, onMouseDown }) => {
+      {anchors.map(({ key, position, onMouseDown }) => {
         return (
-          <TransformAnchor position={position} onMouseDown={onMouseDown} />
+          <TransformAnchor
+            key={key}
+            position={position}
+            onMouseDown={onMouseDown}
+          />
         );
       })}
     </>

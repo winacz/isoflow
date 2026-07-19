@@ -315,10 +315,86 @@ export type ConnectorPathStyleRun = {
   throughNode: boolean;
 };
 
+/** Entry/exit points where segment a→b tunnels through foreign rects (t ∈ (0,1)). */
+const segmentTunnelEdges = (
+  a: Coords,
+  b: Coords,
+  rects: Shape2dRect[]
+): Coords[] => {
+  const hits: { t: number; point: Coords }[] = [];
+  const eps = 1e-9;
+
+  rects.forEach((rect) => {
+    if (isPointInRect(a, rect) || isPointInRect(b, rect)) return;
+
+    const edgeHits: { t: number; point: Coords }[] = [];
+    const dx = b.x - a.x;
+    const dy = b.y - a.y;
+
+    const consider = (t: number, x: number, y: number, onFace: boolean) => {
+      if (!onFace || t <= eps || t >= 1 - eps) return;
+      edgeHits.push({ t, point: { x, y } });
+    };
+
+    if (Math.abs(dx) > eps) {
+      const tLeft = (rect.minX - a.x) / dx;
+      const yLeft = a.y + tLeft * dy;
+      consider(
+        tLeft,
+        rect.minX,
+        yLeft,
+        yLeft >= rect.minY - eps && yLeft <= rect.maxY + eps
+      );
+      const tRight = (rect.maxX - a.x) / dx;
+      const yRight = a.y + tRight * dy;
+      consider(
+        tRight,
+        rect.maxX,
+        yRight,
+        yRight >= rect.minY - eps && yRight <= rect.maxY + eps
+      );
+    }
+    if (Math.abs(dy) > eps) {
+      const tTop = (rect.minY - a.y) / dy;
+      const xTop = a.x + tTop * dx;
+      consider(
+        tTop,
+        xTop,
+        rect.minY,
+        xTop >= rect.minX - eps && xTop <= rect.maxX + eps
+      );
+      const tBottom = (rect.maxY - a.y) / dy;
+      const xBottom = a.x + tBottom * dx;
+      consider(
+        tBottom,
+        xBottom,
+        rect.maxY,
+        xBottom >= rect.minX - eps && xBottom <= rect.maxX + eps
+      );
+    }
+
+    edgeHits.sort((left, right) => left.t - right.t);
+    const unique: { t: number; point: Coords }[] = [];
+    edgeHits.forEach((hit) => {
+      const prev = unique[unique.length - 1];
+      if (prev && Math.abs(prev.t - hit.t) < 1e-6) return;
+      unique.push(hit);
+    });
+
+    if (unique.length >= 2) {
+      hits.push(unique[0], unique[unique.length - 1]);
+    }
+  });
+
+  hits.sort((left, right) => left.t - right.t);
+  return hits.map((hit) => hit.point);
+};
+
 /**
  * Split a connector path into solid / through-node (dashed) runs.
  * Transition sits exactly on the device outer edge (not tile centers before/after).
  * Endpoint devices stay solid — dash only when crossing a foreign node body.
+ * Sparse A↔B previews still dash mid-segment when the chord tunnels a body.
  */
 export const splitConnectorPathByNodeBodies = ({
   tiles,
@@ -366,6 +442,24 @@ export const splitConnectorPathByNodeBodies = ({
     const nextFlag = flags[i];
     const prevCenter = tileCenter(tiles[i - 1]);
     const nextCenter = tileCenter(tiles[i]);
+
+    // Both outside — chord may still tunnel through a foreign body (sparse A↔B).
+    if (!prevFlag && !nextFlag && rects.length > 0) {
+      const edges = segmentTunnelEdges(prevCenter, nextCenter, rects);
+      if (edges.length >= 2) {
+        for (let e = 0; e + 1 < edges.length; e += 2) {
+          currentPoints.push(edges[e]);
+          flush();
+          currentThrough = true;
+          currentPoints = [edges[e], edges[e + 1]];
+          flush();
+          currentThrough = false;
+          currentPoints = [edges[e + 1]];
+        }
+        currentPoints.push(nextCenter);
+        continue;
+      }
+    }
 
     if (prevFlag === nextFlag) {
       currentPoints.push(nextCenter);
@@ -865,40 +959,109 @@ export const getConnectorPath = ({
     return getAnchorTile(anchor, view, modelItems);
   });
 
+  // Overall rectangle for path storage / rendering (covers every via).
   const searchArea = getBoundingBox(anchorPosition, CONNECTOR_SEARCH_OFFSET);
-
   const sorted = sortByPosition(searchArea);
-  const searchAreaSize = getBoundingBoxSize(searchArea);
   const rectangle = {
     from: { x: sorted.highX, y: sorted.highY },
     to: { x: sorted.lowX, y: sorted.lowY }
   };
 
-  const positionsNormalisedFromSearchArea = anchorPosition.map((position) => {
+  const toPathLocal = (global: Coords): Coords => {
     return normalisePositionFromOrigin({
+      position: global,
+      origin: rectangle.from
+    });
+  };
+
+  // Pathfind each consecutive pair in its own bbox so moving anchors on
+  // one side of a (locked) via cannot rewrite tiles on the other side.
+  const tiles = anchorPosition.reduce<Coords[]>((acc, _position, i) => {
+    if (i === 0) return acc;
+
+    const fromGlobal = anchorPosition[i - 1];
+    const toGlobal = anchorPosition[i];
+
+    const segmentArea = getBoundingBox(
+      [fromGlobal, toGlobal],
+      CONNECTOR_SEARCH_OFFSET
+    );
+    const segmentSorted = sortByPosition(segmentArea);
+    const segmentOrigin = {
+      x: segmentSorted.highX,
+      y: segmentSorted.highY
+    };
+    const segmentSize = getBoundingBoxSize(segmentArea);
+
+    const segmentPath = findPath({
+      from: normalisePositionFromOrigin({
+        position: fromGlobal,
+        origin: segmentOrigin
+      }),
+      to: normalisePositionFromOrigin({
+        position: toGlobal,
+        origin: segmentOrigin
+      }),
+      gridSize: segmentSize,
+      orthogonal
+    }).map((tile) => {
+      const global = CoordsUtils.subtract(segmentOrigin, tile);
+      return toPathLocal(global);
+    });
+
+    if (acc.length === 0) {
+      return segmentPath;
+    }
+
+    return [...acc, ...segmentPath.slice(1)];
+  }, []);
+
+  return { tiles, rectangle };
+};
+
+/**
+ * Drag-time path: only the consecutive anchor tiles (no A* / no L-fill).
+ * Cheap O(anchors) preview — call getConnectorPath on mouseup for the real route.
+ */
+export const getConnectorPathPreview = ({
+  anchors,
+  view,
+  modelItems
+}: {
+  anchors: ConnectorAnchor[];
+  view: View;
+  modelItems?: { id: string; icon?: string }[];
+}): {
+  tiles: Coords[];
+  rectangle: Rect;
+} => {
+  if (anchors.length < 2) {
+    throw new Error(
+      `Connector needs at least two anchors (receieved: ${anchors.length})`
+    );
+  }
+
+  const anchorPosition = anchors.map((anchor) => {
+    return getAnchorTile(anchor, view, modelItems);
+  });
+
+  const searchArea = getBoundingBox(anchorPosition, CONNECTOR_SEARCH_OFFSET);
+  const sorted = sortByPosition(searchArea);
+  const rectangle = {
+    from: { x: sorted.highX, y: sorted.highY },
+    to: { x: sorted.lowX, y: sorted.lowY }
+  };
+
+  const tiles: Coords[] = [];
+  anchorPosition.forEach((position) => {
+    const local = normalisePositionFromOrigin({
       position,
       origin: rectangle.from
     });
+    const prev = tiles[tiles.length - 1];
+    if (prev && CoordsUtils.isEqual(prev, local)) return;
+    tiles.push(local);
   });
-
-  const tiles = positionsNormalisedFromSearchArea.reduce<Coords[]>(
-    (acc, position, i) => {
-      if (i === 0) return acc;
-
-      const prev = positionsNormalisedFromSearchArea[i - 1];
-      const path = findPath({
-        from: prev,
-        to: position,
-        gridSize: searchAreaSize,
-        orthogonal
-      });
-
-      // Skip the shared joint tile when concatenating segments
-      const extension = acc.length > 0 ? path.slice(1) : path;
-      return [...acc, ...extension];
-    },
-    []
-  );
 
   return { tiles, rectangle };
 };
@@ -961,25 +1124,53 @@ export const getShape2dItemAtTile = ({
   scene,
   modelItems
 }: GetShape2dItemAtTile): ItemReference | null => {
-  const viewItem = scene.items.find((item) => {
+  type Hit = {
+    id: string;
+    area: number;
+    isCabinet: boolean;
+    hasParent: boolean;
+  };
+
+  const hits: Hit[] = [];
+
+  scene.items.forEach((item) => {
     const modelItem = modelItems.find((candidate) => {
       return candidate.id === item.id;
     });
 
-    if (!modelItem?.icon) return false;
+    if (!modelItem?.icon) return;
 
     const size =
       getModelItemSize(modelItem) ?? getShape2dSize(modelItem.icon);
 
-    if (!size) return false;
+    if (!size) return;
 
-    return isTileInShape2dBounds(tile, item.tile, size);
+    if (!isTileInShape2dBounds(tile, item.tile, size)) return;
+
+    hits.push({
+      id: item.id,
+      area: size.width * size.height,
+      isCabinet: modelItem.icon === SHAPE_2D_CABINET_ID,
+      hasParent: Boolean(item.parentId)
+    });
   });
 
-  if (viewItem) {
+  if (hits.length > 0) {
+    // Prefer mounted devices (switches in a rack) over the cabinet body,
+    // then smaller footprints — otherwise clicks always hit the szafa.
+    hits.sort((a, b) => {
+      if (a.isCabinet !== b.isCabinet) {
+        return a.isCabinet ? 1 : -1;
+      }
+      if (a.hasParent !== b.hasParent) {
+        return a.hasParent ? -1 : 1;
+      }
+      return a.area - b.area;
+    });
+
     return {
       type: 'ITEM',
-      id: viewItem.id
+      id: hits[0].id
     };
   }
 

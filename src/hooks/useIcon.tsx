@@ -1,6 +1,7 @@
 import React, { useMemo, useEffect } from 'react';
 import { useModelStore } from 'src/stores/modelStore';
 import { useCabinetSnapStore } from 'src/stores/cabinetSnapStore';
+import { useScene } from 'src/hooks/useScene';
 import { getItemByIdOrThrow } from 'src/utils';
 import { IsometricIcon } from 'src/components/SceneLayers/Nodes/Node/IconTypes/IsometricIcon';
 import { NonIsometricIcon } from 'src/components/SceneLayers/Nodes/Node/IconTypes/NonIsometricIcon';
@@ -22,7 +23,7 @@ export const useIcon = (
   connectedPortIds?: ReadonlySet<string> | string[],
   color?: string,
   mismatchPortIds?: ReadonlySet<string> | string[],
-  focusedPortId?: string | null,
+  focusedPortIds?: ReadonlySet<string> | string[] | null,
   svis?: ModelItem['svis'],
   rackUnits?: number,
   itemId?: string,
@@ -35,12 +36,24 @@ export const useIcon = (
   const modelItems = useModelStore((state) => {
     return state.items;
   });
+  const { items: viewItems } = useScene();
   const snapCabinetId = useCabinetSnapStore((state) => {
     return state.cabinetId;
   });
   const snapUnit = useCabinetSnapStore((state) => {
     return state.unit;
   });
+
+  const occupiedUnits = useMemo(() => {
+    if (!itemId) return undefined;
+    const units: number[] = [];
+    viewItems.forEach((item) => {
+      if (item.parentId === itemId && item.rackUnit !== undefined) {
+        units.push(item.rackUnit);
+      }
+    });
+    return units;
+  }, [itemId, viewItems]);
 
   const icon = useMemo(() => {
     if (!id) return DEFAULT_ICON;
@@ -86,6 +99,7 @@ export const useIcon = (
             highlightUnit={
               itemId && snapCabinetId === itemId ? snapUnit : null
             }
+            occupiedUnits={occupiedUnits}
           />
         );
       }
@@ -98,7 +112,7 @@ export const useIcon = (
           svis={svis}
           connectedPortIds={connectedPortIds}
           mismatchPortIds={mismatchPortIds}
-          focusedPortId={focusedPortId}
+          focusedPortIds={focusedPortIds}
           peerHighlightPortIds={peerHighlightPortIds}
           modelItems={modelItems}
           color={color}
@@ -126,14 +140,15 @@ export const useIcon = (
     svis,
     connectedPortIds,
     mismatchPortIds,
-    focusedPortId,
+    focusedPortIds,
     peerHighlightPortIds,
     modelItems,
     color,
     rackUnits,
     itemId,
     snapCabinetId,
-    snapUnit
+    snapUnit,
+    occupiedUnits
   ]);
 
   return {

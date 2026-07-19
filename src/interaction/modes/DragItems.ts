@@ -340,6 +340,7 @@ const dragItems = (
 
       const nextAnchors = connector.anchors.map((anchor) => {
         if (!anchorIds.has(anchor.id) || !anchor.ref.tile) return anchor;
+        if (anchor.locked) return anchor;
         const nextTile = nextByAnchor.get(anchor.id);
         if (!nextTile) return anchor;
 
@@ -422,6 +423,19 @@ const dragItems = (
         parseWaypointSegmentId(item.id);
       const connectors = options?.connectors ?? scene.connectors;
       const connector = getItemByIdOrThrow(connectors, connectorId).value;
+      const startA = connector.anchors.find((a) => {
+        return a.id === startAnchorId;
+      });
+      const endA = connector.anchors.find((a) => {
+        return a.id === endAnchorId;
+      });
+      // Locked waypoints stay fixed; still allow dragging the free end.
+      if (startA?.locked && endA?.locked) {
+        return;
+      }
+      if (startAnchorId === endAnchorId && startA?.locked) {
+        return;
+      }
       const origins = options?.anchorOrigins;
       const originStart = origins?.[startAnchorId];
       const originEnd = origins?.[endAnchorId];
@@ -438,10 +452,12 @@ const dragItems = (
             return anchor;
           });
         } else {
-          const [nextStart, nextEnd] = levelWaypointTiles(
+          const [leveledStart, leveledEnd] = levelWaypointTiles(
             [originStart, originEnd],
             delta
           );
+          const nextStart = startA?.locked ? { ...originStart } : leveledStart;
+          const nextEnd = endA?.locked ? { ...originEnd } : leveledEnd;
           // Never stack both segment WPs on the same tile.
           if (CoordsUtils.isEqual(nextStart, nextEnd)) {
             return;
@@ -463,12 +479,25 @@ const dragItems = (
           endAnchorId,
           delta
         );
+        // Re-pin locked ends after relative move.
+        if (startA?.locked || endA?.locked) {
+          moved = moved.map((anchor) => {
+            if (anchor.id === startAnchorId && startA?.locked && startA.ref.tile) {
+              return { ...anchor, ref: { tile: { ...startA.ref.tile } } };
+            }
+            if (anchor.id === endAnchorId && endA?.locked && endA.ref.tile) {
+              return { ...anchor, ref: { tile: { ...endA.ref.tile } } };
+            }
+            return anchor;
+          });
+        }
       }
 
       const snapped = moved.map((anchor) => {
         if (
           (anchor.id !== startAnchorId && anchor.id !== endAnchorId) ||
-          !anchor.ref.tile
+          !anchor.ref.tile ||
+          anchor.locked
         ) {
           return anchor;
         }
@@ -478,11 +507,17 @@ const dragItems = (
         };
       });
 
+      const freeDragId = startA?.locked
+        ? endAnchorId
+        : endA?.locked
+          ? startAnchorId
+          : startAnchorId;
+
       let nextAnchors =
         options?.isTwoD && options.orthogonal
           ? applyOrthogonalBendAnchors({
               anchors: snapped,
-              draggedAnchorId: startAnchorId,
+              draggedAnchorId: freeDragId,
               hint: tile,
               view: scene.currentView,
               modelItems: options.modelItems
@@ -507,6 +542,12 @@ const dragItems = (
     } else if (item.type === 'CONNECTOR_ANCHOR') {
       const connectors = options?.connectors ?? scene.connectors;
       const connector = getAnchorParent(item.id, connectors);
+      const target = connector.anchors.find((a) => {
+        return a.id === item.id;
+      });
+      if (target?.locked) {
+        return;
+      }
 
       if (options?.isTwoD && options.orthogonal) {
         let bent = applyOrthogonalBendAnchors({
@@ -900,40 +941,54 @@ export const DragItems: ModeActions = {
       uiState.mode.type === 'DRAG_ITEMS' &&
       uiState.projectionMode === 'TWO_D'
     ) {
-      const nodeIds = uiState.mode.items
-        .filter((item) => {
-          return item.type === 'ITEM';
-        })
-        .map((item) => {
-          return item.id;
-        });
+      const mode = uiState.mode;
+      const touched = new Set<string>();
 
-      if (nodeIds.length > 0) {
-        const touched = new Set<string>();
-        nodeIds.forEach((nodeId) => {
+      mode.items.forEach((item) => {
+        if (item.type === 'ITEM') {
           scene.connectors.forEach((connector) => {
             if (
               connector.anchors.some((anchor) => {
-                return anchor.ref.item === nodeId;
+                return anchor.ref.item === item.id;
               })
             ) {
               touched.add(connector.id);
             }
           });
-        });
+          return;
+        }
 
-        touched.forEach((connectorId) => {
-          scene.updateConnector(
-            connectorId,
-            {},
-            {
-              overlapResolve: 'off',
-              ignoreWaypoints: true,
-              materializeBends: true
-            }
-          );
+        if (item.type === 'CONNECTOR_SEGMENT') {
+          try {
+            touched.add(parseWaypointSegmentId(item.id).connectorId);
+          } catch {
+            // ignore
+          }
+          return;
+        }
+
+        if (item.type === 'CONNECTOR_ANCHOR') {
+          try {
+            touched.add(getAnchorParent(item.id, scene.connectors).id);
+          } catch {
+            // ignore
+          }
+        }
+      });
+
+      touched.forEach((connectorId) => {
+        // Rebuild final A* from current anchors. Do NOT strip waypoints /
+        // rematerialize — that would rewrite the route past locked vias.
+        const connector = scene.connectors.find((candidate) => {
+          return candidate.id === connectorId;
         });
-      }
+        if (!connector) return;
+        scene.updateConnector(
+          connectorId,
+          { anchors: connector.anchors },
+          { overlapResolve: 'off' }
+        );
+      });
     }
 
     scene.endHistoryTransaction();

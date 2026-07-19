@@ -22,10 +22,12 @@ interface Props {
   color?: string;
   /** Highlight a free U slot while snapping (0-based). */
   highlightUnit?: number | null;
+  /** Occupied rack unit indices (0-based) that have a mounted device. */
+  occupiedUnits?: ReadonlySet<number> | number[];
 }
 
 /**
- * Rack cabinet chassis — rails, U slots, header label.
+ * Rack cabinet — rails, U slots, free/occupied indication.
  */
 export const CabinetShape2d = ({
   name = 'SZAFA',
@@ -34,7 +36,8 @@ export const CabinetShape2d = ({
   height,
   centered = true,
   color,
-  highlightUnit = null
+  highlightUnit = null,
+  occupiedUnits
 }: Props) => {
   const footprint = useMemo(() => {
     return getCabinetSize(rackUnits);
@@ -54,6 +57,13 @@ export const CabinetShape2d = ({
     : rackUnits;
   const chassisTint = parseDeviceColor(color);
 
+  const occupied = useMemo(() => {
+    if (!occupiedUnits) return new Set<number>();
+    return occupiedUnits instanceof Set
+      ? occupiedUnits
+      : new Set(occupiedUnits);
+  }, [occupiedUnits]);
+
   return (
     <Box
       sx={{
@@ -71,15 +81,15 @@ export const CabinetShape2d = ({
         sx={{
           position: 'absolute',
           inset: 0,
-          bgcolor: '#d8dee8',
-          border: `${Math.max(1, Math.round(tileW * 0.04))}px solid #5b6b7f`,
-          borderRadius: Math.max(2, Math.round(tileW * 0.08)),
+          bgcolor: '#c5d0dc',
+          border: '1px solid #7a8ba3',
+          borderRadius: Math.max(2, Math.round(tileW * 0.06)),
           boxSizing: 'border-box',
-          boxShadow: '0 2px 6px rgba(0,0,0,0.12)'
+          boxShadow: '0 2px 6px rgba(15,23,42,0.1)'
         }}
       />
 
-      {/* Left / right ears */}
+      {/* Side rails — no mounting holes */}
       {[0, 1].map((side) => {
         return (
           <Box
@@ -88,24 +98,15 @@ export const CabinetShape2d = ({
               position: 'absolute',
               left: side === 0 ? 0 : undefined,
               right: side === 1 ? 0 : undefined,
-              top: headerH * 0.15,
+              top: 0,
               width: earW,
-              height: pxHeight - headerH * 0.3,
-              bgcolor: '#b8c2d0',
-              border: '1px solid #7a8ba3',
+              height: pxHeight,
+              bgcolor: '#8b97a8',
+              border: '1px solid #64748b',
               boxSizing: 'border-box',
-              '&::before, &::after': {
-                content: '""',
-                position: 'absolute',
-                left: '50%',
-                width: Math.max(3, earW * 0.35),
-                height: Math.max(3, earW * 0.35),
-                borderRadius: '50%',
-                bgcolor: '#6b7c90',
-                transform: 'translateX(-50%)'
-              },
-              '&::before': { top: '12%' },
-              '&::after': { bottom: '12%' }
+              backgroundImage:
+                'linear-gradient(90deg, rgba(255,255,255,0.22) 0%, transparent 45%, rgba(0,0,0,0.12) 100%)',
+              zIndex: 2
             }}
           />
         );
@@ -121,9 +122,11 @@ export const CabinetShape2d = ({
           height: headerH,
           display: 'flex',
           alignItems: 'center',
-          px: `${Math.max(4, tileW * 0.2)}px`,
+          justifyContent: 'space-between',
+          px: `${Math.max(6, tileW * 0.25)}px`,
           boxSizing: 'border-box',
-          borderBottom: '1px solid #9aa8b8',
+          borderBottom: '1px solid #94a3b8',
+          bgcolor: 'rgba(248,250,252,0.92)',
           zIndex: 3
         }}
       >
@@ -138,19 +141,19 @@ export const CabinetShape2d = ({
           <DeviceTypeIcon
             kind="cabinet"
             sx={{
-              fontSize: Math.max(28, Math.round(headerH * 0.55)),
-              width: Math.max(28, Math.round(headerH * 0.55)),
-              height: Math.max(28, Math.round(headerH * 0.55)),
+              fontSize: Math.max(26, Math.round(headerH * 0.5)),
+              width: Math.max(26, Math.round(headerH * 0.5)),
+              height: Math.max(26, Math.round(headerH * 0.5)),
               color: '#334155',
               flexShrink: 0
             }}
           />
           <Typography
             sx={{
-              color: '#1f2937',
-              fontSize: Math.max(16, Math.round(headerH * 0.38)),
+              color: '#0f172a',
+              fontSize: Math.max(15, Math.round(headerH * 0.36)),
               fontWeight: 800,
-              letterSpacing: 0.3,
+              letterSpacing: 0.4,
               lineHeight: 1.1,
               userSelect: 'none',
               whiteSpace: 'nowrap',
@@ -161,13 +164,24 @@ export const CabinetShape2d = ({
           >
             {name}
           </Typography>
+        </Box>
+        <Box
+          sx={{
+            px: `${Math.max(6, tileW * 0.2)}px`,
+            py: `${Math.max(2, tileH * 0.15)}px`,
+            borderRadius: 9999,
+            bgcolor: '#1e293b',
+            flexShrink: 0
+          }}
+        >
           <Typography
             sx={{
-              color: '#64748b',
-              fontSize: Math.max(12, Math.round(headerH * 0.28)),
-              fontWeight: 600,
+              color: '#f8fafc',
+              fontSize: Math.max(11, Math.round(headerH * 0.26)),
+              fontWeight: 700,
+              letterSpacing: 0.3,
               userSelect: 'none',
-              flexShrink: 0
+              lineHeight: 1.2
             }}
           >
             {units}U
@@ -178,6 +192,9 @@ export const CabinetShape2d = ({
       {/* U slots */}
       {Array.from({ length: units }, (_, index) => {
         const isHi = highlightUnit === index;
+        const isFree = !occupied.has(index);
+        const even = index % 2 === 0;
+
         return (
           <Box
             key={`u-${index}`}
@@ -188,35 +205,41 @@ export const CabinetShape2d = ({
               width: contentW,
               height: slotH,
               bgcolor: isHi
-                ? 'rgba(37, 99, 235, 0.18)'
-                : index % 2 === 0
-                  ? '#eef2f7'
-                  : '#e4eaf2',
-              borderBottom: '1px solid #c5cdd8',
-              borderLeft: isHi ? '3px solid #2563eb' : '1px solid #c5cdd8',
-              borderRight: isHi ? '3px solid #2563eb' : '1px solid #c5cdd8',
-              boxSizing: 'border-box'
+                ? 'rgba(37, 99, 235, 0.2)'
+                : isFree
+                  ? even
+                    ? '#a8b4c4'
+                    : '#9aa8b8'
+                  : even
+                    ? '#dce4ee'
+                    : '#cfd8e4',
+              borderBottom: '1px solid #8b97a8',
+              borderLeft: isHi ? '3px solid #2563eb' : '1px solid #8b97a8',
+              borderRight: isHi ? '3px solid #2563eb' : '1px solid #8b97a8',
+              boxSizing: 'border-box',
+              boxShadow: isHi
+                ? 'inset 0 0 0 1px rgba(37,99,235,0.25)'
+                : undefined,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center'
             }}
           >
-            {/* Rail holes */}
-            {[0, 1].map((side) => {
-              return (
-                <Box
-                  key={side}
-                  sx={{
-                    position: 'absolute',
-                    left: side === 0 ? 2 : undefined,
-                    right: side === 1 ? 2 : undefined,
-                    top: '50%',
-                    width: Math.max(2, tileW * 0.12),
-                    height: Math.max(2, tileW * 0.12),
-                    borderRadius: '50%',
-                    bgcolor: '#8b97a8',
-                    transform: 'translateY(-50%)'
-                  }}
-                />
-              );
-            })}
+            {isFree && (
+              <Typography
+                sx={{
+                  fontSize: Math.max(9, Math.round(slotH * 0.22)),
+                  fontWeight: 800,
+                  letterSpacing: 1.2,
+                  color: '#334155',
+                  opacity: 0.28,
+                  userSelect: 'none',
+                  pointerEvents: 'none'
+                }}
+              >
+                WOLNY
+              </Typography>
+            )}
           </Box>
         );
       })}
@@ -225,16 +248,18 @@ export const CabinetShape2d = ({
         <Box
           sx={{
             position: 'absolute',
-            inset: 0,
+            left: earW,
+            top: headerH,
+            width: contentW,
+            height: pxHeight - headerH,
             bgcolor: chassisTint.css,
             pointerEvents: 'none',
-            zIndex: 2,
-            borderRadius: Math.max(2, Math.round(tileW * 0.08))
+            zIndex: 2
           }}
         />
       )}
 
-      {/* U labels above tint so they stay readable */}
+      {/* U labels — right side of chassis body */}
       {Array.from({ length: units }, (_, index) => {
         const isHi = highlightUnit === index;
         return (
@@ -242,17 +267,18 @@ export const CabinetShape2d = ({
             key={`u-label-${index}`}
             sx={{
               position: 'absolute',
-              left: earW + 3,
-              top: headerH + index * slotH + 1,
-              fontSize: Math.max(5, slotH * 0.11),
-              fontWeight: 600,
-              color: isHi ? '#1d4ed8' : '#64748b',
+              right: earW + 6,
+              top: headerH + index * slotH + Math.max(2, slotH * 0.08),
+              fontSize: Math.max(6, slotH * 0.14),
+              fontWeight: 700,
+              color: isHi ? '#1d4ed8' : '#475569',
               userSelect: 'none',
               fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
               lineHeight: 1,
-              opacity: 0.9,
+              opacity: 0.95,
               zIndex: 3,
-              pointerEvents: 'none'
+              pointerEvents: 'none',
+              textAlign: 'right'
             }}
           >
             {index + 1}U

@@ -5,6 +5,8 @@ export const connectorStyleOptions = ['SOLID', 'DOTTED', 'DASHED'] as const;
 
 export const anchorSchema = z.object({
   id,
+  /** Locked tile waypoint — stays put until unlocked (2D plan). */
+  locked: z.boolean().optional(),
   ref: z
     .object({
       item: id,

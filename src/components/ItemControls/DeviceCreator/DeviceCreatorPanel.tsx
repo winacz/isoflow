@@ -35,7 +35,9 @@ import {
 } from 'src/utils';
 import type { DeviceTemplate } from 'src/types';
 
-const PORT_OPTIONS = [1, 2, 4, 8, 12, 16] as const;
+const PORT_OPTIONS_BASE = [1, 2, 4, 8, 12, 16, 24] as const;
+/** RACK may use a single dense 48-port block (24 cols × 2 rows). */
+const PORT_OPTIONS_RACK = [1, 2, 4, 8, 12, 16, 24, 48] as const;
 
 const NUMBERING_HELP: Record<DeviceTemplate['numbering'], string> = {
   ODD_EVEN: 'Góra nieparzyste, dół parzyste (SCALANCE / Cisco)',
@@ -129,6 +131,9 @@ export const DeviceCreatorPanel = ({
     });
   };
 
+  const portOptions =
+    draft.formFactor === 'RACK' ? PORT_OPTIONS_RACK : PORT_OPTIONS_BASE;
+
   const canSave = draft.name.trim().length > 0 && !fitError;
   const title =
     mode === 'edit' ? 'Edycja szablonu' : 'Kreator switcha';
@@ -206,12 +211,19 @@ export const DeviceCreatorPanel = ({
               row
               value={draft.formFactor}
               onChange={(event) => {
+                const formFactor = event.target
+                  .value as DeviceTemplate['formFactor'];
                 setDraft((prev) => {
-                  return {
-                    ...prev,
-                    formFactor: event.target
-                      .value as DeviceTemplate['formFactor']
-                  };
+                  const sections =
+                    formFactor === 'RACK'
+                      ? prev.sections
+                      : prev.sections.map((section) => {
+                          // 48 is RACK-only in the UI; clamp when leaving RACK.
+                          return section.ports > 24
+                            ? { ...section, ports: 24 }
+                            : section;
+                        });
+                  return { ...prev, formFactor, sections };
                 });
               }}
             >
@@ -348,10 +360,16 @@ export const DeviceCreatorPanel = ({
                           });
                         }}
                       >
-                        {PORT_OPTIONS.map((count) => {
+                        {portOptions.map((count) => {
+                          const label =
+                            count === 1
+                              ? '1 port'
+                              : count === 48
+                                ? '48 portów'
+                                : `${count} porty`;
                           return (
                             <MenuItem key={count} value={count}>
-                              {count === 1 ? '1 port' : `${count} porty`}
+                              {label}
                             </MenuItem>
                           );
                         })}

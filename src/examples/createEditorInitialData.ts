@@ -1,6 +1,6 @@
 import { InitialData } from 'src/types';
 import { DEFAULT_COLOR, SHAPES_2D } from 'src/config';
-import { generateId } from 'src/utils';
+import { generateId, ensureDeviceTemplateIcons } from 'src/utils';
 import { initialData as isometricDemo } from './initialData';
 import { createStartingTopology2d } from './startingTopology2d';
 
@@ -19,14 +19,19 @@ export const createEditorInitialData = (): InitialData => {
   const isometricViewId = isoView?.id ?? generateId();
   const planViewId = planView?.id ?? generateId();
 
+  const deviceTemplates = plan.deviceTemplates ?? [];
+
   const isoIcons = isometricDemo.icons ?? [];
   const planIconIds = new Set(SHAPES_2D.map((icon) => icon.id));
-  const icons = [
-    ...isoIcons.filter((icon) => {
-      return !planIconIds.has(icon.id);
-    }),
-    ...SHAPES_2D
-  ];
+  const icons = ensureDeviceTemplateIcons(
+    [
+      ...isoIcons.filter((icon) => {
+        return !planIconIds.has(icon.id);
+      }),
+      ...SHAPES_2D
+    ],
+    deviceTemplates
+  );
 
   const isoColors = isometricDemo.colors ?? [];
   const colorIds = new Set(isoColors.map((color) => color.id));
@@ -50,23 +55,15 @@ export const createEditorInitialData = (): InitialData => {
   });
 
   return {
-    title: isometricDemo.title ?? 'Isoflow',
+    title: plan.title ?? isometricDemo.title ?? 'Isoflow',
     version: isometricDemo.version ?? '1.0',
     fitToView: true,
-    projectionMode: 'ISOMETRIC',
+    projectionMode: 'TWO_D',
     icons,
     colors,
     items: [...(isometricDemo.items ?? []), ...(plan.items ?? [])],
-    deviceTemplates: [],
+    deviceTemplates,
     views: [
-      {
-        id: isometricViewId,
-        name: ISOMETRIC_VIEW_NAME,
-        items: isoView?.items ?? [],
-        connectors: isoView?.connectors ?? [],
-        rectangles: isoView?.rectangles ?? [],
-        textBoxes: isoView?.textBoxes ?? []
-      },
       {
         id: planViewId,
         name: PLAN_2D_VIEW_NAME,
@@ -74,8 +71,16 @@ export const createEditorInitialData = (): InitialData => {
         connectors: planConnectors,
         rectangles: [],
         textBoxes: []
+      },
+      {
+        id: isometricViewId,
+        name: ISOMETRIC_VIEW_NAME,
+        items: isoView?.items ?? [],
+        connectors: isoView?.connectors ?? [],
+        rectangles: isoView?.rectangles ?? [],
+        textBoxes: isoView?.textBoxes ?? []
       }
     ],
-    view: isometricViewId
+    view: planViewId
   };
 };

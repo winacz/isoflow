@@ -357,6 +357,8 @@ const mousedown: ModeActionsAction = ({
           scene
         });
 
+  let clickedPortId: string | null = null;
+
   if (uiState.projectionMode === 'TWO_D') {
     const portHit = getShape2dPortAtTile({
       tile,
@@ -373,12 +375,24 @@ const mousedown: ModeActionsAction = ({
         : null;
 
     if (portHit) {
-      // Clicking a port opens the device panel on that port's settings
+      // Clicking a port opens the device panel on that port's settings.
+      // Ctrl/Cmd toggles multi-port selection on the same device.
+      clickedPortId = portHit.portId;
       itemAtTile = {
         type: 'ITEM',
         id: portHit.itemId
       };
-      uiState.actions.setFocusedPortId(portHit.portId);
+      const togglePort =
+        uiState.mouse.ctrlKey || uiState.mouse.metaKey;
+      const sameDevice =
+        uiState.itemControls?.type === 'ITEM' &&
+        uiState.itemControls.id === portHit.itemId;
+
+      if (togglePort && sameDevice) {
+        uiState.actions.toggleFocusedPortId(portHit.portId);
+      } else {
+        uiState.actions.setFocusedPortId(portHit.portId);
+      }
     } else {
       uiState.actions.setFocusedPortId(null);
     }
@@ -529,7 +543,10 @@ const mousedown: ModeActionsAction = ({
         uiState.selectedItemIds.length > 1 &&
         uiState.selectedItemIds.includes(selected.id);
 
-      if (!keepMulti) {
+      if (clickedPortId) {
+        // Port click always focuses a single device (Ctrl only multi-selects ports).
+        uiState.actions.setSelectedItemIds([selected.id]);
+      } else if (!keepMulti) {
         applyItemSelection(uiState, selected.id);
       }
     } else {
@@ -868,6 +885,18 @@ export const Cursor: ModeActions = {
 
       if (!freshConnector) return;
 
+      const target = freshConnector.anchors.find((anchor) => {
+        return anchor.id === existingWaypoint.id;
+      });
+      // Locked waypoints stay until unlocked via context menu.
+      if (target?.locked) {
+        uiState.actions.setItemControls({
+          type: 'CONNECTOR',
+          id: freshConnector.id
+        });
+        return;
+      }
+
       const nextAnchors = freshConnector.anchors.filter((anchor) => {
         return anchor.id !== existingWaypoint.id;
       });
@@ -895,6 +924,8 @@ export const Cursor: ModeActions = {
 
     // Double-click on cable tile (including over a device body) → add waypoint.
     // Skip pure port handles — those stay as port attachments.
+    if (uiState.simplePaths) return;
+
     const portHit = getShape2dPortAtTile({
       tile,
       scene,
