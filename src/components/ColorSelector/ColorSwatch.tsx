@@ -15,17 +15,28 @@ export const ColorSwatch = ({ hex, onClick, isActive }: Props) => {
       size="small"
       sx={{ width: 40, height: 40, minWidth: 'auto' }}
     >
-      <Box>
+      <Box
+        sx={{
+          width: 28,
+          height: 28,
+          borderRadius: '100%',
+          border: '1px solid',
+          borderColor: 'grey.600',
+          transform: `scale(${isActive ? 1.25 : 1})`,
+          transformOrigin: 'center',
+          overflow: 'hidden',
+          // Checkerboard so alpha is visible
+          backgroundImage:
+            'linear-gradient(45deg, #ccc 25%, transparent 25%), linear-gradient(-45deg, #ccc 25%, transparent 25%), linear-gradient(45deg, transparent 75%, #ccc 75%), linear-gradient(-45deg, transparent 75%, #ccc 75%)',
+          backgroundSize: '8px 8px',
+          backgroundPosition: '0 0, 0 4px, 4px -4px, -4px 0'
+        }}
+      >
         <Box
           sx={{
-            border: '1px solid',
-            borderColor: 'grey.600',
-            bgcolor: hex,
-            width: 28,
-            height: 28,
-            trasformOrigin: 'center',
-            transform: `scale(${isActive ? 1.25 : 1})`,
-            borderRadius: '100%'
+            width: '100%',
+            height: '100%',
+            bgcolor: hex || 'transparent'
           }}
         />
       </Box>

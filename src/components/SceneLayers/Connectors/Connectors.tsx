@@ -64,6 +64,7 @@ export const Connectors = ({ connectors }: Props) => {
   const hasSelectionFocus = Boolean(
     selectedConnectorId || (projectionMode === 'TWO_D' && selectedItemId)
   );
+  const softDim = mode.type === 'DRAG_ITEMS';
 
   const pathInputs = useMemo(() => {
     if (projectionMode !== 'TWO_D') return [];
@@ -126,6 +127,7 @@ export const Connectors = ({ connectors }: Props) => {
               isFocused={isFocused}
               isHighlighted={isHandleTarget}
               isDimmed={isDimmed}
+              softDim={softDim}
               visualOffset={offset}
             />
           );

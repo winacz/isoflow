@@ -13,7 +13,9 @@ import {
   anchorSchema,
   textBoxSchema,
   rectangleSchema,
-  connectorStyleOptions
+  connectorStyleOptions,
+  deviceTemplateSchema,
+  deviceTemplatesSchema
 } from 'src/schemas';
 import { StoreApi } from 'zustand';
 
@@ -32,6 +34,8 @@ export type ConnectorAnchor = z.infer<typeof anchorSchema>;
 export type Connector = z.infer<typeof connectorSchema>;
 export type TextBox = z.infer<typeof textBoxSchema>;
 export type Rectangle = z.infer<typeof rectangleSchema>;
+export type DeviceTemplate = z.infer<typeof deviceTemplateSchema>;
+export type DeviceTemplates = z.infer<typeof deviceTemplatesSchema>;
 
 export type ModelStore = Model & {
   actions: {

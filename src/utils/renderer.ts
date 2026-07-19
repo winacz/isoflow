@@ -768,7 +768,9 @@ export const getMouse = ({
     position: newPosition,
     delta: newDelta,
     mousedown: getMousedown(),
-    shiftKey: Boolean(mouseEvent.shiftKey)
+    shiftKey: Boolean(mouseEvent.shiftKey),
+    ctrlKey: Boolean(mouseEvent.ctrlKey),
+    metaKey: Boolean(mouseEvent.metaKey)
   };
 
   return nextMouse;
@@ -1004,7 +1006,7 @@ export interface Shape2dPortHit {
 }
 
 /** Max Chebyshev tile distance for connector port snap. */
-export const SHAPE_2D_PORT_SNAP_DISTANCE = 1;
+export const SHAPE_2D_PORT_SNAP_DISTANCE = 3;
 
 /** Whether any connector anchor already uses this item+port pair. */
 export const isShape2dPortInUse = ({
@@ -1336,20 +1338,50 @@ export const getConnectorDirectionIcon = (connectorTiles: Coords[]) => {
 
 export const getProjectBounds = (
   view: View,
-  padding = PROJECT_BOUNDING_BOX_PADDING
+  padding = PROJECT_BOUNDING_BOX_PADDING,
+  options?: {
+    projectionMode?: ProjectionMode;
+    modelItems?: { id: string; icon?: string }[];
+  }
 ): Coords[] => {
-  const itemTiles = view.items.map((item) => {
-    return item.tile;
+  const isTwoD = options?.projectionMode === 'TWO_D';
+  const modelItems = options?.modelItems ?? [];
+
+  const itemTiles = view.items.flatMap((item) => {
+    if (!isTwoD) {
+      return [item.tile];
+    }
+
+    const modelItem = modelItems.find((candidate) => {
+      return candidate.id === item.id;
+    });
+    const size = getShape2dSize(modelItem?.icon ?? '') ?? {
+      width: 1,
+      height: 1
+    };
+
+    return [
+      item.tile,
+      {
+        x: item.tile.x + size.width,
+        y: item.tile.y + size.height
+      }
+    ];
   });
 
   const connectors = view.connectors ?? [];
   const connectorTiles = connectors.reduce<Coords[]>((acc, connector) => {
-    const path = getConnectorPath({
-      anchors: connector.anchors,
-      view
-    });
+    try {
+      const path = getConnectorPath({
+        anchors: connector.anchors,
+        view,
+        modelItems
+      });
 
-    return [...acc, path.rectangle.from, path.rectangle.to];
+      return [...acc, path.rectangle.from, path.rectangle.to];
+    } catch {
+      return acc;
+    }
   }, []);
 
   const rectangles = view.rectangles ?? [];
@@ -1391,8 +1423,26 @@ export const getProjectBounds = (
   return corners;
 };
 
-export const getUnprojectedBounds = (view: View) => {
-  const projectBounds = getProjectBounds(view);
+export const getUnprojectedBounds = (
+  view: View,
+  options?: {
+    projectionMode?: ProjectionMode;
+    modelItems?: { id: string; icon?: string }[];
+  }
+) => {
+  const projectBounds = getProjectBounds(view, undefined, options);
+
+  if (options?.projectionMode === 'TWO_D') {
+    const sortedCorners = sortByPosition(projectBounds);
+    const size = getBoundingBoxSize(projectBounds);
+
+    return {
+      width: Math.max(1, size.width) * TILE_SIZE_2D,
+      height: Math.max(1, size.height) * TILE_SIZE_2D,
+      x: sortedCorners.lowX * TILE_SIZE_2D,
+      y: sortedCorners.lowY * TILE_SIZE_2D
+    };
+  }
 
   const cornerPositions = projectBounds.map((corner) => {
     return getTilePosition({
@@ -1411,19 +1461,46 @@ export const getUnprojectedBounds = (view: View) => {
   };
 };
 
-export const getFitToViewParams = (view: View, viewportSize: Size) => {
-  const projectBounds = getProjectBounds(view);
+export const getFitToViewParams = (
+  view: View,
+  viewportSize: Size,
+  options?: {
+    projectionMode?: ProjectionMode;
+    modelItems?: { id: string; icon?: string }[];
+  }
+) => {
+  const projectBounds = getProjectBounds(view, undefined, options);
   const sortedCornerPositions = sortByPosition(projectBounds);
   const boundingBoxSize = getBoundingBoxSize(projectBounds);
-  const unprojectedBounds = getUnprojectedBounds(view);
+  const unprojectedBounds = getUnprojectedBounds(view, options);
   const zoom = clamp(
     Math.min(
-      viewportSize.width / unprojectedBounds.width,
-      viewportSize.height / unprojectedBounds.height
+      viewportSize.width / Math.max(1, unprojectedBounds.width),
+      viewportSize.height / Math.max(1, unprojectedBounds.height)
     ),
     0,
     MAX_ZOOM
   );
+
+  if (options?.projectionMode === 'TWO_D') {
+    const centerPx = {
+      x:
+        (sortedCornerPositions.lowX + boundingBoxSize.width / 2) *
+        TILE_SIZE_2D,
+      y:
+        (sortedCornerPositions.lowY + boundingBoxSize.height / 2) *
+        TILE_SIZE_2D
+    };
+
+    return {
+      zoom,
+      scroll: {
+        x: -centerPx.x * zoom,
+        y: -centerPx.y * zoom
+      }
+    };
+  }
+
   const scrollTarget: Coords = {
     x: (sortedCornerPositions.lowX + boundingBoxSize.width / 2) * zoom,
     y: (sortedCornerPositions.lowY + boundingBoxSize.height / 2) * zoom

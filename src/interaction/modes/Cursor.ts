@@ -23,7 +23,8 @@ import {
   findWaypointSegmentAtTile,
   encodeWaypointSegmentId,
   parseWaypointSegmentId,
-  prepareWaypointSegmentDrag
+  prepareWaypointSegmentDrag,
+  doShape2dFootprintsOverlap
 } from 'src/utils';
 import { useScene } from 'src/hooks/useScene';
 import { isShape2dIcon, getShape2dSize } from 'src/config';
@@ -34,6 +35,119 @@ let armedWaypoint: {
   connectorId: string;
   tile: Coords;
 } | null = null;
+
+const getItemsInMarquee = ({
+  start,
+  end,
+  scene,
+  modelItems
+}: {
+  start: Coords;
+  end: Coords;
+  scene: ReturnType<typeof useScene>;
+  modelItems: ModelItem[];
+}): string[] => {
+  const marquee = {
+    x: Math.min(start.x, end.x),
+    y: Math.min(start.y, end.y),
+    width: Math.abs(end.x - start.x) + 1,
+    height: Math.abs(end.y - start.y) + 1
+  };
+
+  return scene.items
+    .filter((viewItem) => {
+      const modelItem = modelItems.find((item) => {
+        return item.id === viewItem.id;
+      });
+      if (!modelItem || !isShape2dIcon(modelItem.icon)) return false;
+
+      const size = getShape2dSize(modelItem.icon ?? '') ?? {
+        width: 1,
+        height: 1
+      };
+
+      return doShape2dFootprintsOverlap(
+        {
+          x: viewItem.tile.x,
+          y: viewItem.tile.y,
+          width: size.width,
+          height: size.height
+        },
+        marquee
+      );
+    })
+    .map((viewItem) => {
+      return viewItem.id;
+    });
+};
+
+const getWaypointsInMarquee = ({
+  start,
+  end,
+  scene
+}: {
+  start: Coords;
+  end: Coords;
+  scene: ReturnType<typeof useScene>;
+  model?: unknown;
+}): string[] => {
+  const minX = Math.min(start.x, end.x);
+  const maxX = Math.max(start.x, end.x);
+  const minY = Math.min(start.y, end.y);
+  const maxY = Math.max(start.y, end.y);
+
+  const ids: string[] = [];
+
+  scene.connectors.forEach((connector) => {
+    connector.anchors.forEach((anchor) => {
+      const tile = anchor.ref.tile;
+      if (!tile) return;
+      if (tile.x < minX || tile.x > maxX || tile.y < minY || tile.y > maxY) {
+        return;
+      }
+      ids.push(anchor.id);
+    });
+  });
+
+  return ids;
+};
+
+const applyItemSelection = (
+  uiState: {
+    actions: {
+      setSelectedItemIds: (ids: string[]) => void;
+      toggleSelectedItemId: (id: string) => void;
+      setItemControls: (controls: { type: 'ITEM'; id: string } | null) => void;
+      clearSelectedItemIds: () => void;
+    };
+    selectedItemIds: string[];
+    mouse: { shiftKey: boolean; ctrlKey: boolean; metaKey: boolean };
+    projectionMode: string;
+  },
+  itemId: string
+) => {
+  if (uiState.projectionMode !== 'TWO_D') {
+    uiState.actions.setItemControls({ type: 'ITEM', id: itemId });
+    return;
+  }
+
+  const additive = uiState.mouse.shiftKey;
+  const toggle = uiState.mouse.ctrlKey || uiState.mouse.metaKey;
+
+  if (toggle) {
+    uiState.actions.toggleSelectedItemId(itemId);
+    return;
+  }
+
+  if (additive) {
+    if (!uiState.selectedItemIds.includes(itemId)) {
+      uiState.actions.setSelectedItemIds([...uiState.selectedItemIds, itemId]);
+    }
+    return;
+  }
+
+  uiState.actions.setSelectedItemIds([itemId]);
+};
 
 const getAnchorOrdering = (
   anchor: ConnectorAnchor,
@@ -236,6 +350,17 @@ const mousedown: ModeActionsAction = ({
         ? uiState.itemControls.id
         : null;
 
+    if (portHit) {
+      // Clicking a port opens the device panel on that port's settings
+      itemAtTile = {
+        type: 'ITEM',
+        id: portHit.itemId
+      };
+      uiState.actions.setFocusedPortId(portHit.portId);
+    } else {
+      uiState.actions.setFocusedPortId(null);
+    }
+
     if (waypoint && !portHit) {
       itemAtTile = {
         type: 'CONNECTOR_ANCHOR',
@@ -332,6 +457,7 @@ const mousedown: ModeActionsAction = ({
     uiState.actions.setMode(
       produce(uiState.mode, (draft) => {
         draft.mousedownItem = selected;
+        draft.marquee = null;
       })
     );
 
@@ -348,10 +474,19 @@ const mousedown: ModeActionsAction = ({
             })
           : undefined);
 
-      uiState.actions.setItemControls({
-        type: 'CONNECTOR',
-        id: parent?.id ?? armedWaypoint?.connectorId ?? selected.id
-      });
+      // Keep waypoint multi-selection when pressing a selected waypoint.
+      const keepWaypointMulti =
+        uiState.projectionMode === 'TWO_D' &&
+        uiState.selectedWaypointIds.length > 1 &&
+        uiState.selectedWaypointIds.includes(selected.id);
+
+      if (!keepWaypointMulti) {
+        uiState.actions.setSelectedWaypointIds([]);
+        uiState.actions.setItemControls({
+          type: 'CONNECTOR',
+          id: parent?.id ?? armedWaypoint?.connectorId ?? selected.id
+        });
+      }
     } else if (selected.type === 'CONNECTOR_SEGMENT') {
       try {
         const { connectorId } = parseWaypointSegmentId(selected.id);
@@ -362,6 +497,19 @@ const mousedown: ModeActionsAction = ({
       } catch {
         uiState.actions.setItemControls(null);
       }
+    } else if (selected.type === 'ITEM') {
+      // Keep multi-selection when pressing an already-selected node (group drag).
+      const keepMulti =
+        uiState.projectionMode === 'TWO_D' &&
+        !uiState.mouse.shiftKey &&
+        !uiState.mouse.ctrlKey &&
+        !uiState.mouse.metaKey &&
+        uiState.selectedItemIds.length > 1 &&
+        uiState.selectedItemIds.includes(selected.id);
+
+      if (!keepMulti) {
+        applyItemSelection(uiState, selected.id);
+      }
     } else {
       uiState.actions.setItemControls(selected);
     }
@@ -370,10 +518,26 @@ const mousedown: ModeActionsAction = ({
     uiState.actions.setMode(
       produce(uiState.mode, (draft) => {
         draft.mousedownItem = null;
+        draft.marquee =
+          uiState.projectionMode === 'TWO_D'
+            ? {
+                start: { ...tile },
+                end: { ...tile }
+              }
+            : null;
       })
     );
 
-    uiState.actions.setItemControls(null);
+    uiState.actions.setFocusedPortId(null);
+    if (
+      uiState.projectionMode !== 'TWO_D' ||
+      (!uiState.mouse.shiftKey &&
+        !uiState.mouse.ctrlKey &&
+        !uiState.mouse.metaKey)
+    ) {
+      uiState.actions.clearSelectedItemIds();
+      uiState.actions.setSelectedWaypointIds([]);
+    }
   }
 };
 
@@ -389,6 +553,24 @@ export const Cursor: ModeActions = {
   },
   mousemove: ({ scene, uiState, model }) => {
     if (uiState.mode.type !== 'CURSOR' || !hasMovedTile(uiState.mouse)) return;
+
+    // 2D marquee on empty canvas
+    if (
+      uiState.projectionMode === 'TWO_D' &&
+      !uiState.mode.mousedownItem &&
+      uiState.mode.marquee &&
+      uiState.mouse.mousedown
+    ) {
+      uiState.actions.setMode(
+        produce(uiState.mode, (draft) => {
+          draft.marquee = {
+            start: draft.marquee?.start ?? uiState.mouse.mousedown!.tile,
+            end: { ...uiState.mouse.position.tile }
+          };
+        })
+      );
+      return;
+    }
 
     let item = uiState.mode.mousedownItem;
 
@@ -429,34 +611,103 @@ export const Cursor: ModeActions = {
       }
 
       const itemOrigins: Record<string, Coords> = {};
-      if (item.type === 'ITEM') {
+      let dragItems =
+        item.type === 'ITEM' &&
+        uiState.projectionMode === 'TWO_D' &&
+        uiState.selectedItemIds.length > 1 &&
+        uiState.selectedItemIds.includes(item.id)
+          ? uiState.selectedItemIds.map((id) => {
+              return { type: 'ITEM' as const, id };
+            })
+          : [item];
+
+      // Group-drag all marquee-selected waypoints together.
+      if (
+        item.type === 'CONNECTOR_ANCHOR' &&
+        uiState.projectionMode === 'TWO_D' &&
+        uiState.selectedWaypointIds.length > 1 &&
+        uiState.selectedWaypointIds.includes(item.id)
+      ) {
+        dragItems = uiState.selectedWaypointIds.map((id) => {
+          return { type: 'CONNECTOR_ANCHOR' as const, id };
+        });
+      }
+
+      dragItems.forEach((dragItem) => {
+        if (dragItem.type !== 'ITEM') return;
         try {
-          const node = getItemByIdOrThrow(scene.items, item.id).value;
-          itemOrigins[item.id] = { ...node.tile };
+          const node = getItemByIdOrThrow(scene.items, dragItem.id).value;
+          itemOrigins[dragItem.id] = { ...node.tile };
         } catch {
           // ignore — drag will fall back to incremental deltas
         }
-      }
+      });
 
       uiState.actions.setMode({
         type: 'DRAG_ITEMS',
         showCursor: true,
-        items: [item],
+        items: dragItems,
         isInitialMovement: true,
         itemOrigins
       });
     }
   },
   mousedown,
-  mouseup: ({ uiState, isRendererInteraction }) => {
+  mouseup: ({ uiState, scene, model, isRendererInteraction }) => {
     if (uiState.mode.type !== 'CURSOR' || !isRendererInteraction) return;
+
+    if (
+      uiState.projectionMode === 'TWO_D' &&
+      uiState.mode.marquee &&
+      uiState.mouse.mousedown
+    ) {
+      const ids = getItemsInMarquee({
+        start: uiState.mode.marquee.start,
+        end: uiState.mode.marquee.end,
+        scene,
+        modelItems: model.items
+      });
+
+      if (ids.length === 0) {
+        // Cables only under the marquee → select their waypoints.
+        const waypointIds = getWaypointsInMarquee({
+          start: uiState.mode.marquee.start,
+          end: uiState.mode.marquee.end,
+          scene,
+          model
+        });
+
+        uiState.actions.clearSelectedItemIds();
+        uiState.actions.setSelectedWaypointIds(waypointIds);
+      } else if (
+        uiState.mouse.shiftKey ||
+        uiState.mouse.ctrlKey ||
+        uiState.mouse.metaKey
+      ) {
+        const merged = [...new Set([...uiState.selectedItemIds, ...ids])];
+        uiState.actions.setSelectedItemIds(merged);
+      } else {
+        uiState.actions.setSelectedItemIds(ids);
+      }
+
+      uiState.actions.setMode(
+        produce(uiState.mode, (draft) => {
+          draft.mousedownItem = null;
+          draft.marquee = null;
+        })
+      );
+      return;
+    }
 
     if (uiState.mode.mousedownItem) {
       if (uiState.mode.mousedownItem.type === 'ITEM') {
-        uiState.actions.setItemControls({
-          type: 'ITEM',
-          id: uiState.mode.mousedownItem.id
-        });
+        // Selection already applied on mousedown (unless keep-multi).
+        if (uiState.selectedItemIds.length <= 1) {
+          uiState.actions.setItemControls({
+            type: 'ITEM',
+            id: uiState.mode.mousedownItem.id
+          });
+        }
       } else if (uiState.mode.mousedownItem.type === 'RECTANGLE') {
         uiState.actions.setItemControls({
           type: 'RECTANGLE',
@@ -473,13 +724,14 @@ export const Cursor: ModeActions = {
           id: uiState.mode.mousedownItem.id
         });
       }
-    } else {
+    } else if (uiState.projectionMode !== 'TWO_D') {
       uiState.actions.setItemControls(null);
     }
 
     uiState.actions.setMode(
       produce(uiState.mode, (draft) => {
         draft.mousedownItem = null;
+        draft.marquee = null;
       })
     );
   },

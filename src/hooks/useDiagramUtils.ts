@@ -1,5 +1,6 @@
-import { useCallback } from 'react';
+import { useCallback, useMemo } from 'react';
 import { useUiStateStore } from 'src/stores/uiStateStore';
+import { useModelStore } from 'src/stores/modelStore';
 import { Size, Coords } from 'src/types';
 import {
   getUnprojectedBounds as getUnprojectedBoundsUtil,
@@ -11,6 +12,12 @@ import { useResizeObserver } from './useResizeObserver';
 
 export const useDiagramUtils = () => {
   const scene = useScene();
+  const modelItems = useModelStore((state) => {
+    return state.items;
+  });
+  const projectionMode = useUiStateStore((state) => {
+    return state.projectionMode;
+  });
   const rendererEl = useUiStateStore((state) => {
     return state.rendererEl;
   });
@@ -19,15 +26,26 @@ export const useDiagramUtils = () => {
     return state.actions;
   });
 
+  const boundsOptions = useMemo(() => {
+    return {
+      projectionMode,
+      modelItems
+    };
+  }, [projectionMode, modelItems]);
+
   const getUnprojectedBounds = useCallback((): Size & Coords => {
-    return getUnprojectedBoundsUtil(scene.currentView);
-  }, [scene.currentView]);
+    return getUnprojectedBoundsUtil(scene.currentView, boundsOptions);
+  }, [scene.currentView, boundsOptions]);
 
   const getFitToViewParams = useCallback(
     (viewportSize: Size) => {
-      return getFitToViewParamsUtil(scene.currentView, viewportSize);
+      return getFitToViewParamsUtil(
+        scene.currentView,
+        viewportSize,
+        boundsOptions
+      );
     },
-    [scene.currentView]
+    [scene.currentView, boundsOptions]
   );
 
   const fitToView = useCallback(async () => {

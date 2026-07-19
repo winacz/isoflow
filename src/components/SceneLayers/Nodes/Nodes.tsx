@@ -28,13 +28,31 @@ export const Nodes = ({ nodes }: Props) => {
   const itemControls = useUiStateStore((state) => {
     return state.itemControls;
   });
+  const selectedItemIds = useUiStateStore((state) => {
+    return state.selectedItemIds;
+  });
   const projectionMode = useUiStateStore((state) => {
     return state.projectionMode;
   });
+  const mode = useUiStateStore((state) => {
+    return state.mode;
+  });
   const { connectors } = useScene();
 
+  const isDragging = mode.type === 'DRAG_ITEMS';
+  // Keep the rest of the diagram readable while moving a node.
+  const dimmedOpacity = isDragging ? 0.82 : 0.68;
+
   const highlightedNodeIds = useMemo(() => {
-    if (projectionMode !== 'TWO_D' || !itemControls) {
+    if (projectionMode !== 'TWO_D') {
+      return null;
+    }
+
+    if (selectedItemIds.length > 0) {
+      return new Set(selectedItemIds);
+    }
+
+    if (!itemControls) {
       return null;
     }
 
@@ -65,7 +83,7 @@ export const Nodes = ({ nodes }: Props) => {
     }
 
     return null;
-  }, [projectionMode, itemControls, connectors]);
+  }, [projectionMode, itemControls, selectedItemIds, connectors]);
 
   return (
     <>
@@ -84,6 +102,7 @@ export const Nodes = ({ nodes }: Props) => {
             order={-node.tile.x - node.tile.y}
             node={node}
             selectionTone={selectionTone}
+            dimmedOpacity={dimmedOpacity}
           />
         );
       })}

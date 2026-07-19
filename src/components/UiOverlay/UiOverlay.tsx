@@ -82,6 +82,12 @@ export const UiOverlay = () => {
   const itemControls = useUiStateStore((state) => {
     return state.itemControls;
   });
+  const selectedItemIds = useUiStateStore((state) => {
+    return state.selectedItemIds;
+  });
+  const projectionMode = useUiStateStore((state) => {
+    return state.projectionMode;
+  });
   const { currentView } = useScene();
   const editorMode = useUiStateStore((state) => {
     return state.editorMode;
@@ -96,6 +102,13 @@ export const UiOverlay = () => {
     return state.title;
   });
   const { size: rendererSize } = useResizeObserver(rendererEl);
+  const isTwoD = projectionMode === 'TWO_D';
+  const showItemControls =
+    Boolean(itemControls) || (isTwoD && selectedItemIds.length >= 2);
+  // 2D sidebar needs room for device creator + port previews
+  const itemControlsWidth = isTwoD
+    ? Math.min(420, Math.max(360, Math.round(rendererSize.width * 0.28)))
+    : 360;
 
   return (
     <>
@@ -108,18 +121,20 @@ export const UiOverlay = () => {
           left: 0
         }}
       >
-        {availableTools.includes('ITEM_CONTROLS') && itemControls && (
+        {availableTools.includes('ITEM_CONTROLS') && showItemControls && (
           <UiElement
             sx={{
               position: 'absolute',
-              width: '360px',
+              width: `${itemControlsWidth}px`,
               overflowY: 'scroll',
               '&::-webkit-scrollbar': {
                 display: 'none'
               }
             }}
             style={{
-              left: appPadding.x,
+              left: isTwoD
+                ? rendererSize.width - appPadding.x - itemControlsWidth
+                : appPadding.x,
               top: appPadding.y * 2 + spacing(2),
               maxHeight: rendererSize.height - appPadding.y * 6
             }}
@@ -135,7 +150,12 @@ export const UiOverlay = () => {
               transform: 'translateX(-100%)'
             }}
             style={{
-              left: rendererSize.width - appPadding.x,
+              left:
+                rendererSize.width -
+                appPadding.x -
+                (isTwoD && showItemControls
+                  ? itemControlsWidth + spacing(1)
+                  : 0),
               top: appPadding.y
             }}
           >

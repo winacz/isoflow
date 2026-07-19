@@ -1,6 +1,7 @@
 import domtoimage from 'dom-to-image';
 import FileSaver from 'file-saver';
-import { Model, Size } from '../types';
+import { Size } from '../types';
+import type { ExportSnapshot } from './model';
 
 export const generateGenericFilename = (extension: string) => {
   return `isoflow-export-${new Date().toISOString()}.${extension}`;
@@ -36,8 +37,8 @@ export const downloadFile = (data: Blob, filename: string) => {
   FileSaver.saveAs(data, filename);
 };
 
-export const exportAsJSON = (model: Model) => {
-  const data = new Blob([JSON.stringify(model)], {
+export const exportAsJSON = (snapshot: ExportSnapshot) => {
+  const data = new Blob([JSON.stringify(snapshot, null, 2)], {
     type: 'application/json;charset=utf-8'
   });
 

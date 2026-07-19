@@ -36,6 +36,8 @@ export type SlimMouseEvent = Pick<
   | 'preventDefault'
   | 'button'
   | 'shiftKey'
+  | 'ctrlKey'
+  | 'metaKey'
 >;
 
 export const EditorModeEnum = {

@@ -11,7 +11,18 @@ interface AddItemControls {
   type: 'ADD_ITEM';
 }
 
-export type ItemControls = ItemReference | AddItemControls;
+/** Sidebar: edit a custom switch template (from device selection). */
+interface EditDeviceTemplateControls {
+  type: 'EDIT_DEVICE_TEMPLATE';
+  templateId: string;
+  /** Return to this item's controls after cancel/save. */
+  returnItemId?: string;
+}
+
+export type ItemControls =
+  | ItemReference
+  | AddItemControls
+  | EditDeviceTemplateControls;
 
 export interface Mouse {
   position: {
@@ -28,6 +39,10 @@ export interface Mouse {
   } | null;
   /** True while Shift is held (from the latest mouse event). */
   shiftKey: boolean;
+  /** True while Ctrl is held (from the latest mouse event). */
+  ctrlKey: boolean;
+  /** True while Meta/Cmd is held (from the latest mouse event). */
+  metaKey: boolean;
 }
 
 // Mode types
@@ -40,6 +55,8 @@ export interface CursorMode {
   type: 'CURSOR';
   showCursor: boolean;
   mousedownItem: ItemReference | null;
+  /** 2D marquee selection while dragging on empty canvas. */
+  marquee?: { start: Coords; end: Coords } | null;
 }
 
 export interface DragItemsMode {
@@ -149,6 +166,12 @@ export interface UiState {
   dialog: keyof typeof DialogTypeEnum | null;
   isMainMenuOpen: boolean;
   itemControls: ItemControls | null;
+  /** 2D: multi-selected view item (node) ids. Source of truth for node selection. */
+  selectedItemIds: string[];
+  /** 2D: waypoint (tile anchor) ids selected via marquee over cables only. */
+  selectedWaypointIds: string[];
+  /** 2D: port id to expand in the device sidebar when an ITEM is selected. */
+  focusedPortId: string | null;
   contextMenu: ContextMenu | null;
   zoom: number;
   scroll: Scroll;
@@ -172,6 +195,11 @@ export interface UiStateActions {
   setZoom: (zoom: number) => void;
   setScroll: (scroll: Scroll) => void;
   setItemControls: (itemControls: ItemControls | null) => void;
+  setSelectedItemIds: (ids: string[]) => void;
+  toggleSelectedItemId: (id: string) => void;
+  clearSelectedItemIds: () => void;
+  setSelectedWaypointIds: (ids: string[]) => void;
+  setFocusedPortId: (portId: string | null) => void;
   setContextMenu: (contextMenu: ContextMenu | null) => void;
   setMouse: (mouse: Mouse) => void;
   setRendererEl: (el: HTMLDivElement) => void;

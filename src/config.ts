@@ -32,6 +32,9 @@ export const SHAPE_2D_PC_ID = 'PC';
  */
 export const TILE_SIZE_2D = 40;
 
+/** Minimum edge-to-edge gap (tiles) when auto-laying out selected 2D nodes. */
+export const SHAPE_2D_LAYOUT_GAP = 3;
+
 /**
  * 16-port switch footprint (tiles) — card layout:
  * - rows 0..2: header (name)
@@ -47,13 +50,27 @@ export const SWITCH_2D_SIZE: Size = { width: 20, height: 9 };
 export const PC_2D_SIZE: Size = { width: 8, height: 7 };
 
 export type Shape2dPortSide = 'TOP' | 'BOTTOM' | 'LEFT' | 'RIGHT';
+export type Shape2dPortMedia = 'RJ45' | 'SFP';
 
 export interface Shape2dPort {
   id: string;
   /** Tile offset from the shape's top-left corner */
   tile: { x: number; y: number };
   side: Shape2dPortSide;
+  media?: Shape2dPortMedia;
+  /** Display number / label on the jack */
+  label?: string;
+  sectionId?: string;
 }
+
+/**
+ * Fixed RACK 1U chassis width in tiles.
+ * Sized for commercial densities (~48–52 ports), e.g. 6×8 + 2 SFP.
+ */
+export const RACK_1U_WIDTH_TILES = 60;
+export const RACK_1U_HEIGHT_TILES = 9;
+/** Soft cap for custom switch templates (typical commercial max). */
+export const MAX_SWITCH_TEMPLATE_PORTS = 52;
 
 export const SWITCH_2D_PORTS: Shape2dPort[] = [
   ...Array.from({ length: 8 }, (_, index) => {
@@ -94,32 +111,82 @@ export const SHAPE_2D_PORTS: Record<string, Shape2dPort[]> = {
 export const SHAPES_2D: Icon[] = [
   {
     id: SHAPE_2D_SWITCH_ID,
-    name: 'Switch',
+    name: 'Switch 16-port',
     url: '',
-    collection: 'Shapes',
+    collection: 'Switches',
     isIsometric: false
   },
   {
     id: SHAPE_2D_PC_ID,
     name: 'PC',
     url: '',
-    collection: 'Shapes',
+    collection: 'Stacje',
     isIsometric: false
   }
 ];
 
-export const getShape2dSize = (shapeId: string): Size | null => {
-  return SHAPE_2D_SIZES[shapeId] ?? null;
+export const getShape2dSize = (shapeId: string | undefined | null): Size | null => {
+  if (!shapeId) return null;
+  if (SHAPE_2D_SIZES[shapeId]) return SHAPE_2D_SIZES[shapeId];
+
+  // Lazy require avoids circular import (registry → layout → config).
+  // eslint-disable-next-line @typescript-eslint/no-var-requires
+  const { getDeviceTemplateSize } = require('src/utils/deviceTemplateRegistry') as {
+    getDeviceTemplateSize: (id: string) => Size | null;
+  };
+  return getDeviceTemplateSize(shapeId);
 };
 
-export const getShape2dPorts = (shapeId: string): Shape2dPort[] => {
-  return SHAPE_2D_PORTS[shapeId] ?? [];
+export const getShape2dPorts = (
+  shapeId: string | undefined | null
+): Shape2dPort[] => {
+  if (!shapeId) return [];
+  if (SHAPE_2D_PORTS[shapeId]) return SHAPE_2D_PORTS[shapeId];
+
+  // eslint-disable-next-line @typescript-eslint/no-var-requires
+  const { getDeviceTemplatePorts } = require('src/utils/deviceTemplateRegistry') as {
+    getDeviceTemplatePorts: (id: string) => Shape2dPort[] | null;
+  };
+  return getDeviceTemplatePorts(shapeId) ?? [];
+};
+
+/**
+ * Cisco-style short interface name for a 2D shape port (Gi0/0, Gi0/1, …).
+ * Prefer port.label when present (custom numbering from templates).
+ */
+export const getShape2dPortIfaceName = (
+  shapeId: string,
+  portId: string
+): string => {
+  const ports = getShape2dPorts(shapeId);
+  const port = ports.find((candidate) => {
+    return candidate.id === portId;
+  });
+
+  if (port?.label) {
+    return port.label;
+  }
+
+  const index = ports.findIndex((candidate) => {
+    return candidate.id === portId;
+  });
+
+  if (index < 0) {
+    return 'Gi0/0';
+  }
+
+  return `Gi0/${index}`;
 };
 
 export const isShape2dIcon = (iconId: string | undefined | null): boolean => {
   if (!iconId) return false;
+  if (SHAPE_2D_SIZES[iconId] !== undefined) return true;
 
-  return SHAPE_2D_SIZES[iconId] !== undefined;
+  // eslint-disable-next-line @typescript-eslint/no-var-requires
+  const { isDeviceTemplateId } = require('src/utils/deviceTemplateRegistry') as {
+    isDeviceTemplateId: (id: string) => boolean;
+  };
+  return isDeviceTemplateId(iconId);
 };
 
 export const DEFAULT_COLOR: Colors[0] = {
@@ -169,7 +236,7 @@ export const RECTANGLE_DEFAULTS: Required<
 
 export const ZOOM_INCREMENT = 0.2;
 export const MIN_ZOOM = 0.2;
-export const MAX_ZOOM = 1;
+export const MAX_ZOOM = 2.5;
 export const TRANSFORM_ANCHOR_SIZE = 30;
 export const TRANSFORM_CONTROLS_COLOR = '#0392ff';
 export const INITIAL_DATA: InitialData = {
@@ -179,6 +246,7 @@ export const INITIAL_DATA: InitialData = {
   colors: [DEFAULT_COLOR],
   items: [],
   views: [],
+  deviceTemplates: [],
   fitToView: false
 };
 export const INITIAL_UI_STATE = {
@@ -198,8 +266,6 @@ export const MAIN_MENU_OPTIONS: MainMenuOptions = [
   'EXPORT.JSON',
   'EXPORT.PNG',
   'ACTION.CLEAR_CANVAS',
-  'LINK.DISCORD',
-  'LINK.GITHUB',
   'VERSION'
 ];
 

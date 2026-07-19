@@ -2,14 +2,20 @@ import React, { createContext, useRef, useContext } from 'react';
 import { createStore, useStore } from 'zustand';
 import { ModelStore } from 'src/types';
 import { INITIAL_DATA } from 'src/config';
+import { syncDeviceTemplateCache } from 'src/utils/deviceTemplateRegistry';
 
 const initialState = () => {
   return createStore<ModelStore>((set, get) => {
+    syncDeviceTemplateCache(INITIAL_DATA.deviceTemplates);
+
     return {
       ...INITIAL_DATA,
       actions: {
         get,
-        set
+        set: (...args: Parameters<typeof set>) => {
+          set(...args);
+          syncDeviceTemplateCache(get().deviceTemplates);
+        }
       }
     };
   });

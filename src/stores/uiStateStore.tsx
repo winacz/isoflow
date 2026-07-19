@@ -28,9 +28,14 @@ const initialState = () => {
         position: { screen: CoordsUtils.zero(), tile: CoordsUtils.zero() },
         mousedown: null,
         delta: null,
-        shiftKey: false
+        shiftKey: false,
+        ctrlKey: false,
+        metaKey: false
       },
       itemControls: null,
+      selectedItemIds: [],
+      selectedWaypointIds: [],
+      focusedPortId: null,
       enableDebugTools: false,
       actions: {
         setView: (view) => {
@@ -53,6 +58,8 @@ const initialState = () => {
               offset: CoordsUtils.zero()
             },
             itemControls: null,
+            selectedItemIds: [],
+            focusedPortId: null,
             zoom: 1
           });
         },
@@ -63,7 +70,12 @@ const initialState = () => {
           set({ dialog });
         },
         setIsMainMenuOpen: (isMainMenuOpen) => {
-          set({ isMainMenuOpen, itemControls: null });
+          set({
+            isMainMenuOpen,
+            itemControls: null,
+            selectedItemIds: [],
+            focusedPortId: null
+          });
         },
         incrementZoom: () => {
           const { zoom } = get();
@@ -80,7 +92,65 @@ const initialState = () => {
           set({ scroll: { position, offset: offset ?? get().scroll.offset } });
         },
         setItemControls: (itemControls) => {
-          set({ itemControls });
+          if (itemControls?.type === 'ITEM') {
+            set({
+              itemControls,
+              selectedItemIds: [itemControls.id]
+            });
+            return;
+          }
+
+          set({
+            itemControls,
+            selectedItemIds: [],
+            focusedPortId: null
+          });
+        },
+        setSelectedItemIds: (ids) => {
+          const unique = [...new Set(ids.filter(Boolean))];
+
+          if (unique.length === 1) {
+            set({
+              selectedItemIds: unique,
+              selectedWaypointIds: [],
+              itemControls: { type: 'ITEM', id: unique[0] }
+            });
+            return;
+          }
+
+          if (unique.length > 1) {
+            set({
+              selectedItemIds: unique,
+              selectedWaypointIds: [],
+              itemControls: null,
+              focusedPortId: null
+            });
+            return;
+          }
+
+          set({
+            selectedItemIds: [],
+            itemControls: null,
+            focusedPortId: null
+          });
+        },
+        setSelectedWaypointIds: (ids) => {
+          set({ selectedWaypointIds: [...new Set(ids.filter(Boolean))] });
+        },
+        toggleSelectedItemId: (id) => {
+          const current = get().selectedItemIds;
+          const next = current.includes(id)
+            ? current.filter((itemId) => {
+                return itemId !== id;
+              })
+            : [...current, id];
+          get().actions.setSelectedItemIds(next);
+        },
+        clearSelectedItemIds: () => {
+          get().actions.setSelectedItemIds([]);
+        },
+        setFocusedPortId: (focusedPortId) => {
+          set({ focusedPortId });
         },
         setContextMenu: (contextMenu) => {
           set({ contextMenu });

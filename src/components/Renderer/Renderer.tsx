@@ -18,6 +18,7 @@ import { useScene } from 'src/hooks/useScene';
 import { RendererProps } from 'src/types/rendererProps';
 import { isShape2dIcon } from 'src/config';
 import { Connector as ConnectorModel } from 'src/types';
+import { MarqueeSelection } from 'src/components/MarqueeSelection/MarqueeSelection';
 
 const DIAGRAM_BG_2D = '#f6faff';
 
@@ -164,6 +165,11 @@ export const Renderer = ({ showGrid, backgroundColor }: RendererProps) => {
       <SceneLayer>
         <Nodes nodes={visibleNodes} />
       </SceneLayer>
+      {isTwoD && (
+        <SceneLayer order={3} sx={{ pointerEvents: 'none' }}>
+          <MarqueeSelection />
+        </SceneLayer>
+      )}
       {isTwoD && (
         <SceneLayer order={2} sx={{ pointerEvents: 'none' }}>
           <Connectors connectors={visibleConnectors} />

@@ -2,10 +2,14 @@ import React, { useMemo } from 'react';
 import { Box, Typography } from '@mui/material';
 import {
   TILE_SIZE_2D,
+  SHAPE_2D_PC_ID,
   getShape2dSize,
   getShape2dPorts,
-  Shape2dPort
+  getShape2dPortIfaceName
 } from 'src/config';
+import { getPortStatusColor, getDeviceTemplateLayout, parseDeviceColor } from 'src/utils';
+import type { ModelItem } from 'src/types';
+import type { DeviceTemplateLayout } from 'src/utils/deviceTemplateLayout';
 import { Rj45Port } from 'src/components/Shapes2d/Rj45Port';
 
 interface Props {
@@ -15,10 +19,25 @@ interface Props {
   height?: number;
   name?: string;
   subtitle?: string;
+  /** Per-port config from ModelItem — drives VLAN status colors. */
+  ports?: ModelItem['ports'];
+  /** Port ids that currently have a cable attached. */
+  connectedPortIds?: ReadonlySet<string> | string[];
+  /** All model items — used to resolve shared VLAN colors. */
+  modelItems?: ModelItem[];
+  /**
+   * Canvas nodes are centered on their tile; menu previews need top-left
+   * anchoring inside a fixed box.
+   */
+  centered?: boolean;
+  /** Live-preview / unsaved template layout (bypasses registry). */
+  layoutOverride?: DeviceTemplateLayout;
+  /** Chassis fill color (hex). */
+  color?: string;
 }
 
 /**
- * Topology-card device (Switch / PC): thin frame, header, RJ45 port grid.
+ * Topology-card device (Switch / PC): thin frame, header, RJ45/SFP port grid.
  * Each port cell is a connection handle (exact tile center).
  */
 export const DeviceShape2d = ({
@@ -26,9 +45,17 @@ export const DeviceShape2d = ({
   width,
   height,
   name = 'DEVICE',
-  subtitle
+  subtitle,
+  ports: portConfigs,
+  connectedPortIds,
+  modelItems,
+  centered = true,
+  layoutOverride,
+  color = '#ffffff'
 }: Props) => {
-  const footprint = getShape2dSize(shapeId) ?? { width: 8, height: 7 };
+  const templateLayout = layoutOverride ?? getDeviceTemplateLayout(shapeId);
+  const footprint =
+    layoutOverride?.size ?? getShape2dSize(shapeId) ?? { width: 8, height: 7 };
   const pxWidth = width ?? footprint.width * TILE_SIZE_2D;
   const pxHeight = height ?? footprint.height * TILE_SIZE_2D;
   const scaleX = pxWidth / (footprint.width * TILE_SIZE_2D);
@@ -36,35 +63,36 @@ export const DeviceShape2d = ({
   const tileW = TILE_SIZE_2D * scaleX;
   const tileH = TILE_SIZE_2D * scaleY;
   const cellSize = Math.min(tileW, tileH);
-  // Ports sit on every-other tile — draw them larger than one cell
   const portTileSize = cellSize * 1.75;
+  const isRack = templateLayout?.formFactor === 'RACK';
+  const earW = Math.max(3, Math.round(tileW * 0.35));
+  const chassisTint = parseDeviceColor(color);
 
   const ports = useMemo(() => {
+    if (layoutOverride) return layoutOverride.ports;
     return getShape2dPorts(shapeId);
-  }, [shapeId]);
+  }, [shapeId, layoutOverride]);
 
-  const portNumber = (port: Shape2dPort, index: number) => {
-    if (port.id.startsWith('port-top-')) {
-      return Number(port.id.replace('port-top-', ''));
-    }
+  const sectionDividers = templateLayout?.sectionDividers ?? [];
 
-    if (port.id.startsWith('port-bottom-')) {
-      return 8 + Number(port.id.replace('port-bottom-', ''));
-    }
-
-    return index + 1;
-  };
+  const connectedSet = useMemo(() => {
+    if (!connectedPortIds) return null;
+    return connectedPortIds instanceof Set
+      ? connectedPortIds
+      : new Set(connectedPortIds);
+  }, [connectedPortIds]);
 
   return (
     <Box
       sx={{
-        position: 'absolute',
+        position: centered ? 'absolute' : 'relative',
         width: pxWidth,
         height: pxHeight,
-        left: -pxWidth / 2,
-        top: -pxHeight / 2,
+        left: centered ? -pxWidth / 2 : 0,
+        top: centered ? -pxHeight / 2 : 0,
         pointerEvents: 'none',
-        boxSizing: 'border-box'
+        boxSizing: 'border-box',
+        overflow: 'hidden'
       }}
     >
       <Box
@@ -75,10 +103,76 @@ export const DeviceShape2d = ({
           border: `${Math.max(1, Math.round(cellSize * 0.05))}px solid #7a8ba3`,
           borderRadius: Math.max(2, Math.round(cellSize * 0.12)),
           boxSizing: 'border-box',
-          boxShadow: '0 1px 2px rgba(0,0,0,0.06)'
+          boxShadow: '0 1px 2px rgba(0,0,0,0.06)',
+          overflow: 'hidden'
         }}
-      />
+      >
+        {chassisTint.alpha > 0.01 && (
+          <Box
+            sx={{
+              position: 'absolute',
+              inset: 0,
+              bgcolor: chassisTint.css,
+              pointerEvents: 'none'
+            }}
+          />
+        )}
+      </Box>
 
+      {isRack && (
+        <>
+          <Box
+            sx={{
+              position: 'absolute',
+              left: Math.max(1, Math.round(cellSize * 0.05)),
+              top: tileH * 0.85,
+              width: earW,
+              height: pxHeight - tileH * 1.7,
+              bgcolor: '#d8dee8',
+              borderRadius: '1px',
+              border: '1px solid #a8b4c4',
+              boxSizing: 'border-box',
+              '&::before, &::after': {
+                content: '""',
+                position: 'absolute',
+                left: '50%',
+                width: Math.max(2, earW * 0.32),
+                height: Math.max(2, earW * 0.32),
+                borderRadius: '50%',
+                bgcolor: '#8b97a8',
+                transform: 'translateX(-50%)'
+              },
+              '&::before': { top: '16%' },
+              '&::after': { bottom: '16%' }
+            }}
+          />
+          <Box
+            sx={{
+              position: 'absolute',
+              right: Math.max(1, Math.round(cellSize * 0.05)),
+              top: tileH * 0.85,
+              width: earW,
+              height: pxHeight - tileH * 1.7,
+              bgcolor: '#d8dee8',
+              borderRadius: '1px',
+              border: '1px solid #a8b4c4',
+              boxSizing: 'border-box',
+              '&::before, &::after': {
+                content: '""',
+                position: 'absolute',
+                left: '50%',
+                width: Math.max(2, earW * 0.32),
+                height: Math.max(2, earW * 0.32),
+                borderRadius: '50%',
+                bgcolor: '#8b97a8',
+                transform: 'translateX(-50%)'
+              },
+              '&::before': { top: '16%' },
+              '&::after': { bottom: '16%' }
+            }}
+          />
+        </>
+      )}
       <Box
         sx={{
           position: 'absolute',
@@ -134,7 +228,34 @@ export const DeviceShape2d = ({
         }}
       />
 
+      {sectionDividers.map((x) => {
+        return (
+          <Box
+            key={`div-${x}`}
+            sx={{
+              position: 'absolute',
+              left: x * tileW + tileW * 0.35,
+              top: tileH * 3.6,
+              width: Math.max(1, Math.round(tileW * 0.08)),
+              height: tileH * 4.2,
+              bgcolor: '#d0d7e2',
+              borderRadius: 1,
+              opacity: 0.9
+            }}
+          />
+        );
+      })}
+
       {ports.map((port, index) => {
+        const iface =
+          port.label ?? getShape2dPortIfaceName(shapeId, port.id);
+        const config = portConfigs?.[port.id];
+        const statusColor = getPortStatusColor(config?.vlan, index, {
+          isPc: shapeId === SHAPE_2D_PC_ID,
+          customColor: config?.vlanColor,
+          modelItems
+        });
+
         return (
           <Box
             key={port.id}
@@ -155,7 +276,11 @@ export const DeviceShape2d = ({
             <Rj45Port
               side={port.side}
               tileSize={portTileSize}
-              portNumber={portNumber(port, index)}
+              portNumber={index + 1}
+              portLabel={iface}
+              statusColor={statusColor}
+              isConnected={Boolean(connectedSet?.has(port.id))}
+              media={port.media ?? 'RJ45'}
             />
           </Box>
         );

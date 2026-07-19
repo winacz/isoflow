@@ -57,6 +57,7 @@ export const createEditorInitialData = (): InitialData => {
     icons,
     colors,
     items: [...(isometricDemo.items ?? []), ...(plan.items ?? [])],
+    deviceTemplates: [],
     views: [
       {
         id: isometricViewId,

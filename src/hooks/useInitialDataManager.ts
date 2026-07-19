@@ -7,7 +7,11 @@ import {
   CoordsUtils,
   categoriseIcons,
   generateId,
-  getItemByIdOrThrow
+  getItemByIdOrThrow,
+  syncDeviceTemplateCache,
+  mergeDeviceTemplatesWithLibrary,
+  ensureDeviceTemplateIcons,
+  saveDeviceTemplatesLibrary
 } from 'src/utils';
 import * as reducers from 'src/stores/reducers';
 import { useModelStore } from 'src/stores/modelStore';
@@ -52,6 +56,16 @@ export const useInitialDataManager = () => {
 
       const initialData = _initialData;
 
+      const deviceTemplates = mergeDeviceTemplatesWithLibrary(
+        initialData.deviceTemplates
+      );
+      initialData.deviceTemplates = deviceTemplates;
+      initialData.icons = ensureDeviceTemplateIcons(
+        initialData.icons ?? [],
+        deviceTemplates
+      );
+      saveDeviceTemplatesLibrary(deviceTemplates);
+
       if (initialData.views.length === 0) {
         const updates = reducers.view({
           action: 'CREATE_VIEW',
@@ -66,6 +80,7 @@ export const useInitialDataManager = () => {
       }
 
       prevInitialData.current = initialData;
+      syncDeviceTemplateCache(initialData.deviceTemplates);
       model.actions.set(initialData);
 
       const view = getItemByIdOrThrow(
@@ -85,6 +100,9 @@ export const useInitialDataManager = () => {
         const { zoom, scroll } = getFitToViewParams(view.value, {
           width: rendererSize?.width ?? 0,
           height: rendererSize?.height ?? 0
+        }, {
+          projectionMode: initialData.projectionMode,
+          modelItems: initialData.items
         });
 
         uiStateActions.setScroll({

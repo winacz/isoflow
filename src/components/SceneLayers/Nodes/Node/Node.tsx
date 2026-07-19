@@ -11,6 +11,7 @@ import { getTilePosition, getShape2dCenterPosition } from 'src/utils';
 import { useIcon } from 'src/hooks/useIcon';
 import { ViewItem } from 'src/types';
 import { useModelItem } from 'src/hooks/useModelItem';
+import { useScene } from 'src/hooks/useScene';
 import { ExpandableLabel } from 'src/components/Label/ExpandableLabel';
 import { MarkdownEditor } from 'src/components/MarkdownEditor/MarkdownEditor';
 import { useUiStateStore } from 'src/stores/uiStateStore';
@@ -20,11 +21,40 @@ interface Props {
   order: number;
   /** 2D: emphasize endpoints of the selected connector */
   selectionTone?: 'normal' | 'highlighted' | 'dimmed';
+  /** Opacity used when selectionTone is dimmed (softer while dragging). */
+  dimmedOpacity?: number;
 }
 
-export const Node = ({ node, order, selectionTone = 'normal' }: Props) => {
+export const Node = ({
+  node,
+  order,
+  selectionTone = 'normal',
+  dimmedOpacity = 0.7
+}: Props) => {
   const modelItem = useModelItem(node.id);
-  const { iconComponent } = useIcon(modelItem.icon, modelItem.name);
+  const { connectors } = useScene();
+
+  const connectedPortIds = useMemo(() => {
+    const ids = new Set<string>();
+
+    connectors.forEach((connector) => {
+      connector.anchors.forEach((anchor) => {
+        if (anchor.ref.item === node.id && anchor.ref.port) {
+          ids.add(anchor.ref.port);
+        }
+      });
+    });
+
+    return ids;
+  }, [connectors, node.id]);
+
+  const { iconComponent } = useIcon(
+    modelItem.icon,
+    modelItem.name,
+    modelItem.ports,
+    connectedPortIds,
+    modelItem.color
+  );
   const projectionMode = useUiStateStore((state) => {
     return state.projectionMode;
   });
@@ -65,7 +95,7 @@ export const Node = ({ node, order, selectionTone = 'normal' }: Props) => {
       sx={{
         position: 'absolute',
         zIndex: order,
-        opacity: selectionTone === 'dimmed' ? 0.35 : 1,
+        opacity: selectionTone === 'dimmed' ? dimmedOpacity : 1,
         filter:
           selectionTone === 'highlighted'
             ? 'drop-shadow(0 0 6px rgba(37, 99, 235, 0.65)) drop-shadow(0 2px 6px rgba(37, 99, 235, 0.4))'

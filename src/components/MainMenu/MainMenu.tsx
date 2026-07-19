@@ -12,15 +12,16 @@ import {
 import { UiElement } from 'src/components/UiElement/UiElement';
 import { IconButton } from 'src/components/IconButton/IconButton';
 import { useUiStateStore } from 'src/stores/uiStateStore';
-import { exportAsJSON, modelFromModelStore } from 'src/utils';
+import { exportAsJSON, buildExportSnapshot } from 'src/utils';
 import { useInitialDataManager } from 'src/hooks/useInitialDataManager';
 import { useModelStore } from 'src/stores/modelStore';
+import { useScene } from 'src/hooks/useScene';
 import { MenuItem } from './MenuItem';
 
 export const MainMenu = () => {
   const [anchorEl, setAnchorEl] = useState<null | HTMLElement>(null);
-  const model = useModelStore((state) => {
-    return modelFromModelStore(state);
+  const modelStore = useModelStore((state) => {
+    return state;
   });
   const isMainMenuOpen = useUiStateStore((state) => {
     return state.isMainMenuOpen;
@@ -28,10 +29,17 @@ export const MainMenu = () => {
   const mainMenuOptions = useUiStateStore((state) => {
     return state.mainMenuOptions;
   });
+  const projectionMode = useUiStateStore((state) => {
+    return state.projectionMode;
+  });
+  const activeViewId = useUiStateStore((state) => {
+    return state.view;
+  });
   const uiStateActions = useUiStateStore((state) => {
     return state.actions;
   });
   const initialDataManager = useInitialDataManager();
+  const { clearView } = useScene();
 
   const onToggleMenu = useCallback(
     (event: React.MouseEvent<HTMLButtonElement>) => {
@@ -74,10 +82,15 @@ export const MainMenu = () => {
     uiStateActions.setIsMainMenuOpen(false);
   }, [uiStateActions, load]);
 
-  const onExportAsJSON = useCallback(async () => {
-    exportAsJSON(model);
+  const onExportAsJSON = useCallback(() => {
+    exportAsJSON(
+      buildExportSnapshot(modelStore, {
+        view: activeViewId,
+        projectionMode
+      })
+    );
     uiStateActions.setIsMainMenuOpen(false);
-  }, [model, uiStateActions]);
+  }, [modelStore, activeViewId, projectionMode, uiStateActions]);
 
   const onExportAsImage = useCallback(() => {
     uiStateActions.setIsMainMenuOpen(false);
@@ -87,9 +100,35 @@ export const MainMenu = () => {
   const { clear } = initialDataManager;
 
   const onClearCanvas = useCallback(() => {
-    clear();
+    const confirmed = window.confirm(
+      projectionMode === 'TWO_D'
+        ? 'Clear the entire 2D canvas? This cannot be undone.'
+        : 'Clear the canvas? This will reset the diagram and cannot be undone.'
+    );
+
+    if (!confirmed) {
+      return;
+    }
+
+    if (projectionMode === 'TWO_D') {
+      clearView();
+      uiStateActions.setItemControls(null);
+      uiStateActions.setMode({
+        type: 'CURSOR',
+        showCursor: true,
+        mousedownItem: null
+      });
+      uiStateActions.setScroll({
+        position: { x: 0, y: 0 },
+        offset: { x: 0, y: 0 }
+      });
+      uiStateActions.setZoom(1);
+    } else {
+      clear();
+    }
+
     uiStateActions.setIsMainMenuOpen(false);
-  }, [uiStateActions, clear]);
+  }, [uiStateActions, clear, clearView, projectionMode]);
 
   const sectionVisibility = useMemo(() => {
     return {

@@ -44,6 +44,9 @@ export const ExportImageDialog = ({ onClose, quality = 1.5 }: Props) => {
   const currentView = useUiStateStore((state) => {
     return state.view;
   });
+  const projectionMode = useUiStateStore((state) => {
+    return state.projectionMode;
+  });
   const [imageData, setImageData] = React.useState<string>();
   const [exportError, setExportError] = useState(false);
   const { getUnprojectedBounds } = useDiagramUtils();
@@ -97,9 +100,12 @@ export const ExportImageDialog = ({ onClose, quality = 1.5 }: Props) => {
     setShowGrid(checked);
   };
 
-  const [backgroundColor, setBackgroundColor] = useState<string>(
-    customVars.customPalette.diagramBg
-  );
+  const defaultBg =
+    projectionMode === 'TWO_D'
+      ? '#f6faff'
+      : customVars.customPalette.diagramBg;
+
+  const [backgroundColor, setBackgroundColor] = useState<string>(defaultBg);
   const handleBackgroundColorChange = (color: string) => {
     setBackgroundColor(color);
   };
@@ -107,6 +113,9 @@ export const ExportImageDialog = ({ onClose, quality = 1.5 }: Props) => {
   useEffect(() => {
     setImageData(undefined);
   }, [showGrid, backgroundColor]);
+
+  const exportWidth = Math.max(320, unprojectedBounds.width * quality);
+  const exportHeight = Math.max(240, unprojectedBounds.height * quality);
 
   return (
     <Dialog open onClose={onClose}>
@@ -140,8 +149,8 @@ export const ExportImageDialog = ({ onClose, quality = 1.5 }: Props) => {
                     left: 0
                   }}
                   style={{
-                    width: unprojectedBounds.width * quality,
-                    height: unprojectedBounds.height * quality
+                    width: exportWidth,
+                    height: exportHeight
                   }}
                 >
                   <Isoflow
@@ -150,7 +159,8 @@ export const ExportImageDialog = ({ onClose, quality = 1.5 }: Props) => {
                     initialData={{
                       ...model,
                       fitToView: true,
-                      view: currentView
+                      view: currentView,
+                      projectionMode
                     }}
                     renderer={{
                       showGrid,
@@ -181,7 +191,7 @@ export const ExportImageDialog = ({ onClose, quality = 1.5 }: Props) => {
                   maxWidth: '100%'
                 }}
                 style={{
-                  width: unprojectedBounds.width
+                  width: Math.min(500, unprojectedBounds.width)
                 }}
                 src={imageData}
                 alt="preview"

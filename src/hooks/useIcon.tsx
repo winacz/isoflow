@@ -9,11 +9,21 @@ import {
   SHAPES_2D,
   isShape2dIcon
 } from 'src/config';
+import type { ModelItem } from 'src/types';
 
-export const useIcon = (id: string | undefined, name?: string) => {
+export const useIcon = (
+  id: string | undefined,
+  name?: string,
+  ports?: ModelItem['ports'],
+  connectedPortIds?: ReadonlySet<string> | string[],
+  color?: string
+) => {
   const [hasLoaded, setHasLoaded] = React.useState(false);
   const icons = useModelStore((state) => {
     return state.icons;
+  });
+  const modelItems = useModelStore((state) => {
+    return state.items;
   });
 
   const icon = useMemo(() => {
@@ -25,8 +35,23 @@ export const useIcon = (id: string | undefined, name?: string) => {
 
     if (shape) return shape;
 
+    // Custom device templates live in model.icons
+    if (isShape2dIcon(id)) {
+      const fromIcons = icons.find((item) => {
+        return item.id === id;
+      });
+      if (fromIcons) return fromIcons;
+      return {
+        id,
+        name: name || id,
+        url: '',
+        collection: 'Switches',
+        isIsometric: false
+      };
+    }
+
     return getItemByIdOrThrow(icons, id).value;
-  }, [icons, id]);
+  }, [icons, id, name]);
 
   useEffect(() => {
     setHasLoaded(false);
@@ -35,7 +60,16 @@ export const useIcon = (id: string | undefined, name?: string) => {
   const iconComponent = useMemo(() => {
     if (isShape2dIcon(icon.id)) {
       setHasLoaded(true);
-      return <DeviceShape2d shapeId={icon.id} name={name || icon.name} />;
+      return (
+        <DeviceShape2d
+          shapeId={icon.id}
+          name={name || icon.name}
+          ports={ports}
+          connectedPortIds={connectedPortIds}
+          modelItems={modelItems}
+          color={color}
+        />
+      );
     }
 
     if (!icon.isIsometric) {
@@ -51,7 +85,7 @@ export const useIcon = (id: string | undefined, name?: string) => {
         }}
       />
     );
-  }, [icon, name]);
+  }, [icon, name, ports, connectedPortIds, modelItems, color]);
 
   return {
     icon,

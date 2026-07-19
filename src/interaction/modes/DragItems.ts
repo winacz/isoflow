@@ -131,6 +131,47 @@ const dragItems = (
     return;
   }
 
+  // Group waypoint drag (marquee-selected): move every tile anchor by delta.
+  const anchorItems = items.filter((item) => {
+    return item.type === 'CONNECTOR_ANCHOR';
+  });
+
+  if (anchorItems.length > 1) {
+    const connectors = options?.connectors ?? scene.connectors;
+    const byConnector = new Map<string, Set<string>>();
+
+    anchorItems.forEach((anchorItem) => {
+      try {
+        const parent = getAnchorParent(anchorItem.id, connectors);
+        const set = byConnector.get(parent.id) ?? new Set<string>();
+        set.add(anchorItem.id);
+        byConnector.set(parent.id, set);
+      } catch {
+        // anchor may have been removed mid-drag
+      }
+    });
+
+    byConnector.forEach((anchorIds, connectorId) => {
+      const connector = getItemByIdOrThrow(connectors, connectorId).value;
+
+      const nextAnchors = connector.anchors.map((anchor) => {
+        if (!anchorIds.has(anchor.id) || !anchor.ref.tile) return anchor;
+        return {
+          ...anchor,
+          ref: { tile: CoordsUtils.add(anchor.ref.tile, delta) }
+        };
+      });
+
+      scene.updateConnector(
+        connectorId,
+        { anchors: nextAnchors },
+        { overlapResolve: 'off' }
+      );
+    });
+
+    return;
+  }
+
   // Block the whole move if any dragged node would overlap another
   if (draggedNodeIds.length > 0) {
     const blocked = draggedNodeIds.some((id) => {
