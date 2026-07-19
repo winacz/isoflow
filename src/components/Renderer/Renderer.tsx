@@ -48,6 +48,9 @@ export const Renderer = ({ showGrid, backgroundColor }: RendererProps) => {
   const uiStateActions = useUiStateStore((state) => {
     return state.actions;
   });
+  const showGridUi = useUiStateStore((state) => {
+    return state.showGrid;
+  });
   const modelItems = useModelStore((state) => {
     return state.items;
   });
@@ -61,9 +64,24 @@ export const Renderer = ({ showGrid, backgroundColor }: RendererProps) => {
     uiStateActions.setRendererEl(containerRef.current);
   }, [setInteractionsElement, uiStateActions]);
 
-  const isShowGrid = useMemo(() => {
-    return showGrid === undefined || showGrid;
-  }, [showGrid]);
+  // Native wheel on the diagram hit-layer (React onWheel can be passive / unreliable)
+  useEffect(() => {
+    const el = interactionsRef.current;
+    if (!el) return undefined;
+
+    const onWheel = (e: WheelEvent) => {
+      e.preventDefault();
+      e.stopPropagation();
+      uiStateActions.adjustZoomByWheel(e.deltaY, e.deltaMode);
+    };
+
+    el.addEventListener('wheel', onWheel, { passive: false });
+    return () => {
+      el.removeEventListener('wheel', onWheel);
+    };
+  }, [uiStateActions]);
+
+  const isShowGrid = showGrid !== undefined ? showGrid : showGridUi;
 
   const isTwoD = projectionMode === 'TWO_D';
 
@@ -129,6 +147,11 @@ export const Renderer = ({ showGrid, backgroundColor }: RendererProps) => {
           <Rectangles rectangles={rectangles} />
         </SceneLayer>
       )}
+      {isTwoD && (
+        <SceneLayer order={0} sx={{ pointerEvents: 'none' }}>
+          <Rectangles rectangles={rectangles} />
+        </SceneLayer>
+      )}
       <Box
         sx={{
           position: 'absolute',
@@ -163,7 +186,10 @@ export const Renderer = ({ showGrid, backgroundColor }: RendererProps) => {
           )}
         </>
       )}
-      <SceneLayer>
+      <SceneLayer
+        order={isTwoD ? 1 : 11}
+        sx={!isTwoD ? { pointerEvents: 'none' } : undefined}
+      >
         <Nodes nodes={visibleNodes} />
       </SceneLayer>
       {isTwoD && (
@@ -182,7 +208,7 @@ export const Renderer = ({ showGrid, backgroundColor }: RendererProps) => {
         </SceneLayer>
       )}
       {!isTwoD && (
-        <SceneLayer>
+        <SceneLayer order={12} sx={{ pointerEvents: 'none' }}>
           <TransformControlsManager />
         </SceneLayer>
       )}
@@ -198,10 +224,11 @@ export const Renderer = ({ showGrid, backgroundColor }: RendererProps) => {
           zIndex: 10
         }}
       />
-      {/* Above interaction overlay so badge hover/click work */}
+      {/* Above interaction overlay so badge / rectangle handles work */}
       {isTwoD && (
         <SceneLayer order={11} sx={{ pointerEvents: 'none' }}>
           <ConnectorStackBadges />
+          <TransformControlsManager />
         </SceneLayer>
       )}
     </Box>

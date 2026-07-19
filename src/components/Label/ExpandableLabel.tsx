@@ -1,6 +1,5 @@
-import React, { useState, useRef, useEffect, useMemo } from 'react';
+import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { Box } from '@mui/material';
-import { useResizeObserver } from 'src/hooks/useResizeObserver';
 import { Gradient } from 'src/components/Gradient/Gradient';
 import { ExpandButton } from './ExpandButton';
 import { Label, Props as LabelProps } from './Label';
@@ -17,32 +16,55 @@ export const ExpandableLabel = ({
   ...rest
 }: Props) => {
   const [isExpanded, setIsExpanded] = useState(false);
-  const contentRef = useRef<HTMLDivElement>();
-  const { observe, size: contentSize } = useResizeObserver();
+  const [isContentTruncated, setIsContentTruncated] = useState(false);
+  const contentRef = useRef<HTMLDivElement | null>(null);
 
-  useEffect(() => {
-    if (!contentRef.current) return;
-
-    observe(contentRef.current);
-  }, [observe]);
-
-  const containerMaxHeight = useMemo(() => {
-    return isExpanded ? undefined : STANDARD_LABEL_HEIGHT;
+  const measureTruncation = useCallback(() => {
+    const el = contentRef.current;
+    if (!el || isExpanded) {
+      setIsContentTruncated(false);
+      return;
+    }
+    // scrollHeight reflects full content; clientHeight is capped by maxHeight
+    setIsContentTruncated(el.scrollHeight > STANDARD_LABEL_HEIGHT - 4);
   }, [isExpanded]);
 
-  const isContentTruncated = useMemo(() => {
-    return !isExpanded && contentSize.height >= STANDARD_LABEL_HEIGHT - 10;
-  }, [isExpanded, contentSize.height]);
+  useEffect(() => {
+    const el = contentRef.current;
+    if (!el) return undefined;
+
+    measureTruncation();
+
+    const observer = new ResizeObserver(() => {
+      measureTruncation();
+    });
+    observer.observe(el);
+
+    // Quill / markdown may settle after first paint
+    const raf = requestAnimationFrame(measureTruncation);
+    const t = window.setTimeout(measureTruncation, 100);
+
+    return () => {
+      observer.disconnect();
+      cancelAnimationFrame(raf);
+      window.clearTimeout(t);
+    };
+  }, [measureTruncation, children]);
 
   useEffect(() => {
     contentRef.current?.scrollTo({ top: 0 });
-  }, [isExpanded]);
+    measureTruncation();
+  }, [isExpanded, measureTruncation]);
+
+  const containerMaxHeight = isExpanded ? undefined : STANDARD_LABEL_HEIGHT;
+  const showExpandControl = isExpanded || isContentTruncated;
 
   return (
     <Label
       {...rest}
       maxHeight={containerMaxHeight}
       maxWidth={isExpanded ? rest.maxWidth * 1.5 : rest.maxWidth}
+      sx={{ pointerEvents: 'none', ...((rest.sx as object) ?? {}) }}
     >
       <Box
         ref={contentRef}
@@ -58,31 +80,36 @@ export const ExpandableLabel = ({
       >
         {children}
 
-        {isContentTruncated && (
+        {isContentTruncated && !isExpanded && (
           <Gradient
             sx={{
               position: 'absolute',
               width: '100%',
               height: 50,
               bottom: 0,
-              left: 0
+              left: 0,
+              pointerEvents: 'none'
             }}
           />
         )}
       </Box>
 
-      {((!isExpanded && isContentTruncated) || isExpanded) && (
+      {showExpandControl && (
         <ExpandButton
           sx={{
             position: 'absolute',
             bottom: 0,
             right: 0,
-            m: 0.5
+            m: 0.5,
+            pointerEvents: 'auto'
           }}
           isExpanded={isExpanded}
-          onClick={() => {
-            setIsExpanded(!isExpanded);
-            onToggleExpand?.(!isExpanded);
+          onClick={(e) => {
+            e.stopPropagation();
+            e.preventDefault();
+            const next = !isExpanded;
+            setIsExpanded(next);
+            onToggleExpand?.(next);
           }}
         />
       )}

@@ -3,7 +3,7 @@ import { ViewItem } from 'src/types';
 import {
   getItemByIdOrThrow,
   getConnectorsByViewItem,
-  pruneAnchorsAfterNodeMove
+  stripToEndpointAnchors
 } from 'src/utils';
 import { validateView } from 'src/schemas/validation';
 import { State, ViewReducerContext } from './types';
@@ -32,29 +32,27 @@ export const updateViewItem = (
 
       const connectors = draft.model.views[view.index].connectors;
       if (connectors) {
-        // Keep cable topology; only drop WPs that would spaghetti after the move.
+        // Node drag: drop middle WPs and re-route endpoints only.
         connectorsToUpdate.forEach((connector) => {
           const entry = getItemByIdOrThrow(connectors, connector.id);
-          const pruned = pruneAnchorsAfterNodeMove({
-            anchors: entry.value.anchors,
-            movedItemId: viewItem.value.id,
-            view: draft.model.views[view.index],
-            modelItems: draft.model.items
-          });
-
           connectors[entry.index] = {
             ...entry.value,
-            anchors: pruned
+            anchors: stripToEndpointAnchors(entry.value.anchors)
           };
         });
       }
 
-      // Rebuild paths (2 passes so elbow snap can align to neighbors' new bends).
+      // Rebuild paths from endpoints only (ignore old WPs while dragging).
+      // Bend waypoints are rematerialized on drag mouseup.
       let updatedConnectors = connectorsToUpdate.reduce((acc, connector) => {
         return syncConnector(
           connector.id,
           { viewId, state: acc },
-          { overlapResolve: 'off' }
+          {
+            overlapResolve: 'off',
+            ignoreWaypoints: true,
+            materializeBends: false
+          }
         );
       }, draft);
 
@@ -62,7 +60,11 @@ export const updateViewItem = (
         return syncConnector(
           connector.id,
           { viewId, state: acc },
-          { overlapResolve: 'off' }
+          {
+            overlapResolve: 'off',
+            ignoreWaypoints: true,
+            materializeBends: false
+          }
         );
       }, updatedConnectors);
 

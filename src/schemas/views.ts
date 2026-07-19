@@ -7,7 +7,11 @@ import { textBoxSchema } from './textBox';
 export const viewItemSchema = z.object({
   id,
   tile: coords,
-  labelHeight: z.number().optional()
+  labelHeight: z.number().optional(),
+  /** Cabinet this item is mounted in (RACK switches). */
+  parentId: id.optional(),
+  /** 0-based rack unit from the top of the cabinet. */
+  rackUnit: z.number().int().min(0).optional()
 });
 
 export const viewSchema = z.object({

@@ -39,7 +39,7 @@ export const deleteModelItem = (id: string, state: State): State => {
   return newState;
 };
 
-/** Apply a manual VLAN color to every non-PC port with the same VLAN. */
+/** Apply a manual VLAN color to every non-PC port/SVI with the same VLAN. */
 export const setVlanColorAcrossModel = (
   vlan: string,
   vlanColor: string,
@@ -52,20 +52,41 @@ export const setVlanColorAcrossModel = (
 
   return produce(state, (draft) => {
     draft.model.items.forEach((item, index) => {
-      if (!item.ports || item.icon === SHAPE_2D_PC_ID) return;
+      if (item.icon === SHAPE_2D_PC_ID) return;
 
       let changed = false;
-      const nextPorts = { ...item.ports };
+      let nextItem = item;
 
-      Object.entries(item.ports).forEach(([portId, config]) => {
-        if (!vlansMatch(config.vlan, vlan)) return;
-        if (config.vlanColor === color) return;
-        nextPorts[portId] = { ...config, vlanColor: color };
-        changed = true;
-      });
+      if (item.ports) {
+        const nextPorts = { ...item.ports };
+        Object.entries(item.ports).forEach(([portId, config]) => {
+          if (!vlansMatch(config.vlan, vlan)) return;
+          if (config.vlanColor === color) return;
+          nextPorts[portId] = { ...config, vlanColor: color };
+          changed = true;
+        });
+        if (changed) {
+          nextItem = { ...nextItem, ports: nextPorts };
+        }
+      }
+
+      if (item.svis?.length) {
+        let sviChanged = false;
+        const nextSvis = item.svis.map((svi) => {
+          if (!vlansMatch(svi.vlan, vlan) || svi.vlanColor === color) {
+            return svi;
+          }
+          sviChanged = true;
+          return { ...svi, vlanColor: color };
+        });
+        if (sviChanged) {
+          nextItem = { ...nextItem, svis: nextSvis };
+          changed = true;
+        }
+      }
 
       if (changed) {
-        draft.model.items[index] = { ...item, ports: nextPorts };
+        draft.model.items[index] = nextItem;
       }
     });
   });

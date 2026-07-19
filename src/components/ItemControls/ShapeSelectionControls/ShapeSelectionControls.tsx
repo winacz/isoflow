@@ -25,9 +25,14 @@ import {
   getShape2dSize,
   getShape2dPorts,
   SHAPE_2D_SWITCH_ID,
-  SHAPE_2D_PC_ID
+  SHAPE_2D_PC_ID,
+  SHAPE_2D_CABINET_ID,
+  CABINET_DEFAULT_UNITS,
+  getCabinetSize
 } from 'src/config';
 import { DeviceShape2d } from 'src/components/Shapes2d/DeviceShape2d';
+import { CabinetShape2d } from 'src/components/Shapes2d/CabinetShape2d';
+import { DeviceTypeIcon } from 'src/components/Icons/DeviceTypeIcon';
 import {
   deviceTemplateToIcon,
   upsertSavedDeviceTemplate,
@@ -58,6 +63,45 @@ const shapeCaption = (shape: Icon) => {
 };
 
 const ShapePreview = ({ shape }: { shape: Icon }) => {
+  if (shape.id === SHAPE_2D_CABINET_ID) {
+    const size = getCabinetSize(Math.min(8, CABINET_DEFAULT_UNITS));
+    const naturalW = size.width * TILE_SIZE_2D;
+    const naturalH = size.height * TILE_SIZE_2D;
+    const previewWidth = 120;
+    const scale = previewWidth / naturalW;
+    const previewHeight = Math.round(naturalH * scale);
+
+    return (
+      <Box
+        sx={{
+          width: previewWidth,
+          height: Math.min(72, previewHeight),
+          flexShrink: 0,
+          overflow: 'hidden',
+          borderRadius: 1,
+          border: '1px solid',
+          borderColor: 'divider',
+          bgcolor: '#f8fafc'
+        }}
+      >
+        <Box
+          sx={{
+            width: naturalW,
+            height: naturalH,
+            transform: `scale(${scale})`,
+            transformOrigin: 'top left'
+          }}
+        >
+          <CabinetShape2d
+            centered={false}
+            name="SZAFA"
+            rackUnits={Math.min(8, CABINET_DEFAULT_UNITS)}
+          />
+        </Box>
+      </Box>
+    );
+  }
+
   const size = getShape2dSize(shape.id) ?? { width: 8, height: 7 };
   const naturalW = size.width * TILE_SIZE_2D;
   const naturalH = size.height * TILE_SIZE_2D;
@@ -117,7 +161,7 @@ const ShapeCategory = ({
   onEdit?: (shape: Icon) => void;
   footer?: React.ReactNode;
 }) => {
-  const [isExpanded, setIsExpanded] = useState(true);
+  const [isExpanded, setIsExpanded] = useState(false);
 
   return (
     <Box>
@@ -187,9 +231,15 @@ const ShapeCategory = ({
                   <Stack direction="row" spacing={1.5} alignItems="center">
                     <ShapePreview shape={shape} />
                     <Box sx={{ textAlign: 'left', minWidth: 0 }}>
-                      <Typography fontWeight={600} fontSize={13} noWrap>
-                        {shape.name}
-                      </Typography>
+                      <Stack direction="row" spacing={0.75} alignItems="center">
+                        <DeviceTypeIcon
+                          iconId={shape.id}
+                          sx={{ fontSize: 18, opacity: 0.85, flexShrink: 0 }}
+                        />
+                        <Typography fontWeight={600} fontSize={13} noWrap>
+                          {shape.name}
+                        </Typography>
+                      </Stack>
                       {caption && (
                         <Typography
                           variant="caption"
@@ -280,6 +330,8 @@ export const ShapeSelectionControls = () => {
     const byCollection = new Map<string, Icon[]>();
 
     SHAPES_2D.forEach((shape) => {
+      // Cabinet lives under Obiekty section, not device categories.
+      if (shape.id === SHAPE_2D_CABINET_ID) return;
       const key = shape.collection || 'Inne';
       const list = byCollection.get(key) ?? [];
       list.push(shape);
@@ -303,11 +355,30 @@ export const ShapeSelectionControls = () => {
     });
 
     byCollection.forEach((shapes, title) => {
+      if (title === 'Obiekty') return;
       ordered.push({ title, shapes });
     });
 
     return ordered;
   }, [deviceTemplates]);
+
+  const startRectangleDraw = useCallback(
+    (kind: 'area' | 'building') => {
+      uiStateActions.setMode({
+        type: 'RECTANGLE.DRAW',
+        showCursor: true,
+        id: null,
+        kind
+      });
+    },
+    [uiStateActions]
+  );
+
+  const cabinetShape = useMemo(() => {
+    return SHAPES_2D.find((shape) => {
+      return shape.id === SHAPE_2D_CABINET_ID;
+    })!;
+  }, []);
 
   const ensureShapeIcon = useCallback(
     (shape: Icon) => {
@@ -322,8 +393,6 @@ export const ShapeSelectionControls = () => {
 
   const onSelectShape = useCallback(
     (shape: Icon) => {
-      if (mode.type !== 'PLACE_ICON') return;
-
       ensureShapeIcon(shape);
 
       uiStateActions.setMode({
@@ -332,7 +401,7 @@ export const ShapeSelectionControls = () => {
         id: shape.id
       });
     },
-    [mode, uiStateActions, ensureShapeIcon]
+    [uiStateActions, ensureShapeIcon]
   );
 
   const onEditTemplate = useCallback(
@@ -437,6 +506,81 @@ export const ShapeSelectionControls = () => {
               />
             );
           })}
+
+          <ShapeCategory
+            title="Kształty"
+            shapes={[]}
+            activeId={null}
+            onSelect={() => {}}
+            footer={
+              <Button
+                variant={
+                  mode.type === 'RECTANGLE.DRAW' &&
+                  (mode.kind ?? 'area') === 'area'
+                    ? 'contained'
+                    : 'outlined'
+                }
+                onClick={() => {
+                  startRectangleDraw('area');
+                }}
+                sx={{
+                  justifyContent: 'flex-start',
+                  textTransform: 'none',
+                  py: 1.25,
+                  px: 1.25
+                }}
+              >
+                <Stack direction="row" spacing={1.25} alignItems="center">
+                  <DeviceTypeIcon kind="area" sx={{ fontSize: 22 }} />
+                  <Box sx={{ textAlign: 'left' }}>
+                    <Typography fontWeight={600} fontSize={13}>
+                      Obszar
+                    </Typography>
+                    <Typography variant="caption" color="text.secondary">
+                      Kolorowy prostokąt pod urządzeniami
+                    </Typography>
+                  </Box>
+                </Stack>
+              </Button>
+            }
+          />
+
+          <ShapeCategory
+            title="Obiekty"
+            shapes={[cabinetShape]}
+            activeId={activeId}
+            onSelect={onSelectShape}
+            footer={
+              <Button
+                variant={
+                  mode.type === 'RECTANGLE.DRAW' && mode.kind === 'building'
+                    ? 'contained'
+                    : 'outlined'
+                }
+                onClick={() => {
+                  startRectangleDraw('building');
+                }}
+                sx={{
+                  justifyContent: 'flex-start',
+                  textTransform: 'none',
+                  py: 1.25,
+                  px: 1.25
+                }}
+              >
+                <Stack direction="row" spacing={1.25} alignItems="center">
+                  <DeviceTypeIcon kind="building" sx={{ fontSize: 22 }} />
+                  <Box sx={{ textAlign: 'left' }}>
+                    <Typography fontWeight={600} fontSize={13}>
+                      Budynek
+                    </Typography>
+                    <Typography variant="caption" color="text.secondary">
+                      Obszar z obrysem budynku
+                    </Typography>
+                  </Box>
+                </Stack>
+              </Button>
+            }
+          />
         </Stack>
       </Section>
     </ControlsContainer>

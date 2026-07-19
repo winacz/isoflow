@@ -683,6 +683,7 @@ export const Cursor: ModeActions = {
       }
 
       const itemOrigins: Record<string, Coords> = {};
+      const anchorOrigins: Record<string, Coords> = {};
       let dragItems =
         item.type === 'ITEM' &&
         uiState.projectionMode === 'TWO_D' &&
@@ -705,13 +706,44 @@ export const Cursor: ModeActions = {
         });
       }
 
+      const recordAnchorTile = (anchorId: string) => {
+        const parent = scene.connectors.find((con) => {
+          return con.anchors.some((anchor) => {
+            return anchor.id === anchorId;
+          });
+        });
+        const anchor = parent?.anchors.find((candidate) => {
+          return candidate.id === anchorId;
+        });
+        if (anchor?.ref.tile) {
+          anchorOrigins[anchorId] = { ...anchor.ref.tile };
+        }
+      };
+
       dragItems.forEach((dragItem) => {
-        if (dragItem.type !== 'ITEM') return;
-        try {
-          const node = getItemByIdOrThrow(scene.items, dragItem.id).value;
-          itemOrigins[dragItem.id] = { ...node.tile };
-        } catch {
-          // ignore — drag will fall back to incremental deltas
+        if (dragItem.type === 'ITEM') {
+          try {
+            const node = getItemByIdOrThrow(scene.items, dragItem.id).value;
+            itemOrigins[dragItem.id] = { ...node.tile };
+          } catch {
+            // ignore
+          }
+          return;
+        }
+
+        if (dragItem.type === 'CONNECTOR_ANCHOR') {
+          recordAnchorTile(dragItem.id);
+          return;
+        }
+
+        if (dragItem.type === 'CONNECTOR_SEGMENT') {
+          try {
+            const parsed = parseWaypointSegmentId(dragItem.id);
+            recordAnchorTile(parsed.startAnchorId);
+            recordAnchorTile(parsed.endAnchorId);
+          } catch {
+            // ignore
+          }
         }
       });
 
@@ -720,7 +752,8 @@ export const Cursor: ModeActions = {
         showCursor: true,
         items: dragItems,
         isInitialMovement: true,
-        itemOrigins
+        itemOrigins,
+        anchorOrigins
       });
     }
   },

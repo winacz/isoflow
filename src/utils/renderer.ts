@@ -2,9 +2,7 @@ import { produce } from 'immer';
 import {
   UNPROJECTED_TILE_SIZE,
   PROJECTED_TILE_SIZE,
-  ZOOM_INCREMENT,
   MAX_ZOOM,
-  MIN_ZOOM,
   TEXTBOX_PADDING,
   CONNECTOR_SEARCH_OFFSET,
   DEFAULT_FONT_FAMILY,
@@ -13,7 +11,9 @@ import {
   PROJECT_BOUNDING_BOX_PADDING,
   TILE_SIZE_2D,
   getShape2dSize,
-  getShape2dPorts
+  getModelItemSize,
+  getShape2dPorts,
+  SHAPE_2D_CABINET_ID
 } from 'src/config';
 import {
   Coords,
@@ -37,7 +37,6 @@ import {
   CoordsUtils,
   SizeUtils,
   clamp,
-  roundToOneDecimalPlace,
   findPath,
   toPx,
   getItemByIdOrThrow
@@ -186,6 +185,8 @@ export const isTileOnAnyShape2dBody = ({
     });
 
     if (!modelItem?.icon) return false;
+    // Cabinets are furniture under devices — cables on them stay solid.
+    if (modelItem.icon === SHAPE_2D_CABINET_ID) return false;
 
     const size = getShape2dSize(modelItem.icon);
     if (!size) return false;
@@ -211,6 +212,7 @@ const getShape2dRects = (
     });
 
     if (!modelItem?.icon) return [];
+    if (modelItem.icon === SHAPE_2D_CABINET_ID) return [];
 
     const size = getShape2dSize(modelItem.icon);
     if (!size) return [];
@@ -416,15 +418,16 @@ export const doShape2dFootprintsOverlap = (
 
 const getItemFootprint = (
   viewItem: { id: string; tile: Coords },
-  modelItems: { id: string; icon?: string }[]
+  modelItems: { id: string; icon?: string; rackUnits?: number }[]
 ): { x: number; y: number; width: number; height: number } => {
   const modelItem = modelItems.find((candidate) => {
     return candidate.id === viewItem.id;
   });
-  const size = getShape2dSize(modelItem?.icon ?? '') ?? {
-    width: 1,
-    height: 1
-  };
+  const size = getModelItemSize(modelItem ?? {}) ??
+    getShape2dSize(modelItem?.icon ?? '') ?? {
+      width: 1,
+      height: 1
+    };
 
   return {
     x: viewItem.tile.x,
@@ -437,19 +440,23 @@ const getItemFootprint = (
 /**
  * Whether a shape can be placed/moved to `origin` without overlapping
  * other view items (optionally excluding some, e.g. the items being dragged).
+ * Cabinets do not block device placement (devices mount inside).
  */
 export const isShape2dPlacementFree = ({
   origin,
   size,
   items,
   modelItems,
-  excludeItemIds = []
+  excludeItemIds = [],
+  /** When placing a non-cabinet, ignore cabinet footprints. */
+  ignoreCabinets = true
 }: {
   origin: Coords;
   size: Size;
   items: { id: string; tile: Coords }[];
-  modelItems: { id: string; icon?: string }[];
+  modelItems: { id: string; icon?: string; rackUnits?: number }[];
   excludeItemIds?: string[];
+  ignoreCabinets?: boolean;
 }): boolean => {
   const candidate = {
     x: origin.x,
@@ -461,6 +468,13 @@ export const isShape2dPlacementFree = ({
 
   return items.every((viewItem) => {
     if (excluded.has(viewItem.id)) return true;
+
+    const other = modelItems.find((item) => {
+      return item.id === viewItem.id;
+    });
+    if (ignoreCabinets && other?.icon === SHAPE_2D_CABINET_ID) {
+      return true;
+    }
 
     return !doShape2dFootprintsOverlap(
       candidate,
@@ -480,20 +494,23 @@ export const resolveShape2dDragOrigin = ({
   size,
   items,
   modelItems,
-  excludeItemIds = []
+  excludeItemIds = [],
+  ignoreCabinets = true
 }: {
   desired: Coords;
   current: Coords;
   size: Size;
   items: { id: string; tile: Coords }[];
-  modelItems: { id: string; icon?: string }[];
+  modelItems: { id: string; icon?: string; rackUnits?: number }[];
   excludeItemIds?: string[];
+  ignoreCabinets?: boolean;
 }): Coords | null => {
   const placement = {
     size,
     items,
     modelItems,
-    excludeItemIds
+    excludeItemIds,
+    ignoreCabinets
   };
 
   if (isShape2dPlacementFree({ origin: desired, ...placement })) {
@@ -691,17 +708,6 @@ export const getIsoProjectionCss = (
 
 export const getTranslateCSS = (translate: Coords = { x: 0, y: 0 }) => {
   return `translate(${translate.x}px, ${translate.y}px)`;
-};
-
-/** Snap to 10% grid, then step by ZOOM_INCREMENT. */
-export const incrementZoom = (zoom: number) => {
-  const stepped = Math.round(zoom * 10) / 10 + ZOOM_INCREMENT;
-  return clamp(roundToOneDecimalPlace(stepped), MIN_ZOOM, MAX_ZOOM);
-};
-
-export const decrementZoom = (zoom: number) => {
-  const stepped = Math.round(zoom * 10) / 10 - ZOOM_INCREMENT;
-  return clamp(roundToOneDecimalPlace(stepped), MIN_ZOOM, MAX_ZOOM);
 };
 
 interface GetMouse {
@@ -962,7 +968,8 @@ export const getShape2dItemAtTile = ({
 
     if (!modelItem?.icon) return false;
 
-    const size = getShape2dSize(modelItem.icon);
+    const size =
+      getModelItemSize(modelItem) ?? getShape2dSize(modelItem.icon);
 
     if (!size) return false;
 
@@ -991,6 +998,17 @@ export const getShape2dItemAtTile = ({
     return {
       type: 'CONNECTOR',
       id: connector.id
+    };
+  }
+
+  const rectangle = scene.rectangles.find(({ from, to }) => {
+    return isWithinBounds(tile, [from, to]);
+  });
+
+  if (rectangle) {
+    return {
+      type: 'RECTANGLE',
+      id: rectangle.id
     };
   }
 
@@ -1223,11 +1241,32 @@ export const convertBoundsToNamedAnchors = (
 ): {
   [key in AnchorPosition]: Coords;
 } => {
+  const bottomLeft = boundingBox[0];
+  const bottomRight = boundingBox[1];
+  const topRight = boundingBox[2];
+  const topLeft = boundingBox[3];
+
   return {
-    BOTTOM_LEFT: boundingBox[0],
-    BOTTOM_RIGHT: boundingBox[1],
-    TOP_RIGHT: boundingBox[2],
-    TOP_LEFT: boundingBox[3]
+    BOTTOM_LEFT: bottomLeft,
+    BOTTOM_RIGHT: bottomRight,
+    TOP_RIGHT: topRight,
+    TOP_LEFT: topLeft,
+    TOP: {
+      x: Math.round((topLeft.x + topRight.x) / 2),
+      y: topLeft.y
+    },
+    BOTTOM: {
+      x: Math.round((bottomLeft.x + bottomRight.x) / 2),
+      y: bottomLeft.y
+    },
+    LEFT: {
+      x: topLeft.x,
+      y: Math.round((topLeft.y + bottomLeft.y) / 2)
+    },
+    RIGHT: {
+      x: topRight.x,
+      y: Math.round((topRight.y + bottomRight.y) / 2)
+    }
   };
 };
 

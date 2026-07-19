@@ -12,7 +12,9 @@ import {
   getConnectorGlobalTiles,
   getStackHandleOffsetsPx,
   getTilePosition2d,
-  prepareWaypointSegmentDrag
+  prepareWaypointSegmentDrag,
+  classifyStackOverlap,
+  STACK_OVERLAP_COLORS
 } from 'src/utils';
 import { TILE_SIZE_2D } from 'src/config';
 
@@ -162,6 +164,17 @@ export const ConnectorStackBadges = () => {
         );
       }
 
+      const anchorOrigins: Record<string, { x: number; y: number }> = {};
+      prepared.anchors.forEach((anchor) => {
+        if (
+          (anchor.id === prepared.startAnchorId ||
+            anchor.id === prepared.endAnchorId) &&
+          anchor.ref.tile
+        ) {
+          anchorOrigins[anchor.id] = { ...anchor.ref.tile };
+        }
+      });
+
       setPinnedKey(stackKey(badgeTile));
       uiActions.setMode({
         type: 'DRAG_ITEMS',
@@ -176,7 +189,8 @@ export const ConnectorStackBadges = () => {
             )
           }
         ],
-        isInitialMovement: true
+        isInitialMovement: true,
+        anchorOrigins
       });
     },
     [
@@ -195,6 +209,12 @@ export const ConnectorStackBadges = () => {
       {stackBadges.map((badge) => {
         const key = stackKey(badge.tile);
         const isActive = activeKey === key;
+        const severity = classifyStackOverlap({
+          connectorIds: badge.connectorIds,
+          connectors,
+          modelItems
+        });
+        const colors = STACK_OVERLAP_COLORS[severity];
         const center = getTilePosition2d({
           tile: badge.tile,
           origin: 'CENTER'
@@ -251,6 +271,11 @@ export const ConnectorStackBadges = () => {
             />
 
             <Box
+              title={
+                severity === 'sameVlan'
+                  ? 'Nakładające się kable — ten sam VLAN'
+                  : 'Nakładające się kable — różne VLAN / trunk'
+              }
               sx={{
                 position: 'relative',
                 zIndex: 1,
@@ -258,11 +283,11 @@ export const ConnectorStackBadges = () => {
                 height: BADGE_SIZE,
                 px: 0.75,
                 borderRadius: '999px',
-                bgcolor: isActive ? '#dc2626' : '#ef4444',
-                border: '2px solid #7f1d1d',
+                bgcolor: isActive ? colors.bgActive : colors.bg,
+                border: `2px solid ${colors.border}`,
                 boxShadow: isActive
-                  ? '0 2px 8px rgba(127, 29, 29, 0.45)'
-                  : '0 1px 4px rgba(127, 29, 29, 0.35)',
+                  ? `0 2px 8px ${colors.shadow}`
+                  : `0 1px 4px ${colors.shadow}`,
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'center',

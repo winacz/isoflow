@@ -219,6 +219,13 @@ export const Connector: ModeActions = {
 
     if (!isValidIso && !isValid2d) {
       scene.deleteConnector(uiState.mode.id);
+    } else if (uiState.projectionMode === 'TWO_D') {
+      // Persist bend corners as editable waypoints.
+      scene.updateConnector(
+        uiState.mode.id,
+        {},
+        { overlapResolve: 'off', materializeBends: true }
+      );
     }
 
     scene.endHistoryTransaction();

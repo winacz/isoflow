@@ -82,6 +82,13 @@ export const useInteractionManager = () => {
   const scene = useScene();
   const { size: rendererSize } = useResizeObserver(uiState.rendererEl);
 
+  const actionsRef = useRef(uiState.actions);
+  const rendererElRef = useRef(uiState.rendererEl);
+  const mouseRef = useRef(uiState.mouse);
+  actionsRef.current = uiState.actions;
+  rendererElRef.current = uiState.rendererEl;
+  mouseRef.current = uiState.mouse;
+
   const onMouseEvent = useCallback(
     (e: SlimMouseEvent) => {
       if (!rendererRef.current) return;
@@ -231,7 +238,7 @@ export const useInteractionManager = () => {
   );
 
   useEffect(() => {
-    if (uiState.mode.type === 'INTERACTIONS_DISABLED') return;
+    if (uiState.mode.type === 'INTERACTIONS_DISABLED') return undefined;
 
     const el = window;
 
@@ -265,18 +272,10 @@ export const useInteractionManager = () => {
       });
     };
 
-    const onScroll = (e: WheelEvent) => {
-      if (e.deltaY > 0) {
-        uiState.actions.decrementZoom();
-      } else {
-        uiState.actions.incrementZoom();
-      }
-    };
-
     const onKeyChange = (e: KeyboardEvent) => {
       if (e.key !== 'Shift') return;
-      uiState.actions.setMouse({
-        ...uiState.mouse,
+      actionsRef.current.setMouse({
+        ...mouseRef.current,
         shiftKey: e.type === 'keydown'
       });
     };
@@ -291,7 +290,6 @@ export const useInteractionManager = () => {
     el.addEventListener('touchend', onTouchEnd);
     el.addEventListener('keydown', onKeyChange);
     el.addEventListener('keyup', onKeyChange);
-    uiState.rendererEl?.addEventListener('wheel', onScroll);
 
     return () => {
       el.removeEventListener('mousemove', onMouseEvent);
@@ -304,15 +302,12 @@ export const useInteractionManager = () => {
       el.removeEventListener('touchend', onTouchEnd);
       el.removeEventListener('keydown', onKeyChange);
       el.removeEventListener('keyup', onKeyChange);
-      uiState.rendererEl?.removeEventListener('wheel', onScroll);
     };
   }, [
     uiState.editorMode,
     onMouseEvent,
     uiState.mode.type,
-    onContextMenu,
-    uiState.actions,
-    uiState.rendererEl
+    onContextMenu
   ]);
 
   const setInteractionsElement = useCallback((element: HTMLElement) => {

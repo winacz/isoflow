@@ -13,6 +13,15 @@ export const shape2dPortConfigSchema = z.object({
   speed: z.string().max(20).optional()
 });
 
+/** Switch Virtual Interface — IP in a VLAN, shown on the chassis. */
+export const sviSchema = z.object({
+  id,
+  vlan: z.string().max(32),
+  /** IPv4/IPv6 address, optionally with prefix (e.g. 10.0.0.1/24). */
+  ip: z.string().max(64).optional(),
+  vlanColor: z.string().max(32).optional()
+});
+
 export const modelItemSchema = z.object({
   id,
   name: constrainedStrings.name,
@@ -21,7 +30,11 @@ export const modelItemSchema = z.object({
   /** Chassis / body fill for 2D plan devices (hex / hex8 / rgba). */
   color: z.string().max(64).optional(),
   /** Per-port config for 2D devices (keyed by Shape2dPort.id). */
-  ports: z.record(shape2dPortConfigSchema).optional()
+  ports: z.record(shape2dPortConfigSchema).optional(),
+  /** Switch SVIs (not used on hosts / PC). */
+  svis: z.array(sviSchema).optional(),
+  /** Cabinet height in rack units (U). Only for CABINET icon. */
+  rackUnits: z.number().int().min(4).max(42).optional()
 });
 
 export const modelItemsSchema = z.array(modelItemSchema);

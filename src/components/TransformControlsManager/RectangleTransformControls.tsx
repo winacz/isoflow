@@ -3,6 +3,7 @@ import { useRectangle } from 'src/hooks/useRectangle';
 import { AnchorPosition } from 'src/types';
 import { useUiStateStore } from 'src/stores/uiStateStore';
 import { TransformControls } from './TransformControls';
+import { TransformControls2d } from './TransformControls2d';
 
 interface Props {
   id: string;
@@ -13,6 +14,10 @@ export const RectangleTransformControls = ({ id }: Props) => {
   const uiStateActions = useUiStateStore((state) => {
     return state.actions;
   });
+  const projectionMode = useUiStateStore((state) => {
+    return state.projectionMode;
+  });
+  const isTwoD = projectionMode === 'TWO_D';
 
   const onAnchorMouseDown = useCallback(
     (key: AnchorPosition) => {
@@ -25,6 +30,16 @@ export const RectangleTransformControls = ({ id }: Props) => {
     },
     [rectangle.id, uiStateActions]
   );
+
+  if (isTwoD) {
+    return (
+      <TransformControls2d
+        from={rectangle.from}
+        to={rectangle.to}
+        onAnchorMouseDown={onAnchorMouseDown}
+      />
+    );
+  }
 
   return (
     <TransformControls

@@ -1,12 +1,16 @@
 import React, { useMemo, useEffect } from 'react';
 import { useModelStore } from 'src/stores/modelStore';
+import { useCabinetSnapStore } from 'src/stores/cabinetSnapStore';
 import { getItemByIdOrThrow } from 'src/utils';
 import { IsometricIcon } from 'src/components/SceneLayers/Nodes/Node/IconTypes/IsometricIcon';
 import { NonIsometricIcon } from 'src/components/SceneLayers/Nodes/Node/IconTypes/NonIsometricIcon';
 import { DeviceShape2d } from 'src/components/Shapes2d/DeviceShape2d';
+import { CabinetShape2d } from 'src/components/Shapes2d/CabinetShape2d';
 import {
   DEFAULT_ICON,
   SHAPES_2D,
+  SHAPE_2D_CABINET_ID,
+  CABINET_DEFAULT_UNITS,
   isShape2dIcon
 } from 'src/config';
 import type { ModelItem } from 'src/types';
@@ -18,7 +22,11 @@ export const useIcon = (
   connectedPortIds?: ReadonlySet<string> | string[],
   color?: string,
   mismatchPortIds?: ReadonlySet<string> | string[],
-  focusedPortId?: string | null
+  focusedPortId?: string | null,
+  svis?: ModelItem['svis'],
+  rackUnits?: number,
+  itemId?: string,
+  peerHighlightPortIds?: ReadonlySet<string> | string[]
 ) => {
   const [hasLoaded, setHasLoaded] = React.useState(false);
   const icons = useModelStore((state) => {
@@ -26,6 +34,12 @@ export const useIcon = (
   });
   const modelItems = useModelStore((state) => {
     return state.items;
+  });
+  const snapCabinetId = useCabinetSnapStore((state) => {
+    return state.cabinetId;
+  });
+  const snapUnit = useCabinetSnapStore((state) => {
+    return state.unit;
   });
 
   const icon = useMemo(() => {
@@ -62,14 +76,30 @@ export const useIcon = (
   const iconComponent = useMemo(() => {
     if (isShape2dIcon(icon.id)) {
       setHasLoaded(true);
+
+      if (icon.id === SHAPE_2D_CABINET_ID) {
+        return (
+          <CabinetShape2d
+            name={name || icon.name}
+            rackUnits={rackUnits ?? CABINET_DEFAULT_UNITS}
+            color={color}
+            highlightUnit={
+              itemId && snapCabinetId === itemId ? snapUnit : null
+            }
+          />
+        );
+      }
+
       return (
         <DeviceShape2d
           shapeId={icon.id}
           name={name || icon.name}
           ports={ports}
+          svis={svis}
           connectedPortIds={connectedPortIds}
           mismatchPortIds={mismatchPortIds}
           focusedPortId={focusedPortId}
+          peerHighlightPortIds={peerHighlightPortIds}
           modelItems={modelItems}
           color={color}
         />
@@ -93,11 +123,17 @@ export const useIcon = (
     icon,
     name,
     ports,
+    svis,
     connectedPortIds,
     mismatchPortIds,
     focusedPortId,
+    peerHighlightPortIds,
     modelItems,
-    color
+    color,
+    rackUnits,
+    itemId,
+    snapCabinetId,
+    snapUnit
   ]);
 
   return {

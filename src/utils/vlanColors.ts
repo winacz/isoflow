@@ -88,15 +88,21 @@ type PortVlanFields = {
   label?: string;
 };
 
+type SviVlanFields = {
+  vlan?: string | null;
+  vlanColor?: string | null;
+};
+
 type ModelItemVlanFields = {
   id?: string;
   name?: string;
   icon?: string;
   ports?: Record<string, PortVlanFields>;
+  svis?: SviVlanFields[];
 };
 
 /**
- * Manual color already assigned to any port in this VLAN (scene-wide).
+ * Manual color already assigned to any port/SVI in this VLAN (scene-wide).
  * VLAN 1 / empty never has a shared brand color.
  */
 export const findSharedVlanColor = (
@@ -110,14 +116,25 @@ export const findSharedVlanColor = (
 
   for (let i = 0; i < modelItems.length; i += 1) {
     const item = modelItems[i];
-    if (!item?.ports || isNonVlanAwareDevice(item.icon)) continue;
+    if (isNonVlanAwareDevice(item?.icon)) continue;
 
-    const ports = Object.values(item.ports);
-    for (let j = 0; j < ports.length; j += 1) {
-      const port = ports[j];
-      if (!vlansMatch(port?.vlan, key)) continue;
-      const custom = normalizeHexColor(port?.vlanColor);
-      if (custom) return custom;
+    if (item?.ports) {
+      const ports = Object.values(item.ports);
+      for (let j = 0; j < ports.length; j += 1) {
+        const port = ports[j];
+        if (!vlansMatch(port?.vlan, key)) continue;
+        const custom = normalizeHexColor(port?.vlanColor);
+        if (custom) return custom;
+      }
+    }
+
+    if (item?.svis) {
+      for (let j = 0; j < item.svis.length; j += 1) {
+        const svi = item.svis[j];
+        if (!vlansMatch(svi?.vlan, key)) continue;
+        const custom = normalizeHexColor(svi?.vlanColor);
+        if (custom) return custom;
+      }
     }
   }
 
@@ -241,6 +258,48 @@ export const getMismatchPortIdsForItem = ({
 };
 
 /**
+ * Peer (opposite-end) ports on `itemId` when another device is selected.
+ * - Node selected: all remote ports of cables touching that node.
+ * - Specific port focused: only peers of cables on that RJ45.
+ */
+export const getPeerHighlightedPortIdsForItem = ({
+  itemId,
+  selectedItemId,
+  focusedPortId,
+  connectors
+}: {
+  itemId: string;
+  selectedItemId: string | null;
+  focusedPortId?: string | null;
+  connectors: { anchors: { ref: { item?: string; port?: string } }[] }[];
+}): Set<string> => {
+  const portIds = new Set<string>();
+  if (!selectedItemId || selectedItemId === itemId) return portIds;
+
+  connectors.forEach((connector) => {
+    const ends = connector.anchors.filter((anchor) => {
+      return Boolean(anchor.ref.item && anchor.ref.port);
+    });
+    if (ends.length < 2) return;
+
+    const local = ends.find((anchor) => {
+      return anchor.ref.item === selectedItemId;
+    });
+    if (!local?.ref.port) return;
+
+    if (focusedPortId && local.ref.port !== focusedPortId) return;
+
+    ends.forEach((anchor) => {
+      if (anchor.ref.item === itemId && anchor.ref.port) {
+        portIds.add(anchor.ref.port);
+      }
+    });
+  });
+
+  return portIds;
+};
+
+/**
  * Human-readable relation + VLAN for a cable (hover popup / stroke style).
  */
 export const getConnectorRelationSummary = ({
@@ -332,6 +391,83 @@ export const getConnectorRelationSummary = ({
 
   return { endpoints, vlanLabel, vlanColor, linkMode };
 };
+
+/** Stack-badge severity for overlapping cables. */
+export type StackOverlapSeverity = 'sameVlan' | 'conflict';
+
+const linkVlanKey = (summary: ConnectorRelationSummary): string => {
+  if (summary.linkMode === 'trunk' || summary.linkMode === 'mismatch') {
+    return summary.linkMode;
+  }
+
+  for (let i = 0; i < summary.endpoints.length; i += 1) {
+    const endpoint = summary.endpoints[i];
+    if (endpoint.isNonVlanAware || endpoint.type !== 'access') continue;
+    if (!isVlan1(endpoint.vlan)) {
+      return normalizeVlanKey(endpoint.vlan);
+    }
+  }
+
+  return '1';
+};
+
+/**
+ * - `sameVlan` — all links are access on the same VLAN (incl. VLAN 1)
+ * - `conflict` — any trunk/mismatch, or access VLANs differ
+ */
+export const classifyStackOverlap = ({
+  connectorIds,
+  connectors,
+  modelItems
+}: {
+  connectorIds: string[];
+  connectors: {
+    id: string;
+    anchors: { ref: { item?: string; port?: string } }[];
+  }[];
+  modelItems: ModelItemVlanFields[];
+}): StackOverlapSeverity => {
+  if (connectorIds.length < 2) return 'sameVlan';
+
+  const keys: string[] = [];
+
+  for (let i = 0; i < connectorIds.length; i += 1) {
+    const connector = connectors.find((candidate) => {
+      return candidate.id === connectorIds[i];
+    });
+    if (!connector) {
+      return 'conflict';
+    }
+
+    const summary = getConnectorRelationSummary({
+      anchors: connector.anchors,
+      modelItems
+    });
+    const key = linkVlanKey(summary);
+    if (key === 'trunk' || key === 'mismatch') {
+      return 'conflict';
+    }
+    keys.push(key);
+  }
+
+  const unique = new Set(keys);
+  return unique.size <= 1 ? 'sameVlan' : 'conflict';
+};
+
+export const STACK_OVERLAP_COLORS = {
+  sameVlan: {
+    bg: '#eab308',
+    bgActive: '#ca8a04',
+    border: '#a16207',
+    shadow: 'rgba(161, 98, 7, 0.4)'
+  },
+  conflict: {
+    bg: '#ef4444',
+    bgActive: '#dc2626',
+    border: '#7f1d1d',
+    shadow: 'rgba(127, 29, 29, 0.4)'
+  }
+} as const;
 
 export const PORT_SPEED_OPTIONS = [
   '10M',

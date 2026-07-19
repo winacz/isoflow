@@ -4,10 +4,10 @@ import {
   PROJECTED_TILE_SIZE,
   DEFAULT_LABEL_HEIGHT,
   MARKDOWN_EMPTY_VALUE,
-  getShape2dSize,
+  getModelItemSize,
   isShape2dIcon
 } from 'src/config';
-import { getTilePosition, getShape2dCenterPosition, getMismatchPortIdsForItem } from 'src/utils';
+import { getTilePosition, getShape2dCenterPosition, getMismatchPortIdsForItem, getPeerHighlightedPortIdsForItem } from 'src/utils';
 import { useIcon } from 'src/hooks/useIcon';
 import { ViewItem } from 'src/types';
 import { useModelItem } from 'src/hooks/useModelItem';
@@ -66,10 +66,19 @@ export const Node = ({
   const itemControls = useUiStateStore((state) => {
     return state.itemControls;
   });
+  const selectedItemId =
+    itemControls?.type === 'ITEM' ? itemControls.id : null;
   const nodeFocusedPortId =
-    itemControls?.type === 'ITEM' && itemControls.id === node.id
-      ? focusedPortId
-      : null;
+    selectedItemId === node.id ? focusedPortId : null;
+
+  const peerHighlightPortIds = useMemo(() => {
+    return getPeerHighlightedPortIdsForItem({
+      itemId: node.id,
+      selectedItemId,
+      focusedPortId: selectedItemId ? focusedPortId : null,
+      connectors
+    });
+  }, [node.id, selectedItemId, focusedPortId, connectors]);
 
   const { iconComponent } = useIcon(
     modelItem.icon,
@@ -78,7 +87,11 @@ export const Node = ({
     connectedPortIds,
     modelItem.color,
     mismatchPortIds,
-    nodeFocusedPortId
+    nodeFocusedPortId,
+    modelItem.svis,
+    modelItem.rackUnits,
+    node.id,
+    peerHighlightPortIds
   );
   const projectionMode = useUiStateStore((state) => {
     return state.projectionMode;
@@ -86,7 +99,7 @@ export const Node = ({
 
   const isTwoD = projectionMode === 'TWO_D';
   const isPlanShape = isShape2dIcon(modelItem.icon);
-  const shapeSize = modelItem.icon ? getShape2dSize(modelItem.icon) : null;
+  const shapeSize = getModelItemSize(modelItem);
 
   const position = useMemo(() => {
     if (isTwoD && shapeSize) {

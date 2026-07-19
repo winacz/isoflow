@@ -32,7 +32,9 @@ export const DrawRectangle: ModeActions = {
       id: newRectangleId,
       color: scene.colors[0].id,
       from: uiState.mouse.position.tile,
-      to: uiState.mouse.position.tile
+      to: uiState.mouse.position.tile,
+      kind: uiState.mode.kind ?? 'area',
+      opacity: 0.25
     });
 
     const newMode = produce(uiState.mode, (draft) => {

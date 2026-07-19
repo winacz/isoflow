@@ -599,6 +599,8 @@ export const useScene = () => {
       options?: {
         overlapResolve?: 'default' | 'orthogonalDetour' | 'off';
         removedTile?: { x: number; y: number };
+        ignoreWaypoints?: boolean;
+        materializeBends?: boolean;
       }
     ) => {
       const newState = reducers.view({

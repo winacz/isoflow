@@ -11,6 +11,7 @@ import { getPortStatusColor, getDeviceTemplateLayout, parseDeviceColor } from 's
 import type { ModelItem } from 'src/types';
 import type { DeviceTemplateLayout } from 'src/utils/deviceTemplateLayout';
 import { Rj45Port } from 'src/components/Shapes2d/Rj45Port';
+import { DeviceTypeIcon } from 'src/components/Icons/DeviceTypeIcon';
 
 interface Props {
   shapeId: string;
@@ -21,12 +22,16 @@ interface Props {
   subtitle?: string;
   /** Per-port config from ModelItem — drives VLAN status colors. */
   ports?: ModelItem['ports'];
+  /** Switch SVIs shown on the chassis body. */
+  svis?: ModelItem['svis'];
   /** Port ids that currently have a cable attached. */
   connectedPortIds?: ReadonlySet<string> | string[];
   /** Port ids on a trunk mismatch link (red border). */
   mismatchPortIds?: ReadonlySet<string> | string[];
   /** Currently focused port (sidebar / click) — gentle highlight. */
   focusedPortId?: string | null;
+  /** Peer ports on this device (other end of cables from the selected node). */
+  peerHighlightPortIds?: ReadonlySet<string> | string[];
   /** All model items — used to resolve shared VLAN colors. */
   modelItems?: ModelItem[];
   /**
@@ -51,9 +56,11 @@ export const DeviceShape2d = ({
   name = 'DEVICE',
   subtitle,
   ports: portConfigs,
+  svis,
   connectedPortIds,
   mismatchPortIds,
   focusedPortId = null,
+  peerHighlightPortIds,
   modelItems,
   centered = true,
   layoutOverride,
@@ -69,11 +76,17 @@ export const DeviceShape2d = ({
   const tileW = TILE_SIZE_2D * scaleX;
   const tileH = TILE_SIZE_2D * scaleY;
   const cellSize = Math.min(tileW, tileH);
-  const portTileSize = cellSize * 1.75;
   const isRack = templateLayout?.formFactor === 'RACK';
+  const isPc = shapeId === SHAPE_2D_PC_ID;
+  const portTileSize = isPc
+    ? cellSize * 5.2
+    : cellSize * (isRack ? 2.25 : 2.7);
   const earW = Math.max(3, Math.round(tileW * 0.35));
   const chassisTint = parseDeviceColor(color);
-  const isPc = shapeId === SHAPE_2D_PC_ID;
+  /** Header band ≈ top third of the chassis (name + icon + divider). */
+  const headerBandH = pxHeight / 3;
+  const headerIconSize = Math.max(36, Math.round(headerBandH * 0.45));
+  const headerNameSize = Math.max(18, Math.round(headerBandH * 0.28));
 
   const ports = useMemo(() => {
     if (layoutOverride) return layoutOverride.ports;
@@ -95,6 +108,30 @@ export const DeviceShape2d = ({
       ? mismatchPortIds
       : new Set(mismatchPortIds);
   }, [mismatchPortIds]);
+
+  const peerHighlightSet = useMemo(() => {
+    if (!peerHighlightPortIds) return null;
+    return peerHighlightPortIds instanceof Set
+      ? peerHighlightPortIds
+      : new Set(peerHighlightPortIds);
+  }, [peerHighlightPortIds]);
+
+  const sviRows = useMemo(() => {
+    if (isPc || !svis?.length) return [];
+    return svis.map((svi) => {
+      const vlan = svi.vlan?.trim() || '1';
+      const color = getPortStatusColor(vlan, 0, {
+        customColor: svi.vlanColor,
+        modelItems
+      });
+      return {
+        id: svi.id,
+        vlan,
+        ip: svi.ip?.trim() || '',
+        color
+      };
+    });
+  }, [isPc, svis, modelItems]);
 
   return (
     <Box
@@ -192,37 +229,61 @@ export const DeviceShape2d = ({
       <Box
         sx={{
           position: 'absolute',
-          left: tileW * 0.5,
-          top: tileH * 0.35,
-          width: pxWidth - tileW,
-          height: tileH * 2.1,
+          left: tileW * 0.4,
+          top: 0,
+          width: pxWidth - tileW * 0.8,
+          height: headerBandH,
           display: 'flex',
           flexDirection: 'column',
           justifyContent: 'center',
-          px: `${Math.max(2, tileW * 0.15)}px`,
-          boxSizing: 'border-box'
+          gap: `${Math.max(2, Math.round(headerBandH * 0.06))}px`,
+          px: `${Math.max(3, tileW * 0.18)}px`,
+          boxSizing: 'border-box',
+          zIndex: 1,
+          overflow: 'hidden'
         }}
       >
-        <Typography
+        <Box
           sx={{
-            color: '#1f2937',
-            fontSize: Math.max(11, tileH * 0.75),
-            fontWeight: 700,
-            letterSpacing: 0.2,
-            lineHeight: 1.15,
-            userSelect: 'none',
-            whiteSpace: 'nowrap',
-            overflow: 'hidden',
-            textOverflow: 'ellipsis'
+            display: 'flex',
+            alignItems: 'center',
+            gap: `${Math.max(8, Math.round(headerIconSize * 0.28))}px`,
+            minWidth: 0,
+            flexShrink: 0
           }}
         >
-          {name}
-        </Typography>
+          <DeviceTypeIcon
+            iconId={shapeId}
+            sx={{
+              fontSize: headerIconSize,
+              width: headerIconSize,
+              height: headerIconSize,
+              color: '#334155',
+              flexShrink: 0
+            }}
+          />
+          <Typography
+            sx={{
+              color: '#1f2937',
+              fontSize: headerNameSize,
+              fontWeight: 700,
+              letterSpacing: 0.2,
+              lineHeight: 1.15,
+              userSelect: 'none',
+              whiteSpace: 'nowrap',
+              overflow: 'hidden',
+              textOverflow: 'ellipsis',
+              minWidth: 0
+            }}
+          >
+            {name}
+          </Typography>
+        </Box>
         {subtitle && (
           <Typography
             sx={{
               color: '#6b7280',
-              fontSize: Math.max(8, tileH * 0.4),
+              fontSize: Math.max(11, Math.round(headerBandH * 0.12)),
               fontWeight: 500,
               lineHeight: 1.2,
               userSelect: 'none'
@@ -231,16 +292,85 @@ export const DeviceShape2d = ({
             {subtitle}
           </Typography>
         )}
+        {sviRows.length > 0 && (
+          <Box
+            sx={{
+              display: 'flex',
+              flexDirection: 'column',
+              gap: `${Math.max(1, Math.round(tileH * 0.06))}px`,
+              minHeight: 0,
+              overflow: 'hidden'
+            }}
+          >
+            {sviRows.map((svi) => {
+              return (
+                <Box
+                  key={svi.id}
+                  title={`SVI VLAN ${svi.vlan}${svi.ip ? ` · ${svi.ip}` : ''}`}
+                  sx={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: `${Math.max(2, Math.round(tileW * 0.08))}px`,
+                    px: `${Math.max(2, Math.round(tileW * 0.1))}px`,
+                    py: `${Math.max(1, Math.round(tileH * 0.05))}px`,
+                    borderRadius: Math.max(2, Math.round(cellSize * 0.08)),
+                    bgcolor: svi.color,
+                    border: '1px solid rgba(0,0,0,0.12)',
+                    minWidth: 0,
+                    flexShrink: 0
+                  }}
+                >
+                  <Typography
+                    sx={{
+                      color: '#fff',
+                      fontSize: Math.max(9, tileH * 0.42),
+                      fontWeight: 700,
+                      lineHeight: 1.1,
+                      letterSpacing: 0.2,
+                      textShadow: '0 1px 1px rgba(0,0,0,0.35)',
+                      userSelect: 'none',
+                      whiteSpace: 'nowrap',
+                      flexShrink: 0
+                    }}
+                  >
+                    VLAN {svi.vlan}
+                  </Typography>
+                  {svi.ip && (
+                    <Typography
+                      sx={{
+                        color: '#fff',
+                        fontSize: Math.max(9, tileH * 0.42),
+                        fontWeight: 600,
+                        fontFamily:
+                          'ui-monospace, SFMono-Regular, Menlo, monospace',
+                        lineHeight: 1.1,
+                        textShadow: '0 1px 1px rgba(0,0,0,0.35)',
+                        userSelect: 'none',
+                        whiteSpace: 'nowrap',
+                        overflow: 'hidden',
+                        textOverflow: 'ellipsis',
+                        minWidth: 0
+                      }}
+                    >
+                      {svi.ip}
+                    </Typography>
+                  )}
+                </Box>
+              );
+            })}
+          </Box>
+        )}
       </Box>
 
       <Box
         sx={{
           position: 'absolute',
           left: tileW * 0.5,
-          top: tileH * 2.55,
+          top: headerBandH,
           width: pxWidth - tileW,
-          height: Math.max(1, Math.round(tileH * 0.05)),
-          bgcolor: '#c5cdd8'
+          height: Math.max(1, Math.round(tileH * 0.06)),
+          bgcolor: '#c5cdd8',
+          zIndex: 1
         }}
       />
 
@@ -289,7 +419,7 @@ export const DeviceShape2d = ({
               alignItems: 'center',
               justifyContent: 'center',
               overflow: 'visible',
-              zIndex: 2
+              zIndex: peerHighlightSet?.has(port.id) ? 4 : 2
             }}
           >
             <Rj45Port
@@ -301,8 +431,10 @@ export const DeviceShape2d = ({
               isTrunk={isTrunk}
               hasMismatch={Boolean(mismatchSet?.has(port.id))}
               isFocused={focusedPortId === port.id}
+              isPeerHighlight={Boolean(peerHighlightSet?.has(port.id))}
               isConnected={Boolean(connectedSet?.has(port.id))}
               media={port.media ?? 'RJ45'}
+              compactLabel={isRack}
             />
           </Box>
         );

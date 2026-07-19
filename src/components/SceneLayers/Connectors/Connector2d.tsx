@@ -12,7 +12,6 @@ import {
   TRUNK_RAINBOW_COLORS,
   TRUNK_RAINBOW_CSS,
   TRUNK_MISMATCH_COLOR,
-  VLAN_1_COLOR,
   CONNECTOR_JUMP_RADIUS_TILES,
   type ConnectorJump
 } from 'src/utils';
@@ -84,9 +83,11 @@ export const Connector2d = ({
   const vlanStroke = linkSummary.linkMode === 'access' ? linkSummary.vlanColor : null;
   const isTrunkLink = linkSummary.linkMode === 'trunk';
   const isMismatchLink = linkSummary.linkMode === 'mismatch';
+  const isUntaggedLink =
+    linkSummary.linkMode === 'access' && !vlanStroke;
   const rainbowGradId = `trunk-rainbow-${connector.id}`;
-  // Standard / VLAN 1 cables match access port gray; colored only by VLAN / trunk / mismatch.
-  const strokeBase = vlanStroke ?? VLAN_1_COLOR;
+  // Untagged / VLAN 1 cables: solid black. Colored only by non-1 VLAN / trunk / mismatch.
+  const strokeBase = vlanStroke ?? '#0a0a0a';
 
   const globalTiles = useMemo(() => {
     return connector.path.tiles.map((tile) => {
@@ -210,8 +211,10 @@ export const Connector2d = ({
   }, [isSelected, connector, mouseTile, bounds]);
 
   const connectorWidthPx = useMemo(() => {
-    return (TILE_SIZE_2D / 100) * connector.width * 1.25;
-  }, [connector.width]);
+    const base = (TILE_SIZE_2D / 100) * connector.width * 1.25;
+    // Untagged links read clearer when slightly heavier
+    return isUntaggedLink ? base * 1.45 : base;
+  }, [connector.width, isUntaggedLink]);
 
   const solidDashArray = useMemo(() => {
     switch (connector.style) {
@@ -274,7 +277,15 @@ export const Connector2d = ({
       style={{
         left: originPx.x + (visualOffset?.x ?? 0),
         top: originPx.y + (visualOffset?.y ?? 0),
-        zIndex: isHighlighted ? 4 : jumps.length > 0 || visualOffset ? 2 : 1,
+        // Popup lives inside this stacking context — lift the whole cable
+        // above sibling connectors while the hover card is open.
+        zIndex: showHoverPopup
+          ? 50
+          : isHighlighted
+            ? 4
+            : jumps.length > 0 || visualOffset
+              ? 2
+              : 1,
         transition: visualOffset
           ? 'left 0.12s ease, top 0.12s ease'
           : undefined
@@ -424,7 +435,7 @@ export const Connector2d = ({
             transform: `translate(-50%, -100%) scale(${popupScreenScale})`,
             transformOrigin: 'bottom center',
             pointerEvents: 'none',
-            zIndex: 6,
+            zIndex: 20,
             minWidth: 340,
             maxWidth: 480,
             px: 3,
@@ -534,7 +545,7 @@ export const Connector2d = ({
                 bgcolor: isTrunkLink
                   ? undefined
                   : linkSummary.vlanColor ??
-                    (isMismatchLink ? TRUNK_MISMATCH_COLOR : '#94a3b8'),
+                    (isMismatchLink ? TRUNK_MISMATCH_COLOR : '#0a0a0a'),
                 background: isTrunkLink ? TRUNK_RAINBOW_CSS : undefined,
                 border: '1px solid rgba(0,0,0,0.12)'
               }}

@@ -26,28 +26,40 @@ export const PROJECTED_TILE_SIZE = {
 
 export const SHAPE_2D_SWITCH_ID = 'SWITCH';
 export const SHAPE_2D_PC_ID = 'PC';
+export const SHAPE_2D_CABINET_ID = 'CABINET';
 
+/** Default / min / max rack height for cabinets. */
+export const CABINET_DEFAULT_UNITS = 12;
+export const CABINET_MIN_UNITS = 4;
+export const CABINET_MAX_UNITS = 42;
+/** Header strip above U slots (tiles). */
+export const CABINET_HEADER_TILES = 3;
+/** Left/right rail ears (tiles each side). */
+export const CABINET_EAR_TILES = 2;
 /**
  * Pixel size of one 2D grid cell (independent from isometric UNPROJECTED_TILE_SIZE).
  */
 export const TILE_SIZE_2D = 40;
+
+/**
+ * Visual 2D grid spacing in logical tiles.
+ * Snapping / connectors still use every tile (TILE_SIZE_2D); only drawing is coarser.
+ */
+export const GRID_2D_VISUAL_STEP = 5;
 
 /** Minimum edge-to-edge gap (tiles) when auto-laying out selected 2D nodes. */
 export const SHAPE_2D_LAYOUT_GAP = 3;
 
 /**
  * 16-port switch footprint (tiles) — card layout:
- * - rows 0..2: header (name)
- * - row 3: divider / spacer
- * - row 4: 8 top RJ45 (cols 2,4,6,8,10,12,14,16)
- * - rows 5..6: spacer
- * - row 7: 8 bottom RJ45
- * - row 8: bottom padding
+ * - top ~1/3: header (name + icon)
+ * - divider at ~1/3 height
+ * - lower band: two RJ45 rows
  */
-export const SWITCH_2D_SIZE: Size = { width: 20, height: 9 };
+export const SWITCH_2D_SIZE: Size = { width: 50, height: 25 };
 
 /** PC card — same visual language, single NIC port. */
-export const PC_2D_SIZE: Size = { width: 8, height: 7 };
+export const PC_2D_SIZE: Size = { width: 20, height: 16 };
 
 export type Shape2dPortSide = 'TOP' | 'BOTTOM' | 'LEFT' | 'RIGHT';
 export type Shape2dPortMedia = 'RJ45' | 'SFP';
@@ -69,6 +81,19 @@ export interface Shape2dPort {
  */
 export const RACK_1U_WIDTH_TILES = 60;
 export const RACK_1U_HEIGHT_TILES = 9;
+
+/** Footprint of a cabinet for the given rack-unit height. */
+export const getCabinetSize = (rackUnits = CABINET_DEFAULT_UNITS): Size => {
+  const units = Math.min(
+    CABINET_MAX_UNITS,
+    Math.max(CABINET_MIN_UNITS, Math.round(rackUnits) || CABINET_DEFAULT_UNITS)
+  );
+  return {
+    width: RACK_1U_WIDTH_TILES + CABINET_EAR_TILES * 2,
+    height: CABINET_HEADER_TILES + units * RACK_1U_HEIGHT_TILES
+  };
+};
+
 /** Soft cap for custom switch templates (typical commercial max). */
 export const MAX_SWITCH_TEMPLATE_PORTS = 52;
 
@@ -76,14 +101,14 @@ export const SWITCH_2D_PORTS: Shape2dPort[] = [
   ...Array.from({ length: 8 }, (_, index) => {
     return {
       id: `port-top-${index + 1}`,
-      tile: { x: 2 + index * 2, y: 4 },
+      tile: { x: 3 + index * 5, y: 11 },
       side: 'TOP' as const
     };
   }),
   ...Array.from({ length: 8 }, (_, index) => {
     return {
       id: `port-bottom-${index + 1}`,
-      tile: { x: 2 + index * 2, y: 7 },
+      tile: { x: 3 + index * 5, y: 19 },
       side: 'BOTTOM' as const
     };
   })
@@ -92,7 +117,7 @@ export const SWITCH_2D_PORTS: Shape2dPort[] = [
 export const PC_2D_PORTS: Shape2dPort[] = [
   {
     id: 'port-1',
-    tile: { x: 3, y: 5 },
+    tile: { x: 9, y: 12 },
     side: 'BOTTOM'
   }
 ];
@@ -100,12 +125,14 @@ export const PC_2D_PORTS: Shape2dPort[] = [
 /** Footprint of 2D shapes in grid cells (for ports / connections later). */
 export const SHAPE_2D_SIZES: Record<string, Size> = {
   [SHAPE_2D_SWITCH_ID]: SWITCH_2D_SIZE,
-  [SHAPE_2D_PC_ID]: PC_2D_SIZE
+  [SHAPE_2D_PC_ID]: PC_2D_SIZE,
+  [SHAPE_2D_CABINET_ID]: getCabinetSize(CABINET_DEFAULT_UNITS)
 };
 
 export const SHAPE_2D_PORTS: Record<string, Shape2dPort[]> = {
   [SHAPE_2D_SWITCH_ID]: SWITCH_2D_PORTS,
-  [SHAPE_2D_PC_ID]: PC_2D_PORTS
+  [SHAPE_2D_PC_ID]: PC_2D_PORTS,
+  [SHAPE_2D_CABINET_ID]: []
 };
 
 export const SHAPES_2D: Icon[] = [
@@ -122,11 +149,21 @@ export const SHAPES_2D: Icon[] = [
     url: '',
     collection: 'Stacje',
     isIsometric: false
+  },
+  {
+    id: SHAPE_2D_CABINET_ID,
+    name: 'Szafa rack',
+    url: '',
+    collection: 'Obiekty',
+    isIsometric: false
   }
 ];
 
 export const getShape2dSize = (shapeId: string | undefined | null): Size | null => {
   if (!shapeId) return null;
+  if (shapeId === SHAPE_2D_CABINET_ID) {
+    return getCabinetSize(CABINET_DEFAULT_UNITS);
+  }
   if (SHAPE_2D_SIZES[shapeId]) return SHAPE_2D_SIZES[shapeId];
 
   // Lazy require avoids circular import (registry → layout → config).
@@ -135,6 +172,18 @@ export const getShape2dSize = (shapeId: string | undefined | null): Size | null 
     getDeviceTemplateSize: (id: string) => Size | null;
   };
   return getDeviceTemplateSize(shapeId);
+};
+
+/** Footprint for a placed model item (cabinet uses rackUnits). */
+export const getModelItemSize = (item: {
+  icon?: string;
+  rackUnits?: number;
+}): Size | null => {
+  if (!item.icon) return null;
+  if (item.icon === SHAPE_2D_CABINET_ID) {
+    return getCabinetSize(item.rackUnits ?? CABINET_DEFAULT_UNITS);
+  }
+  return getShape2dSize(item.icon);
 };
 
 export const getShape2dPorts = (
@@ -206,7 +255,9 @@ export const VIEW_DEFAULTS: Required<
   textBoxes: []
 };
 
-export const VIEW_ITEM_DEFAULTS: Required<Omit<ViewItem, 'id' | 'tile'>> = {
+export const VIEW_ITEM_DEFAULTS: Required<
+  Omit<ViewItem, 'id' | 'tile' | 'parentId' | 'rackUnit'>
+> = {
   labelHeight: 80
 };
 
@@ -231,12 +282,14 @@ export const TEXTBOX_PADDING = 0.2;
 export const TEXTBOX_FONT_WEIGHT = 'bold';
 
 export const RECTANGLE_DEFAULTS: Required<
-  Omit<Rectangle, 'id' | 'from' | 'to' | 'color'>
+  Omit<Rectangle, 'id' | 'from' | 'to' | 'color' | 'kind' | 'opacity'>
 > = {};
 
 /** Zoom step as a fraction (0.1 = 10%). */
 export const ZOOM_INCREMENT = 0.1;
 export const MIN_ZOOM = 0.2;
+/** 2D plans need deeper zoom-out to fit cabinets / large footprints. */
+export const MIN_ZOOM_2D = 0.05;
 export const MAX_ZOOM = 2.5;
 export const TRANSFORM_ANCHOR_SIZE = 30;
 export const TRANSFORM_CONTROLS_COLOR = '#0392ff';
@@ -256,7 +309,8 @@ export const INITIAL_UI_STATE = {
     position: CoordsUtils.zero(),
     offset: CoordsUtils.zero()
   },
-  projectionMode: 'ISOMETRIC' as const
+  projectionMode: 'ISOMETRIC' as const,
+  showGrid: true
 };
 export const INITIAL_SCENE_STATE = {
   connectors: {},

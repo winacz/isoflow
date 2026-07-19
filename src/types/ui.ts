@@ -66,6 +66,11 @@ export interface DragItemsMode {
   isInitialMovement: Boolean;
   /** View-item tiles at drag start — used for absolute 2D placement. */
   itemOrigins?: Record<string, Coords>;
+  /**
+   * Tile-waypoint positions at drag start — used so absolute mouse deltas
+   * (from snap / path drag) are not re-applied onto already-moved anchors.
+   */
+  anchorOrigins?: Record<string, Coords>;
 }
 
 export interface PanMode {
@@ -89,13 +94,20 @@ export interface DrawRectangleMode {
   type: 'RECTANGLE.DRAW';
   showCursor: boolean;
   id: string | null;
+  /** Area vs building — applied when the rectangle is created. */
+  kind?: 'area' | 'building';
 }
 
 export const AnchorPositionOptions = {
   BOTTOM_LEFT: 'BOTTOM_LEFT',
   BOTTOM_RIGHT: 'BOTTOM_RIGHT',
   TOP_RIGHT: 'TOP_RIGHT',
-  TOP_LEFT: 'TOP_LEFT'
+  TOP_LEFT: 'TOP_LEFT',
+  /** Mid-edge handles (2D rectangle resize). */
+  TOP: 'TOP',
+  BOTTOM: 'BOTTOM',
+  LEFT: 'LEFT',
+  RIGHT: 'RIGHT'
 } as const;
 
 export type AnchorPosition = keyof typeof AnchorPositionOptions;
@@ -179,6 +191,8 @@ export interface UiState {
   rendererEl: HTMLDivElement | null;
   enableDebugTools: boolean;
   projectionMode: ProjectionMode;
+  /** Whether the background grid is drawn (logical snap grid is always active). */
+  showGrid: boolean;
 }
 
 export interface UiStateActions {
@@ -193,6 +207,8 @@ export interface UiStateActions {
   setIsMainMenuOpen: (isOpen: boolean) => void;
   setDialog: (dialog: keyof typeof DialogTypeEnum | null) => void;
   setZoom: (zoom: number) => void;
+  /** Continuous zoom from mouse wheel / trackpad. */
+  adjustZoomByWheel: (deltaY: number, deltaMode?: number) => void;
   setScroll: (scroll: Scroll) => void;
   setItemControls: (itemControls: ItemControls | null) => void;
   setSelectedItemIds: (ids: string[]) => void;
@@ -205,6 +221,8 @@ export interface UiStateActions {
   setRendererEl: (el: HTMLDivElement) => void;
   setEnableDebugTools: (enabled: boolean) => void;
   setProjectionMode: (projectionMode: ProjectionMode) => void;
+  setShowGrid: (showGrid: boolean) => void;
+  toggleShowGrid: () => void;
 }
 
 export type UiStateStore = UiState & {

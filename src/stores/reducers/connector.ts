@@ -9,7 +9,9 @@ import {
   collectOtherConnectorPaths,
   withOrthogonalPath,
   dedupeTileWaypoints,
-  snapConnectorPathToElbowGuides
+  snapConnectorPathToElbowGuides,
+  stripToEndpointAnchors,
+  materializeBendWaypoints
 } from 'src/utils';
 import { isShape2dIcon } from 'src/config';
 import { validateConnector } from 'src/schemas/validation';
@@ -23,6 +25,10 @@ export type SyncConnectorOptions = {
   removedTile?: Coords;
   /** Fan-out index when syncing many cables after a node move. */
   laneIndex?: number;
+  /** Route using only first/last anchors (ignore middle tile WPs). */
+  ignoreWaypoints?: boolean;
+  /** After path build, write bend corners back as tile waypoints. */
+  materializeBends?: boolean;
 };
 
 /** Anti-overlap is 2D-only — never mutate isometric connector anchors. */
@@ -82,6 +88,11 @@ export const syncConnector = (
         draft.model.items
       );
 
+      const routingAnchors =
+        isTwoDView && options?.ignoreWaypoints
+          ? stripToEndpointAnchors(anchors)
+          : anchors;
+
       if (isTwoDView && overlapResolve !== 'off') {
         const otherPaths = collectOtherConnectorPaths(
           draft.scene.connectors,
@@ -92,7 +103,7 @@ export const syncConnector = (
           const resolved =
             overlapResolve === 'orthogonalDetour'
               ? resolveOrthogonalDetourAfterWaypointRemoval({
-                  anchors,
+                  anchors: routingAnchors,
                   removedTile: options?.removedTile,
                   view: view.value,
                   modelItems: draft.model.items,
@@ -100,13 +111,13 @@ export const syncConnector = (
                   laneIndex: options?.laneIndex ?? 0
                 })
               : resolveConnectorAnchorsAgainstOthers({
-                  anchors,
+                  anchors: routingAnchors,
                   view: view.value,
                   modelItems: draft.model.items,
                   otherPaths
                 });
 
-          if (resolved !== anchors) {
+          if (resolved !== routingAnchors) {
             anchors = resolved;
             const connectors = draft.model.views[view.index].connectors;
             if (connectors) {
@@ -115,20 +126,30 @@ export const syncConnector = (
                 anchors
               };
             }
+          } else if (options?.ignoreWaypoints) {
+            anchors = routingAnchors;
           }
+        } else if (options?.ignoreWaypoints) {
+          anchors = routingAnchors;
         }
+      } else if (options?.ignoreWaypoints) {
+        anchors = routingAnchors;
       }
 
       // Orthogonal L/U only when detour actually uses elbows (or WP-delete hint).
       // `off` and plain port↔port must keep A* diagonals — otherwise no angled cables.
+      const pathAnchors = options?.ignoreWaypoints
+        ? stripToEndpointAnchors(anchors)
+        : anchors;
+
       const buildOrthogonal =
         isTwoDView &&
         overlapResolve === 'orthogonalDetour' &&
-        (Boolean(options?.removedTile) || anchors.length > 2);
+        (Boolean(options?.removedTile) || pathAnchors.length > 2);
 
       const buildPath = () => {
         return getConnectorPath({
-          anchors,
+          anchors: pathAnchors,
           view: view.value,
           modelItems: draft.model.items,
           orthogonal: buildOrthogonal
@@ -140,19 +161,35 @@ export const syncConnector = (
         : buildPath();
 
       // Align automatic elbows with nearby cable bends (shared Y/X guides).
-      if (isTwoDView && anchors.length === 2) {
+      if (isTwoDView && pathAnchors.length === 2) {
         const guidePaths = collectOtherConnectorPaths(
           draft.scene.connectors,
           connector.value.id
         );
         path = snapConnectorPathToElbowGuides({
-          anchors,
+          anchors: pathAnchors,
           path,
           view: view.value,
           modelItems: draft.model.items,
           otherPaths: guidePaths,
           orthogonal: buildOrthogonal
         });
+      }
+
+      if (isTwoDView && options?.materializeBends) {
+        const withBends = materializeBendWaypoints({
+          anchors: pathAnchors,
+          path,
+          view: view.value,
+          modelItems: draft.model.items
+        });
+        const connectors = draft.model.views[view.index].connectors;
+        if (connectors) {
+          connectors[connector.index] = {
+            ...connectors[connector.index],
+            anchors: withBends
+          };
+        }
       }
 
       draft.scene.connectors[connector.value.id] = { path };
@@ -166,10 +203,19 @@ export type UpdateConnectorPayload = {
   id: string;
   overlapResolve?: OverlapResolveMode;
   removedTile?: Coords;
+  ignoreWaypoints?: boolean;
+  materializeBends?: boolean;
 } & Partial<Connector>;
 
 export const updateConnector = (
-  { id, overlapResolve, removedTile, ...updates }: UpdateConnectorPayload,
+  {
+    id,
+    overlapResolve,
+    removedTile,
+    ignoreWaypoints,
+    materializeBends,
+    ...updates
+  }: UpdateConnectorPayload,
   { state, viewId }: ViewReducerContext
 ): State => {
   const newState = produce(state, (draft) => {
@@ -188,14 +234,14 @@ export const updateConnector = (
     };
     connectors[connector.index] = newConnector;
 
-    if (updates.anchors) {
+    if (updates.anchors || materializeBends || ignoreWaypoints) {
       const stateAfterSync = syncConnector(
         newConnector.id,
         {
           viewId,
           state: draft
         },
-        { overlapResolve, removedTile }
+        { overlapResolve, removedTile, ignoreWaypoints, materializeBends }
       );
 
       draft.model = stateAfterSync.model;

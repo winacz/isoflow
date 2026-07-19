@@ -28,6 +28,16 @@ const connectorTouchesItem = (
   });
 };
 
+const connectorUsesPort = (
+  connector: { anchors: { ref: { item?: string; port?: string } }[] },
+  itemId: string,
+  portId: string
+) => {
+  return connector.anchors.some((anchor) => {
+    return anchor.ref.item === itemId && anchor.ref.port === portId;
+  });
+};
+
 const stackKey = (tile: { x: number; y: number }) => {
   return `${tile.x},${tile.y}`;
 };
@@ -41,6 +51,9 @@ export const Connectors = ({ connectors }: Props) => {
   });
   const projectionMode = useUiStateStore((state) => {
     return state.projectionMode;
+  });
+  const focusedPortId = useUiStateStore((state) => {
+    return state.focusedPortId;
   });
 
   const activeStackKey = useStackFanStore(getActiveStackKey);
@@ -132,7 +145,10 @@ export const Connectors = ({ connectors }: Props) => {
       {[...connectors].reverse().map((connector) => {
         const isSelected = selectedConnectorId === connector.id;
         const isRelatedToItem = Boolean(
-          selectedItemId && connectorTouchesItem(connector, selectedItemId)
+          selectedItemId &&
+            (focusedPortId
+              ? connectorUsesPort(connector, selectedItemId, focusedPortId)
+              : connectorTouchesItem(connector, selectedItemId))
         );
         const offset = fanOffsets[connector.id];
         const isHandleTarget = highlightedConnectorId === connector.id;

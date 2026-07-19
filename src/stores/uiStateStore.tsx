@@ -2,12 +2,23 @@ import React, { createContext, useContext, useRef } from 'react';
 import { createStore, useStore } from 'zustand';
 import {
   CoordsUtils,
+  getStartingMode,
+  clamp
+} from 'src/utils';
+import {
   incrementZoom,
   decrementZoom,
-  getStartingMode
-} from 'src/utils';
+  createSmoothZoomController
+} from 'src/utils/zoom';
 import { UiStateStore } from 'src/types';
-import { INITIAL_UI_STATE } from 'src/config';
+import {
+  INITIAL_UI_STATE,
+  MIN_ZOOM,
+  MIN_ZOOM_2D,
+  MAX_ZOOM
+} from 'src/config';
+
+const smoothZoom = createSmoothZoomController();
 
 const initialState = () => {
   return createStore<UiStateStore>((set, get) => {
@@ -37,6 +48,7 @@ const initialState = () => {
       selectedWaypointIds: [],
       focusedPortId: null,
       enableDebugTools: false,
+      showGrid: INITIAL_UI_STATE.showGrid,
       actions: {
         setView: (view) => {
           set({ view });
@@ -78,15 +90,39 @@ const initialState = () => {
           });
         },
         incrementZoom: () => {
-          const { zoom } = get();
-          set({ zoom: incrementZoom(zoom) });
+          const { zoom, projectionMode } = get();
+          const minZoom =
+            projectionMode === 'TWO_D' ? MIN_ZOOM_2D : MIN_ZOOM;
+          const next = incrementZoom(zoom, minZoom);
+          smoothZoom.sync(next);
+          set({ zoom: next });
         },
         decrementZoom: () => {
-          const { zoom } = get();
-          set({ zoom: decrementZoom(zoom) });
+          const { zoom, projectionMode } = get();
+          const minZoom =
+            projectionMode === 'TWO_D' ? MIN_ZOOM_2D : MIN_ZOOM;
+          const next = decrementZoom(zoom, minZoom);
+          smoothZoom.sync(next);
+          set({ zoom: next });
         },
         setZoom: (zoom) => {
-          set({ zoom });
+          const minZoom =
+            get().projectionMode === 'TWO_D' ? MIN_ZOOM_2D : MIN_ZOOM;
+          const next = clamp(zoom, minZoom, MAX_ZOOM);
+          smoothZoom.sync(next);
+          set({ zoom: next });
+        },
+        adjustZoomByWheel: (deltaY, deltaMode = 0) => {
+          const { zoom, projectionMode } = get();
+          const minZoom =
+            projectionMode === 'TWO_D' ? MIN_ZOOM_2D : MIN_ZOOM;
+          smoothZoom.applyWheel(deltaY, deltaMode, {
+            zoom,
+            minZoom,
+            setZoom: (next) => {
+              set({ zoom: next });
+            }
+          });
         },
         setScroll: ({ position, offset }) => {
           set({ scroll: { position, offset: offset ?? get().scroll.offset } });
@@ -166,6 +202,12 @@ const initialState = () => {
         },
         setProjectionMode: (projectionMode) => {
           set({ projectionMode });
+        },
+        setShowGrid: (showGrid) => {
+          set({ showGrid });
+        },
+        toggleShowGrid: () => {
+          set({ showGrid: !get().showGrid });
         }
       }
     };

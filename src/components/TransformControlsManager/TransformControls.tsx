@@ -30,23 +30,26 @@ export const TransformControls = ({ from, to, onAnchorMouseDown }: Props) => {
 
     const corners = getBoundingBox([from, to]);
     const namedCorners = convertBoundsToNamedAnchors(corners);
-    const cornerPositions = Object.entries(namedCorners).map(
-      ([key, value], i) => {
-        const position = getTilePosition({
-          tile: value,
-          origin: outermostCornerPositions[i]
-        });
+    const cornerKeys: AnchorPosition[] = [
+      'BOTTOM_LEFT',
+      'BOTTOM_RIGHT',
+      'TOP_RIGHT',
+      'TOP_LEFT'
+    ];
 
-        return {
-          position,
-          onMouseDown: () => {
-            onAnchorMouseDown(key as AnchorPosition);
-          }
-        };
-      }
-    );
+    return cornerKeys.map((key, i) => {
+      const position = getTilePosition({
+        tile: namedCorners[key],
+        origin: outermostCornerPositions[i]
+      });
 
-    return cornerPositions;
+      return {
+        position,
+        onMouseDown: () => {
+          onAnchorMouseDown(key);
+        }
+      };
+    });
   }, [onAnchorMouseDown, from, to]);
 
   return (

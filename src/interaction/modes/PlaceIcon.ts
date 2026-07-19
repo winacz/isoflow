@@ -11,8 +11,11 @@ import {
   VIEW_ITEM_DEFAULTS,
   SHAPES_2D,
   getShape2dSize,
+  getModelItemSize,
   SHAPE_2D_SWITCH_ID,
-  SHAPE_2D_PC_ID
+  SHAPE_2D_PC_ID,
+  SHAPE_2D_CABINET_ID,
+  CABINET_DEFAULT_UNITS
 } from 'src/config';
 
 export const PlaceIcon: ModeActions = {
@@ -52,7 +55,14 @@ export const PlaceIcon: ModeActions = {
       const shape = SHAPES_2D.find((item) => {
         return item.id === iconId;
       });
-      const shapeSize = getShape2dSize(iconId) ?? { width: 1, height: 1 };
+      const isCabinet = iconId === SHAPE_2D_CABINET_ID;
+      const shapeSize =
+        (isCabinet
+          ? getModelItemSize({
+              icon: iconId,
+              rackUnits: CABINET_DEFAULT_UNITS
+            })
+          : getShape2dSize(iconId)) ?? { width: 1, height: 1 };
 
       if (
         shape &&
@@ -80,7 +90,8 @@ export const PlaceIcon: ModeActions = {
           origin: tile,
           size: shapeSize,
           items: scene.items,
-          modelItems: model.items
+          modelItems: model.items,
+          ignoreCabinets: !isCabinet
         })
       ) {
         return;
@@ -96,13 +107,16 @@ export const PlaceIcon: ModeActions = {
         defaultName = `SW-CORE-${String(existingOfType + 1).padStart(2, '0')}`;
       } else if (iconId === SHAPE_2D_PC_ID) {
         defaultName = `PC-${String(existingOfType + 1).padStart(2, '0')}`;
+      } else if (isCabinet) {
+        defaultName = `SZAFA-${String(existingOfType + 1).padStart(2, '0')}`;
       }
 
       scene.beginHistoryTransaction();
       scene.createModelItem({
         id: modelItemId,
         name: defaultName,
-        icon: iconId
+        icon: iconId,
+        ...(isCabinet ? { rackUnits: CABINET_DEFAULT_UNITS } : {})
       });
 
       scene.createViewItem({

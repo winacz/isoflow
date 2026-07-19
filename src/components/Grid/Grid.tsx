@@ -1,20 +1,22 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef } from 'react';
 import { Box } from '@mui/material';
-import gsap from 'gsap';
 import { Size } from 'src/types';
 import gridTileSvg from 'src/assets/grid-tile-bg.svg';
 import { useUiStateStore } from 'src/stores/uiStateStore';
-import { PROJECTED_TILE_SIZE, TILE_SIZE_2D } from 'src/config';
+import { PROJECTED_TILE_SIZE, TILE_SIZE_2D, GRID_2D_VISUAL_STEP } from 'src/config';
 import { SizeUtils } from 'src/utils/SizeUtils';
 import { useResizeObserver } from 'src/hooks/useResizeObserver';
 
-const GRID_LINE_COLOR_LIGHT = 'rgba(0, 0, 0, 0.15)';
-const GRID_LINE_COLOR_DARK = 'rgba(0, 0, 0, 0.15)';
+/** Major (sparse) grid lines */
+const GRID_MAJOR_COLOR = 'rgba(0, 0, 0, 0.15)';
+/** Fine logical-tile grid — very faint under the major grid */
+const GRID_FINE_COLOR = 'rgba(0, 0, 0, 0.045)';
 
 export const Grid = () => {
-  const elementRef = useRef<HTMLDivElement>(null);
-  const { size } = useResizeObserver(elementRef.current);
-  const [isFirstRender, setIsFirstRender] = useState(true);
+  const majorRef = useRef<HTMLDivElement>(null);
+  const fineRef = useRef<HTMLDivElement>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
+  const { size } = useResizeObserver(containerRef.current);
   const scroll = useUiStateStore((state) => {
     return state.scroll;
   });
@@ -27,47 +29,62 @@ export const Grid = () => {
 
   const isTwoD = projectionMode === 'TWO_D';
 
-  const twoDBackgroundImage = useMemo(() => {
-    const color = isTwoD ? GRID_LINE_COLOR_DARK : GRID_LINE_COLOR_LIGHT;
-
+  const majorBackgroundImage = useMemo(() => {
     return [
-      `linear-gradient(to right, ${color} 1px, transparent 1px)`,
-      `linear-gradient(to bottom, ${color} 1px, transparent 1px)`
+      `linear-gradient(to right, ${GRID_MAJOR_COLOR} 1px, transparent 1px)`,
+      `linear-gradient(to bottom, ${GRID_MAJOR_COLOR} 1px, transparent 1px)`
     ].join(', ');
-  }, [isTwoD]);
+  }, []);
+
+  const fineBackgroundImage = useMemo(() => {
+    return [
+      `linear-gradient(to right, ${GRID_FINE_COLOR} 1px, transparent 1px)`,
+      `linear-gradient(to bottom, ${GRID_FINE_COLOR} 1px, transparent 1px)`
+    ].join(', ');
+  }, []);
 
   useEffect(() => {
-    if (!elementRef.current) return;
+    if (!isTwoD) {
+      if (!majorRef.current) return;
 
-    const elSize = elementRef.current.getBoundingClientRect();
-    const tileSize = isTwoD
-      ? {
-          width: TILE_SIZE_2D * zoom,
-          height: TILE_SIZE_2D * zoom
-        }
-      : SizeUtils.multiply(PROJECTED_TILE_SIZE, zoom);
+      const elSize = majorRef.current.getBoundingClientRect();
+      const tileSize = SizeUtils.multiply(PROJECTED_TILE_SIZE, zoom);
+      const backgroundPosition: Size = {
+        width: elSize.width / 2 + scroll.position.x + tileSize.width / 2,
+        height: elSize.height / 2 + scroll.position.y
+      };
 
+      majorRef.current.style.backgroundSize = `${tileSize.width}px ${tileSize.height * 2}px`;
+      majorRef.current.style.backgroundPosition = `${backgroundPosition.width}px ${backgroundPosition.height}px`;
+      return;
+    }
+
+    if (!majorRef.current || !fineRef.current) return;
+
+    const elSize = majorRef.current.getBoundingClientRect();
+    const fine = {
+      width: TILE_SIZE_2D * zoom,
+      height: TILE_SIZE_2D * zoom
+    };
+    const major = {
+      width: TILE_SIZE_2D * GRID_2D_VISUAL_STEP * zoom,
+      height: TILE_SIZE_2D * GRID_2D_VISUAL_STEP * zoom
+    };
     const backgroundPosition: Size = {
-      width:
-        elSize.width / 2 + scroll.position.x + (isTwoD ? 0 : tileSize.width / 2),
+      width: elSize.width / 2 + scroll.position.x,
       height: elSize.height / 2 + scroll.position.y
     };
+    const pos = `${backgroundPosition.width}px ${backgroundPosition.height}px`;
 
-    gsap.to(elementRef.current, {
-      duration: isFirstRender ? 0 : 0.25,
-      backgroundSize: isTwoD
-        ? `${tileSize.width}px ${tileSize.height}px`
-        : `${tileSize.width}px ${tileSize.height * 2}px`,
-      backgroundPosition: `${backgroundPosition.width}px ${backgroundPosition.height}px`
-    });
-
-    if (isFirstRender) {
-      setIsFirstRender(false);
-    }
-  }, [scroll, zoom, isFirstRender, size, projectionMode, isTwoD]);
+    fineRef.current.style.backgroundSize = `${fine.width}px ${fine.height}px`;
+    fineRef.current.style.backgroundPosition = pos;
+    majorRef.current.style.backgroundSize = `${major.width}px ${major.height}px`;
+    majorRef.current.style.backgroundPosition = pos;
+  }, [scroll, zoom, size, projectionMode, isTwoD]);
 
   return (
     <Box
+      ref={containerRef}
       sx={{
         position: 'absolute',
         left: 0,
@@ -78,14 +95,25 @@ export const Grid = () => {
         pointerEvents: 'none'
       }}
     >
+      {isTwoD && (
+        <Box
+          ref={fineRef}
+          sx={{
+            position: 'absolute',
+            width: '100%',
+            height: '100%',
+            backgroundImage: fineBackgroundImage
+          }}
+        />
+      )}
       <Box
-        ref={elementRef}
+        ref={majorRef}
         sx={{
           position: 'absolute',
           width: '100%',
           height: '100%',
           background: isTwoD ? undefined : `repeat url("${gridTileSvg}")`,
-          backgroundImage: isTwoD ? twoDBackgroundImage : undefined
+          backgroundImage: isTwoD ? majorBackgroundImage : undefined
         }}
       />
     </Box>

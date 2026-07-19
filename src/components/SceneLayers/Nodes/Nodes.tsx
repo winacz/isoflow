@@ -1,7 +1,9 @@
 import React, { useMemo } from 'react';
 import { ViewItem } from 'src/types';
 import { useUiStateStore } from 'src/stores/uiStateStore';
+import { useModelStore } from 'src/stores/modelStore';
 import { useScene } from 'src/hooks/useScene';
+import { SHAPE_2D_CABINET_ID } from 'src/config';
 import { Node } from './Node/Node';
 
 interface Props {
@@ -24,6 +26,20 @@ const getEndpointItemIds = (
   );
 };
 
+const connectorUsesPort = (
+  connector: { anchors: { ref: { item?: string; port?: string } }[] },
+  itemId: string,
+  portId: string
+) => {
+  return connector.anchors.some((anchor) => {
+    return anchor.ref.item === itemId && anchor.ref.port === portId;
+  });
+};
+
+/** Cabinets always paint under devices (mounted switches sit in slots). */
+const CABINET_Z_BASE = -100000;
+const DEVICE_Z_BASE = 1000;
+
 export const Nodes = ({ nodes }: Props) => {
   const itemControls = useUiStateStore((state) => {
     return state.itemControls;
@@ -31,17 +47,31 @@ export const Nodes = ({ nodes }: Props) => {
   const selectedItemIds = useUiStateStore((state) => {
     return state.selectedItemIds;
   });
+  const focusedPortId = useUiStateStore((state) => {
+    return state.focusedPortId;
+  });
   const projectionMode = useUiStateStore((state) => {
     return state.projectionMode;
   });
   const mode = useUiStateStore((state) => {
     return state.mode;
   });
+  const modelItems = useModelStore((state) => {
+    return state.items;
+  });
   const { connectors } = useScene();
 
   const isDragging = mode.type === 'DRAG_ITEMS';
   // Keep the rest of the diagram readable while moving a node.
   const dimmedOpacity = isDragging ? 0.82 : 0.68;
+
+  const iconById = useMemo(() => {
+    const map = new Map<string, string | undefined>();
+    modelItems.forEach((item) => {
+      map.set(item.id, item.icon);
+    });
+    return map;
+  }, [modelItems]);
 
   const highlightedNodeIds = useMemo(() => {
     if (projectionMode !== 'TWO_D') {
@@ -67,6 +97,21 @@ export const Nodes = ({ nodes }: Props) => {
     if (itemControls.type === 'ITEM') {
       const ids = new Set<string>([itemControls.id]);
 
+      // Port focus: only the peer(s) on cables attached to that RJ45.
+      if (focusedPortId) {
+        connectors.forEach((connector) => {
+          if (
+            !connectorUsesPort(connector, itemControls.id, focusedPortId)
+          ) {
+            return;
+          }
+          getEndpointItemIds(connector).forEach((id) => {
+            ids.add(id);
+          });
+        });
+        return ids;
+      }
+
       connectors.forEach((connector) => {
         const touches = connector.anchors.some((anchor) => {
           return anchor.ref.item === itemControls.id;
@@ -83,7 +128,13 @@ export const Nodes = ({ nodes }: Props) => {
     }
 
     return null;
-  }, [projectionMode, itemControls, selectedItemIds, connectors]);
+  }, [
+    projectionMode,
+    itemControls,
+    selectedItemIds,
+    connectors,
+    focusedPortId
+  ]);
 
   return (
     <>
@@ -96,10 +147,16 @@ export const Nodes = ({ nodes }: Props) => {
             : 'dimmed';
         }
 
+        const isCabinet = iconById.get(node.id) === SHAPE_2D_CABINET_ID;
+        const depth = -node.tile.x - node.tile.y;
+        const order = isCabinet
+          ? CABINET_Z_BASE + depth
+          : DEVICE_Z_BASE + depth;
+
         return (
           <Node
             key={node.id}
-            order={-node.tile.x - node.tile.y}
+            order={order}
             node={node}
             selectionTone={selectionTone}
             dimmedOpacity={dimmedOpacity}

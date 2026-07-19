@@ -1,5 +1,4 @@
-import React, { useRef, useEffect, useState } from 'react';
-import gsap from 'gsap';
+import React, { useRef } from 'react';
 import { Box, SxProps } from '@mui/material';
 import { useUiStateStore } from 'src/stores/uiStateStore';
 
@@ -10,13 +9,7 @@ interface Props {
   disableAnimation?: boolean;
 }
 
-export const SceneLayer = ({
-  children,
-  order = 0,
-  sx,
-  disableAnimation
-}: Props) => {
-  const [isFirstRender, setIsFirstRender] = useState(true);
+export const SceneLayer = ({ children, order = 0, sx }: Props) => {
   const elementRef = useRef<HTMLDivElement>(null);
 
   const scroll = useUiStateStore((state) => {
@@ -25,21 +18,6 @@ export const SceneLayer = ({
   const zoom = useUiStateStore((state) => {
     return state.zoom;
   });
-
-  useEffect(() => {
-    if (!elementRef.current) return;
-
-    gsap.to(elementRef.current, {
-      duration: disableAnimation || isFirstRender ? 0 : 0.25,
-      translateX: scroll.position.x,
-      translateY: scroll.position.y,
-      scale: zoom
-    });
-
-    if (isFirstRender) {
-      setIsFirstRender(false);
-    }
-  }, [zoom, scroll, disableAnimation, isFirstRender]);
 
   return (
     <Box
@@ -52,7 +30,12 @@ export const SceneLayer = ({
         width: 0,
         height: 0,
         userSelect: 'none',
+        transformOrigin: '0 0',
         ...sx
+      }}
+      style={{
+        // Scale around the layer anchor (viewport center via left/top 50%)
+        transform: `translate(${scroll.position.x}px, ${scroll.position.y}px) scale(${zoom})`
       }}
     >
       {children}

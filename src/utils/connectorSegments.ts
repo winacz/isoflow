@@ -644,6 +644,44 @@ export const untangleAnchorHairpins = (
 };
 
 /**
+ * Level-drag values on one axis (N waypoints).
+ *
+ * - All aligned → everyone moves by `d`.
+ * - Offset → only trailing values (behind in the drag direction) move toward
+ *   the lead until they catch up; leftover delta then translates the pack.
+ */
+export const levelAxisValues = (values: number[], d: number): number[] => {
+  if (d === 0 || values.length === 0) return values;
+  if (values.every((value) => value === values[0])) {
+    return values.map((value) => value + d);
+  }
+
+  if (d > 0) {
+    const lead = Math.max(...values);
+    const lagExtreme = Math.min(...values);
+    const gap = lead - lagExtreme;
+    if (d >= gap) {
+      const target = lagExtreme + d;
+      return values.map(() => target);
+    }
+    return values.map((value) => {
+      return value === lead ? value : Math.min(value + d, lead);
+    });
+  }
+
+  const lead = Math.min(...values);
+  const lagExtreme = Math.max(...values);
+  const gap = lagExtreme - lead;
+  if (-d >= gap) {
+    const target = lagExtreme + d;
+    return values.map(() => target);
+  }
+  return values.map((value) => {
+    return value === lead ? value : Math.max(value + d, lead);
+  });
+};
+
+/**
  * Level-drag one axis of the two segment waypoints.
  *
  * - Aligned on this axis → both move together by `d`.
@@ -651,17 +689,37 @@ export const untangleAnchorHairpins = (
  *   until it catches up with the leading one; any overshoot then carries both.
  */
 const levelAxis = (a: number, b: number, d: number): [number, number] => {
-  if (d === 0) return [a, b];
-  if (a === b) return [a + d, b + d];
+  const [nextA, nextB] = levelAxisValues([a, b], d);
+  return [nextA, nextB];
+};
 
-  const lead = d > 0 ? Math.max(a, b) : Math.min(a, b);
-  const lag = d > 0 ? Math.min(a, b) : Math.max(a, b);
-  const newLag = lag + d;
-  const overshoot = d > 0 ? newLag > lead : newLag < lead;
-  const nextLead = overshoot ? newLag : lead;
+/**
+ * Apply leveling to a set of tiles (multi-WP / multi-cable selection).
+ * X and Y are leveled independently — same policy as segment handles.
+ */
+export const levelWaypointTiles = (
+  tiles: Coords[],
+  delta: Coords
+): Coords[] => {
+  if (tiles.length === 0) return tiles;
+  if (CoordsUtils.isEqual(delta, CoordsUtils.zero())) {
+    return tiles.map((tile) => {
+      return { ...tile };
+    });
+  }
 
-  const aIsLead = d > 0 ? a > b : a < b;
-  return aIsLead ? [nextLead, newLag] : [newLag, nextLead];
+  const nextX = levelAxisValues(
+    tiles.map((tile) => tile.x),
+    delta.x
+  );
+  const nextY = levelAxisValues(
+    tiles.map((tile) => tile.y),
+    delta.y
+  );
+
+  return tiles.map((_, index) => {
+    return { x: nextX[index], y: nextY[index] };
+  });
 };
 
 /**

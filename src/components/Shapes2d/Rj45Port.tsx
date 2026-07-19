@@ -31,9 +31,13 @@ interface Props {
   hasMismatch?: boolean;
   /** Soft selection ring when this port is focused in the sidebar. */
   isFocused?: boolean;
+  /** Strong ring — peer port on the other end of a cable from the selected node. */
+  isPeerHighlight?: boolean;
   isConnected?: boolean;
   /** RJ45 jack (default) or open SFP cage. */
   media?: 'RJ45' | 'SFP';
+  /** Smaller iface labels for dense rack layouts (e.g. Gi0/0). */
+  compactLabel?: boolean;
 }
 
 /**
@@ -49,18 +53,19 @@ export const Rj45Port = ({
   isTrunk = false,
   hasMismatch = false,
   isFocused = false,
+  isPeerHighlight = false,
   isConnected = false,
-  media = 'RJ45'
+  media = 'RJ45',
+  compactLabel = false
 }: Props) => {
   const facesUp = side === 'TOP';
   const jackSize = Math.round(tileSize * 0.72);
   const barH = Math.max(3, Math.round(jackSize * 0.14));
   const iconSize = Math.round(jackSize * 0.72);
   const label = portLabel ?? String(portNumber);
-  const numberSize = Math.max(
-    8,
-    Math.round(tileSize * (label.length > 3 ? 0.16 : 0.22))
-  );
+  const numberSize = compactLabel
+    ? Math.max(6, Math.round(tileSize * (label.length > 3 ? 0.14 : 0.2)))
+    : Math.max(10, Math.round(tileSize * (label.length > 3 ? 0.26 : 0.34)));
   const isSfp = media === 'SFP';
 
   return (
@@ -94,7 +99,18 @@ export const Rj45Port = ({
                 boxShadow: `0 0 0 2px rgba(239, 68, 68, 0.35), inset 0 1px 0 rgba(255,255,255,0.95), inset 0 -1px 0 rgba(100,116,139,0.1)`
               }
             : null),
-          ...(isFocused
+          ...(isPeerHighlight
+            ? {
+                border: hasMismatch
+                  ? `2px solid ${TRUNK_MISMATCH_COLOR}`
+                  : '3px solid #f59e0b',
+                boxShadow: hasMismatch
+                  ? `0 0 0 2px rgba(239, 68, 68, 0.35), 0 0 0 6px rgba(245, 158, 11, 0.45), 0 0 18px rgba(245, 158, 11, 0.55)`
+                  : `0 0 0 4px rgba(245, 158, 11, 0.5), 0 0 16px rgba(245, 158, 11, 0.65), inset 0 1px 0 rgba(255,255,255,0.95)`,
+                transform: 'translate(-50%, -50%) scale(1.12)'
+              }
+            : null),
+          ...(isFocused && !isPeerHighlight
             ? {
                 border: hasMismatch
                   ? `2px solid ${TRUNK_MISMATCH_COLOR}`
