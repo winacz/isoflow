@@ -143,7 +143,8 @@ export const layoutDeviceTemplate = (
       section.ports,
       cols,
       rows,
-      template.numbering,
+      // Always sequential top L→R then bottom (1, 2, 3…) — not chassis ODD_EVEN.
+      'ROWS_LTR',
       nextNumber
     );
     nextNumber += section.ports;

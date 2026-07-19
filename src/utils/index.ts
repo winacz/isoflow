@@ -21,4 +21,5 @@ export * from './deviceTemplateStorage';
 export * from './deviceColor';
 export * from './waypointGuides';
 export * from './cabinet';
+export * from './portal';
 export * from './model';

@@ -106,14 +106,16 @@ export const SWITCH_2D_PORTS: Shape2dPort[] = [
     return {
       id: `port-top-${index + 1}`,
       tile: { x: 2 + index * 2, y: 4 },
-      side: 'TOP' as const
+      side: 'TOP' as const,
+      label: String(index + 1)
     };
   }),
   ...Array.from({ length: 8 }, (_, index) => {
     return {
       id: `port-bottom-${index + 1}`,
       tile: { x: 2 + index * 2, y: 7 },
-      side: 'BOTTOM' as const
+      side: 'BOTTOM' as const,
+      label: String(index + 9)
     };
   })
 ];
@@ -122,7 +124,8 @@ export const PC_2D_PORTS: Shape2dPort[] = [
   {
     id: 'port-1',
     tile: { x: 5, y: 7 },
-    side: 'BOTTOM'
+    side: 'BOTTOM',
+    label: '1'
   }
 ];
 
@@ -204,8 +207,8 @@ export const getShape2dPorts = (
 };
 
 /**
- * Cisco-style short interface name for a 2D shape port (Gi0/0, Gi0/1, …).
- * Prefer port.label when present (custom numbering from templates).
+ * Display label for a 2D shape port (1, 2, 3, …).
+ * Prefer port.label when present (sequential numbering from templates).
  */
 export const getShape2dPortIfaceName = (
   shapeId: string,
@@ -225,10 +228,10 @@ export const getShape2dPortIfaceName = (
   });
 
   if (index < 0) {
-    return 'Gi0/0';
+    return '1';
   }
 
-  return `Gi0/${index}`;
+  return String(index + 1);
 };
 
 export const isShape2dIcon = (iconId: string | undefined | null): boolean => {
@@ -285,8 +288,8 @@ export const TEXTBOX_DEFAULTS: Required<Omit<TextBox, 'id' | 'tile'>> = {
 export const TEXTBOX_PADDING = 0.2;
 export const TEXTBOX_FONT_WEIGHT = 'bold';
 
-export const RECTANGLE_DEFAULTS: Required<
-  Omit<Rectangle, 'id' | 'from' | 'to' | 'color' | 'kind' | 'opacity'>
+export const RECTANGLE_DEFAULTS: Partial<
+  Omit<Rectangle, 'id' | 'from' | 'to'>
 > = {};
 
 /** Zoom step as a fraction (0.1 = 10%). */

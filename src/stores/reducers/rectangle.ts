@@ -16,6 +16,9 @@ export const updateRectangle = (
 
     const rectangle = getItemByIdOrThrow(rectangles, id);
     const newRectangle = { ...rectangle.value, ...updates };
+    if ('name' in updates && updates.name === undefined) {
+      delete newRectangle.name;
+    }
     rectangles[rectangle.index] = newRectangle;
   });
 

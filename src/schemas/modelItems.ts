@@ -34,7 +34,15 @@ export const modelItemSchema = z.object({
   /** Switch SVIs (not used on hosts / PC). */
   svis: z.array(sviSchema).optional(),
   /** Cabinet height in rack units (U). Only for CABINET icon. */
-  rackUnits: z.number().int().min(4).max(42).optional()
+  rackUnits: z.number().int().min(4).max(42).optional(),
+  /** Portal from isometric node → Plan (2D) item / rectangle. */
+  portal: z
+    .object({
+      targetType: z.enum(['ITEM', 'RECTANGLE']),
+      targetId: id,
+      label: z.string().max(120).optional()
+    })
+    .optional()
 });
 
 export const modelItemsSchema = z.array(modelItemSchema);

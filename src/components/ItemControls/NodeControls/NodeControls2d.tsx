@@ -83,8 +83,8 @@ const fieldSx = {
   '& .MuiInputBase-input': { py: 0.75 }
 };
 
-const portIface = (port: Shape2dPort, index: number) => {
-  return port.label ?? `Gi0/${index}`;
+const portIface = (_port: Shape2dPort, index: number) => {
+  return String(index + 1);
 };
 
 type PortRowProps = {
@@ -371,6 +371,7 @@ export const NodeControls2d = ({ id }: Props) => {
     return state.items;
   });
   const [portsOpen, setPortsOpen] = useState(false);
+  const [opisOpen, setOpisOpen] = useState(false);
   const [expandedPortId, setExpandedPortId] = useState<string | null>(
     focusedPortIds.length === 1 ? focusedPortIds[0] : null
   );
@@ -815,82 +816,105 @@ export const NodeControls2d = ({ id }: Props) => {
           />
         </Box>
         <Box sx={{ mt: 1.25 }}>
-          <Typography
+          <Accordion
+            disableGutters
+            elevation={0}
+            expanded={opisOpen}
+            onChange={(_, expanded) => {
+              setOpisOpen(expanded);
+            }}
             sx={{
-              fontSize: 10,
-              fontWeight: 600,
-              letterSpacing: 0.4,
-              color: 'text.secondary',
-              textTransform: 'uppercase',
-              mb: 0.5
+              bgcolor: 'transparent',
+              '&:before': { display: 'none' }
             }}
           >
-            Opis
-          </Typography>
-          <MarkdownEditor
-            value={modelItem.description}
-            onChange={(text) => {
-              if (modelItem.description !== text) {
-                updateModelItem(viewItem.id, { description: text });
-              }
-            }}
-          />
-          {hasDescription && (
-            <Box sx={{ mt: 1 }}>
+            <AccordionSummary
+              expandIcon={<ExpandMoreIcon sx={{ fontSize: 18 }} />}
+              sx={{
+                px: 0,
+                minHeight: 28,
+                '& .MuiAccordionSummary-content': { my: 0.25 }
+              }}
+            >
               <Typography
                 sx={{
                   fontSize: 10,
                   fontWeight: 600,
                   letterSpacing: 0.4,
                   color: 'text.secondary',
-                  textTransform: 'uppercase',
-                  mb: 0.5
+                  textTransform: 'uppercase'
                 }}
               >
-                Wielkość opisu
+                Opis{hasDescription ? '' : ' (pusty)'}
               </Typography>
-              <Slider
-                size="small"
-                marks
-                step={0.5}
-                min={3}
-                max={10}
-                value={Math.min(10, Math.max(3, viewItem.labelScale ?? 3))}
-                onChange={(_, value) => {
-                  const labelScale = Array.isArray(value) ? value[0] : value;
-                  updateViewItem(viewItem.id, { labelScale });
+            </AccordionSummary>
+            <AccordionDetails sx={{ px: 0, pt: 0, pb: 0.5 }}>
+              <MarkdownEditor
+                value={modelItem.description}
+                onChange={(text) => {
+                  if (modelItem.description !== text) {
+                    updateModelItem(viewItem.id, { description: text });
+                  }
                 }}
-                valueLabelDisplay="auto"
-                valueLabelFormat={(v) => `${v}×`}
               />
-              <Typography
-                sx={{
-                  fontSize: 10,
-                  fontWeight: 600,
-                  letterSpacing: 0.4,
-                  color: 'text.secondary',
-                  textTransform: 'uppercase',
-                  mb: 0.5,
-                  mt: 1
-                }}
-              >
-                Długość linii
-              </Typography>
-              <Slider
-                size="small"
-                marks
-                step={20}
-                min={60}
-                max={320}
-                value={viewItem.labelHeight ?? 140}
-                onChange={(_, value) => {
-                  const labelHeight = Array.isArray(value) ? value[0] : value;
-                  updateViewItem(viewItem.id, { labelHeight });
-                }}
-                valueLabelDisplay="auto"
-              />
-            </Box>
-          )}
+              {hasDescription && (
+                <Box sx={{ mt: 1 }}>
+                  <Typography
+                    sx={{
+                      fontSize: 10,
+                      fontWeight: 600,
+                      letterSpacing: 0.4,
+                      color: 'text.secondary',
+                      textTransform: 'uppercase',
+                      mb: 0.5
+                    }}
+                  >
+                    Wielkość opisu
+                  </Typography>
+                  <Slider
+                    size="small"
+                    marks
+                    step={0.5}
+                    min={3}
+                    max={10}
+                    value={Math.min(10, Math.max(3, viewItem.labelScale ?? 3))}
+                    onChange={(_, value) => {
+                      const labelScale = Array.isArray(value) ? value[0] : value;
+                      updateViewItem(viewItem.id, { labelScale });
+                    }}
+                    valueLabelDisplay="auto"
+                    valueLabelFormat={(v) => `${v}×`}
+                  />
+                  <Typography
+                    sx={{
+                      fontSize: 10,
+                      fontWeight: 600,
+                      letterSpacing: 0.4,
+                      color: 'text.secondary',
+                      textTransform: 'uppercase',
+                      mb: 0.5,
+                      mt: 1
+                    }}
+                  >
+                    Długość linii
+                  </Typography>
+                  <Slider
+                    size="small"
+                    marks
+                    step={20}
+                    min={60}
+                    max={320}
+                    value={viewItem.labelHeight ?? 140}
+                    onChange={(_, value) => {
+                      const labelHeight = Array.isArray(value) ? value[0] : value;
+                      updateViewItem(viewItem.id, { labelHeight });
+                    }}
+                    valueLabelDisplay="auto"
+                  />
+                </Box>
+              )}
+            </AccordionDetails>
+          </Accordion>
         </Box>
       </Box>
 

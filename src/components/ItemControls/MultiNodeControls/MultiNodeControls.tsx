@@ -28,6 +28,20 @@ const TIDY_IN_PLACE_LABELS: Record<string, string> = {
   gatherAuto: 'zbij auto'
 };
 
+const actionBtnSx = {
+  justifyContent: 'flex-start',
+  textTransform: 'none',
+  fontSize: 12,
+  py: 0.35,
+  px: 1,
+  minHeight: 28,
+  lineHeight: 1.2,
+  '& .MuiButton-startIcon': {
+    marginRight: 0.75,
+    '& > *:nth-of-type(1)': { fontSize: 16 }
+  }
+} as const;
+
 export const MultiNodeControls = () => {
   const selectedItemIds = useUiStateStore((state) => {
     return state.selectedItemIds;
@@ -56,7 +70,7 @@ export const MultiNodeControls = () => {
 
   return (
     <ControlsContainer>
-      <Box sx={{ px: 1.5, pt: 1.25, pb: 1.5 }}>
+      <Box sx={{ px: 1.25, pt: 1, pb: 1.25 }}>
         <Typography
           sx={{
             fontSize: 10,
@@ -64,17 +78,17 @@ export const MultiNodeControls = () => {
             letterSpacing: 0.6,
             color: 'text.secondary',
             textTransform: 'uppercase',
-            mb: 0.75
+            mb: 0.5
           }}
         >
           Zaznaczenie
         </Typography>
-        <Typography sx={{ fontSize: 13, fontWeight: 600, mb: 1.25 }}>
+        <Typography sx={{ fontSize: 12, fontWeight: 600, mb: 1 }}>
           Zaznaczono {count}{' '}
           {count === 1 ? 'urządzenie' : count < 5 ? 'urządzenia' : 'urządzeń'}
         </Typography>
 
-        <Stack spacing={0.75}>
+        <Stack spacing={0.5}>
           <Button
             size="small"
             variant="outlined"
@@ -82,7 +96,7 @@ export const MultiNodeControls = () => {
             onClick={() => {
               layoutViewItems(selectedItemIds, 'vertical');
             }}
-            sx={{ justifyContent: 'flex-start', textTransform: 'none' }}
+            sx={actionBtnSx}
           >
             Rozłóż w pionie
           </Button>
@@ -93,7 +107,7 @@ export const MultiNodeControls = () => {
             onClick={() => {
               layoutViewItems(selectedItemIds, 'horizontal');
             }}
-            sx={{ justifyContent: 'flex-start', textTransform: 'none' }}
+            sx={actionBtnSx}
           >
             Rozłóż w poziomie
           </Button>
@@ -104,7 +118,7 @@ export const MultiNodeControls = () => {
             onClick={() => {
               layoutViewItems(selectedItemIds, 'grid');
             }}
-            sx={{ justifyContent: 'flex-start', textTransform: 'none' }}
+            sx={actionBtnSx}
           >
             Rozłóż w siatce
           </Button>
@@ -115,7 +129,7 @@ export const MultiNodeControls = () => {
             onClick={() => {
               tidyItems(selectedItemIds);
             }}
-            sx={{ justifyContent: 'flex-start', textTransform: 'none' }}
+            sx={actionBtnSx}
           >
             Porządkuj
           </Button>
@@ -127,7 +141,7 @@ export const MultiNodeControls = () => {
               routeDiagonalFanForItems(selectedItemIds);
             }}
             disabled={simplePaths}
-            sx={{ justifyContent: 'flex-start', textTransform: 'none' }}
+            sx={actionBtnSx}
           >
             Mój algorytm
           </Button>
@@ -139,7 +153,7 @@ export const MultiNodeControls = () => {
               runTestLayoutForItems(selectedItemIds);
             }}
             disabled={simplePaths}
-            sx={{ justifyContent: 'flex-start', textTransform: 'none' }}
+            sx={actionBtnSx}
           >
             Test
           </Button>
@@ -160,7 +174,7 @@ export const MultiNodeControls = () => {
                 ]
               );
             }}
-            sx={{ justifyContent: 'flex-start', textTransform: 'none' }}
+            sx={actionBtnSx}
           >
             Porządkuj w miejscu ({TIDY_IN_PLACE_LABELS[nextVariant]})
           </Button>
@@ -171,7 +185,7 @@ export const MultiNodeControls = () => {
             onClick={() => {
               setSimplePathsMode(!simplePaths);
             }}
-            sx={{ justifyContent: 'flex-start', textTransform: 'none' }}
+            sx={actionBtnSx}
           >
             {simplePaths ? 'Włącz obliczanie' : 'Wyłącz obliczanie'}
           </Button>
@@ -182,7 +196,7 @@ export const MultiNodeControls = () => {
             onClick={() => {
               regenerateRoutesForItems(selectedItemIds);
             }}
-            sx={{ justifyContent: 'flex-start', textTransform: 'none' }}
+            sx={actionBtnSx}
           >
             Generuj nowe trasy
           </Button>
@@ -192,7 +206,7 @@ export const MultiNodeControls = () => {
             onClick={() => {
               clearSelectedItemIds();
             }}
-            sx={{ justifyContent: 'flex-start', textTransform: 'none', mt: 0.5 }}
+            sx={{ ...actionBtnSx, mt: 0.25 }}
           >
             Wyczyść zaznaczenie
           </Button>

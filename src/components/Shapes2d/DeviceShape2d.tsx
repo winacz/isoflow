@@ -5,8 +5,7 @@ import {
   SHAPE_2D_PC_ID,
   CABINET_EAR_TILES,
   getShape2dSize,
-  getShape2dPorts,
-  getShape2dPortIfaceName
+  getShape2dPorts
 } from 'src/config';
 import { getPortStatusColor, getDeviceTemplateLayout, parseDeviceColor } from 'src/utils';
 import type { ModelItem } from 'src/types';
@@ -475,8 +474,7 @@ export const DeviceShape2d = ({
       })}
 
       {ports.map((port, index) => {
-        const iface =
-          port.label ?? getShape2dPortIfaceName(shapeId, port.id);
+        const iface = String(index + 1);
         const config = portConfigs?.[port.id];
         const isTrunk = !isPc && config?.type === 'trunk';
         const statusColor = getPortStatusColor(config?.vlan, index, {

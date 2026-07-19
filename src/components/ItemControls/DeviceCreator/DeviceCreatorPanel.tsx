@@ -39,12 +39,6 @@ const PORT_OPTIONS_BASE = [1, 2, 4, 8, 12, 16, 24] as const;
 /** RACK may use a single dense 48-port block (24 cols × 2 rows). */
 const PORT_OPTIONS_RACK = [1, 2, 4, 8, 12, 16, 24, 48] as const;
 
-const NUMBERING_HELP: Record<DeviceTemplate['numbering'], string> = {
-  ODD_EVEN: 'Góra nieparzyste, dół parzyste (SCALANCE / Cisco)',
-  ROWS_LTR: 'Rządami: góra L→P, potem dół L→P',
-  COLS_TTB: 'Jak MikroTik: kolumnami góra→dół, potem L→P'
-};
-
 const defaultSection = (): DeviceTemplate['sections'][number] => {
   return {
     id: generateId(),
@@ -60,7 +54,7 @@ const createDraft = (): DeviceTemplate => {
     name: 'Nowy switch',
     kind: 'SWITCH',
     formFactor: 'DIN',
-    numbering: 'ODD_EVEN',
+    numbering: 'ROWS_LTR',
     sections: [defaultSection()]
   };
 };
@@ -237,28 +231,9 @@ export const DeviceCreatorPanel = ({
             </RadioGroup>
           </FormControl>
 
-          <FormControl fullWidth size="small">
-            <FormLabel sx={{ fontSize: 12, mb: 0.5 }}>Numeracja</FormLabel>
-            <Select
-              value={draft.numbering}
-              onChange={(event) => {
-                setDraft((prev) => {
-                  return {
-                    ...prev,
-                    numbering: event.target
-                      .value as DeviceTemplate['numbering']
-                  };
-                });
-              }}
-            >
-              <MenuItem value="ODD_EVEN">Nieparzyste / parzyste</MenuItem>
-              <MenuItem value="ROWS_LTR">Rządami L→P</MenuItem>
-              <MenuItem value="COLS_TTB">MikroTik (kolumnami)</MenuItem>
-            </Select>
-            <Typography variant="caption" color="text.secondary" sx={{ mt: 0.5 }}>
-              {NUMBERING_HELP[draft.numbering]}
-            </Typography>
-          </FormControl>
+          <Typography variant="caption" color="text.secondary">
+            Porty RJ45: 1, 2, 3… (góra L→P, potem dół)
+          </Typography>
 
           <Divider />
 

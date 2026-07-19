@@ -12,7 +12,11 @@ export const updateModelItem = (
   const modelItem = getItemByIdOrThrow(state.model.items, id);
 
   const newState = produce(state, (draft) => {
-    draft.model.items[modelItem.index] = { ...modelItem.value, ...updates };
+    const next = { ...modelItem.value, ...updates };
+    if ('portal' in updates && updates.portal === undefined) {
+      delete next.portal;
+    }
+    draft.model.items[modelItem.index] = next;
   });
 
   return newState;

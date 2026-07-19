@@ -109,10 +109,10 @@ export const UiOverlay = () => {
     Boolean(itemControls) || (isTwoD && selectedItemIds.length >= 2);
   const selectedConnectorId =
     itemControls?.type === 'CONNECTOR' ? itemControls.id : null;
-  // 2D sidebar needs room for device creator + port previews
+  // Compact on smaller Mac screens — ~18–20% width, not ~28%/360–420px.
   const itemControlsWidth = isTwoD
-    ? Math.min(420, Math.max(360, Math.round(rendererSize.width * 0.28)))
-    : 360;
+    ? Math.min(300, Math.max(260, Math.round(rendererSize.width * 0.2)))
+    : 280;
 
   return (
     <>
@@ -122,7 +122,8 @@ export const UiOverlay = () => {
           width: 0,
           height: 0,
           top: 0,
-          left: 0
+          left: 0,
+          zIndex: 20
         }}
       >
         {availableTools.includes('ITEM_CONTROLS') && showItemControls && (

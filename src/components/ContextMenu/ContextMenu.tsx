@@ -29,6 +29,16 @@ export const ContextMenu = ({
         top: position.y
       }}
       onClose={onClose}
+      PaperProps={{
+        sx: {
+          '& .MuiMenuItem-root': {
+            minHeight: 28,
+            py: 0.5,
+            fontSize: 13,
+            lineHeight: 1.25
+          }
+        }
+      }}
     >
       {menuItems.map((item) => {
         return (

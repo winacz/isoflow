@@ -1,5 +1,5 @@
 import React from 'react';
-import { Box, Slider, Stack, Typography } from '@mui/material';
+import { Box, Slider, TextField, Typography } from '@mui/material';
 import { useRectangle } from 'src/hooks/useRectangle';
 import { ColorSelector } from 'src/components/ColorSelector/ColorSelector';
 import { useUiStateStore } from 'src/stores/uiStateStore';
@@ -39,6 +39,24 @@ export const RectangleControls = ({ id }: Props) => {
         >
           {kindLabel}
         </Typography>
+        <TextField
+          size="small"
+          fullWidth
+          label="Nazwa"
+          placeholder={`np. ${kindLabel}`}
+          value={rectangle.name ?? ''}
+          onChange={(e) => {
+            const name = e.target.value;
+            updateRectangle(rectangle.id, {
+              name: name.trim() ? name : undefined
+            });
+          }}
+          sx={{
+            mb: 1.5,
+            '& .MuiInputBase-root': { fontSize: 12 },
+            '& .MuiInputLabel-root': { fontSize: 12 }
+          }}
+        />
         <ColorSelector
           onChange={(color) => {
             updateRectangle(rectangle.id, { color });

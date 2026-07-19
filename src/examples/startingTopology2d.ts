@@ -17,7 +17,7 @@ export const RACK_48_TEMPLATE: DeviceTemplate = {
   name: 'Switch 48p RACK',
   kind: 'SWITCH',
   formFactor: 'RACK',
-  numbering: 'ODD_EVEN',
+  numbering: 'ROWS_LTR',
   sections: [{ id: 'gi', media: 'RJ45', ports: 48, rows: 2 }]
 };
 
@@ -27,7 +27,7 @@ export const DIN_8_TEMPLATE: DeviceTemplate = {
   name: 'Switch 8p DIN',
   kind: 'SWITCH',
   formFactor: 'DIN',
-  numbering: 'ODD_EVEN',
+  numbering: 'ROWS_LTR',
   sections: [{ id: 'gi', media: 'RJ45', ports: 8, rows: 2 }]
 };
 
