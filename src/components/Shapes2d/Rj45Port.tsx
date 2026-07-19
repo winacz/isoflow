@@ -1,10 +1,23 @@
 import React from 'react';
 import { Box, Typography } from '@mui/material';
 import { TILE_SIZE_2D, Shape2dPortSide } from 'src/config';
+import { TRUNK_RAINBOW_CSS, TRUNK_MISMATCH_COLOR } from 'src/utils';
 
 const PORT_STATUS_COLORS = ['#4c8bf5', '#3ecf8e', '#f0a04b', '#a78bfa'];
 const PLUG_FILL = '#9aa3af';
 const PLUG_STROKE = '#7a8494';
+
+/** Frosted jack face — sits above chassis tint so device color doesn't muddy ports. */
+const PORT_GLASS_SX = {
+  bgcolor: 'rgba(255, 255, 255, 0.78)',
+  backgroundImage:
+    'linear-gradient(165deg, rgba(255,255,255,0.95) 0%, rgba(255,255,255,0.72) 45%, rgba(241,245,249,0.88) 100%)',
+  backdropFilter: 'blur(5px)',
+  WebkitBackdropFilter: 'blur(5px)',
+  boxShadow:
+    'inset 0 1px 0 rgba(255,255,255,0.95), inset 0 -1px 0 rgba(100,116,139,0.1), 0 1px 2px rgba(15,23,42,0.04)',
+  border: '1px solid rgba(107, 124, 147, 0.55)'
+} as const;
 
 interface Props {
   side: Shape2dPortSide;
@@ -12,6 +25,12 @@ interface Props {
   portNumber?: number;
   portLabel?: string;
   statusColor?: string;
+  /** Trunk port — status bar uses rainbow instead of solid VLAN color. */
+  isTrunk?: boolean;
+  /** Highlight port with a red ring (trunk↔access / trunk↔host mismatch). */
+  hasMismatch?: boolean;
+  /** Soft selection ring when this port is focused in the sidebar. */
+  isFocused?: boolean;
   isConnected?: boolean;
   /** RJ45 jack (default) or open SFP cage. */
   media?: 'RJ45' | 'SFP';
@@ -27,6 +46,9 @@ export const Rj45Port = ({
   portNumber = 1,
   portLabel,
   statusColor = PORT_STATUS_COLORS[(portNumber - 1) % PORT_STATUS_COLORS.length],
+  isTrunk = false,
+  hasMismatch = false,
+  isFocused = false,
   isConnected = false,
   media = 'RJ45'
 }: Props) => {
@@ -60,20 +82,36 @@ export const Rj45Port = ({
           height: jackSize,
           transform: 'translate(-50%, -50%)',
           boxSizing: 'border-box',
-          border: '1px solid #6b7c93',
           borderRadius: isSfp ? '2px' : '3px',
-          bgcolor: 'transparent',
           display: 'flex',
           flexDirection: facesUp ? 'column' : 'column-reverse',
           alignItems: 'center',
-          overflow: 'hidden'
+          overflow: 'hidden',
+          ...PORT_GLASS_SX,
+          ...(hasMismatch
+            ? {
+                border: `2px solid ${TRUNK_MISMATCH_COLOR}`,
+                boxShadow: `0 0 0 2px rgba(239, 68, 68, 0.35), inset 0 1px 0 rgba(255,255,255,0.95), inset 0 -1px 0 rgba(100,116,139,0.1)`
+              }
+            : null),
+          ...(isFocused
+            ? {
+                border: hasMismatch
+                  ? `2px solid ${TRUNK_MISMATCH_COLOR}`
+                  : '2px solid #3b82f6',
+                boxShadow: hasMismatch
+                  ? `0 0 0 2px rgba(239, 68, 68, 0.3), 0 0 0 5px rgba(59, 130, 246, 0.28), inset 0 1px 0 rgba(255,255,255,0.95)`
+                  : `0 0 0 3px rgba(59, 130, 246, 0.32), 0 0 10px rgba(59, 130, 246, 0.22), inset 0 1px 0 rgba(255,255,255,0.95)`
+              }
+            : null)
         }}
       >
         <Box
           sx={{
             width: '100%',
             height: barH,
-            bgcolor: statusColor,
+            bgcolor: isTrunk ? undefined : statusColor,
+            background: isTrunk ? TRUNK_RAINBOW_CSS : undefined,
             flexShrink: 0
           }}
         />

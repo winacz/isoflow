@@ -56,6 +56,42 @@ export const parseWaypointSegmentId = (id: string) => {
   return { connectorId, startAnchorId, endAnchorId };
 };
 
+/**
+ * Collapse tile waypoints that share the same grid cell (keep first along
+ * the anchor list). Port / item endpoints are never removed.
+ */
+export const dedupeTileWaypoints = (
+  anchors: ConnectorAnchor[]
+): ConnectorAnchor[] => {
+  const seen = new Set<string>();
+
+  return anchors.filter((anchor) => {
+    const tile = anchor.ref.tile;
+    if (!tile) return true;
+
+    const key = `${tile.x},${tile.y}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+};
+
+/**
+ * True when `tile` is already occupied by another tile waypoint on this cable
+ * (optionally ignoring one id — the WP being dragged).
+ */
+export const hasTileWaypointAt = (
+  anchors: ConnectorAnchor[],
+  tile: Coords,
+  excludeAnchorId?: string
+): boolean => {
+  return anchors.some((anchor) => {
+    if (excludeAnchorId && anchor.id === excludeAnchorId) return false;
+    if (!anchor.ref.tile) return false;
+    return CoordsUtils.isEqual(anchor.ref.tile, tile);
+  });
+};
+
 const getGlobalPathTiles = (path: ConnectorPath): Coords[] => {
   return path.tiles.map((tile) => {
     return connectorPathTileToGlobal(tile, path.rectangle.from);
@@ -445,6 +481,28 @@ export const prepareWaypointSegmentDrag = ({
     hit.startPortTile &&
     hit.endPortTile
   ) {
+    // Same exit cell → only one WP (never two on one tile).
+    if (CoordsUtils.isEqual(hit.startPortTile, hit.endPortTile)) {
+      const wp: ConnectorAnchor = {
+        id: generateId(),
+        ref: { tile: { ...hit.startPortTile } }
+      };
+      const exitIndex = pathIndexOf(globalTiles, hit.startPortTile);
+      const ordered = sortAnchorsAlongPath(
+        [...anchors, wp],
+        path,
+        view,
+        modelItems,
+        { [wp.id]: exitIndex }
+      );
+      const existingId = hit.existingWaypointIds[0];
+      return {
+        anchors: dedupeTileWaypoints(ordered),
+        startAnchorId: wp.id,
+        endAnchorId: existingId ?? wp.id
+      };
+    }
+
     const wpStart: ConnectorAnchor = {
       id: generateId(),
       ref: { tile: { ...hit.startPortTile } }
@@ -469,7 +527,7 @@ export const prepareWaypointSegmentDrag = ({
     );
 
     return {
-      anchors: ordered,
+      anchors: dedupeTileWaypoints(ordered),
       startAnchorId: wpStart.id,
       endAnchorId: wpEnd.id
     };
@@ -488,6 +546,22 @@ export const prepareWaypointSegmentDrag = ({
     throw new Error('Port↔waypoint segment is missing the existing waypoint id');
   }
 
+  // Exit tile already has a WP — drag that one with the neighbour, no duplicate.
+  if (hasTileWaypointAt(anchors, hit.portTile)) {
+    const occupant = anchors.find((anchor) => {
+      return (
+        Boolean(anchor.ref.tile) &&
+        CoordsUtils.isEqual(anchor.ref.tile as Coords, hit.portTile as Coords)
+      );
+    });
+    return {
+      anchors,
+      startAnchorId:
+        hit.portSide === 'start' ? occupant!.id : existingId,
+      endAnchorId: hit.portSide === 'start' ? existingId : occupant!.id
+    };
+  }
+
   const newAnchor: ConnectorAnchor = {
     id: generateId(),
     ref: { tile: { ...hit.portTile } }
@@ -504,7 +578,7 @@ export const prepareWaypointSegmentDrag = ({
   );
 
   return {
-    anchors: ordered,
+    anchors: dedupeTileWaypoints(ordered),
     startAnchorId:
       hit.portSide === 'start' ? newAnchor.id : existingId,
     endAnchorId: hit.portSide === 'start' ? existingId : newAnchor.id
@@ -569,7 +643,33 @@ export const untangleAnchorHairpins = (
   });
 };
 
-/** Translate both tile waypoints by the same delta. */
+/**
+ * Level-drag one axis of the two segment waypoints.
+ *
+ * - Aligned on this axis → both move together by `d`.
+ * - Offset → only the trailing waypoint (behind in the drag direction) moves,
+ *   until it catches up with the leading one; any overshoot then carries both.
+ */
+const levelAxis = (a: number, b: number, d: number): [number, number] => {
+  if (d === 0) return [a, b];
+  if (a === b) return [a + d, b + d];
+
+  const lead = d > 0 ? Math.max(a, b) : Math.min(a, b);
+  const lag = d > 0 ? Math.min(a, b) : Math.max(a, b);
+  const newLag = lag + d;
+  const overshoot = d > 0 ? newLag > lead : newLag < lead;
+  const nextLead = overshoot ? newLag : lead;
+
+  const aIsLead = d > 0 ? a > b : a < b;
+  return aIsLead ? [nextLead, newLag] : [newLag, nextLead];
+};
+
+/**
+ * Drag a segment by its handle with "leveling" behavior:
+ * grabs the waypoint that trails in the drag direction until it aligns with
+ * the leading one, then translates both. Applied independently per axis, so
+ * it works for every drag direction.
+ */
 export const moveWaypointSegment = (
   anchors: ConnectorAnchor[],
   startAnchorId: string,
@@ -580,21 +680,38 @@ export const moveWaypointSegment = (
     return anchors;
   }
 
+  const startTile = anchors.find((anchor) => {
+    return anchor.id === startAnchorId;
+  })?.ref.tile;
+  const endTile = anchors.find((anchor) => {
+    return anchor.id === endAnchorId;
+  })?.ref.tile;
+
+  if (!startTile || !endTile) {
+    return anchors;
+  }
+
+  const [startX, endX] = levelAxis(startTile.x, endTile.x, delta.x);
+  const [startY, endY] = levelAxis(startTile.y, endTile.y, delta.y);
+
+  const nextStart: Coords = { x: startX, y: startY };
+  const nextEnd: Coords = { x: endX, y: endY };
+
+  // Never stack both segment WPs on the same tile.
+  if (CoordsUtils.isEqual(nextStart, nextEnd)) {
+    return anchors;
+  }
+
   return anchors.map((anchor) => {
-    if (anchor.id !== startAnchorId && anchor.id !== endAnchorId) {
-      return anchor;
+    if (anchor.id === startAnchorId && anchor.ref.tile) {
+      return { ...anchor, ref: { tile: nextStart } };
     }
 
-    if (!anchor.ref.tile) {
-      return anchor;
+    if (anchor.id === endAnchorId && anchor.ref.tile) {
+      return { ...anchor, ref: { tile: nextEnd } };
     }
 
-    return {
-      ...anchor,
-      ref: {
-        tile: CoordsUtils.add(anchor.ref.tile, delta)
-      }
-    };
+    return anchor;
   });
 };
 

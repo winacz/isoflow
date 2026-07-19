@@ -1,15 +1,18 @@
 import React, { useMemo } from 'react';
-import { useTheme, Box } from '@mui/material';
+import { useTheme, Box, Typography } from '@mui/material';
 import OpenWithOutlinedIcon from '@mui/icons-material/OpenWithOutlined';
-import { TILE_SIZE_2D } from 'src/config';
+import { TILE_SIZE_2D, getShape2dPortIfaceName } from 'src/config';
 import {
   connectorPathTileToGlobal,
   getAnchorTile,
-  getColorVariant,
   findWaypointSegmentAtTile,
   splitConnectorPathByNodeBodies,
   buildConnectorSvgPathD,
-  getConnectorVlanColor,
+  getConnectorRelationSummary,
+  TRUNK_RAINBOW_COLORS,
+  TRUNK_RAINBOW_CSS,
+  TRUNK_MISMATCH_COLOR,
+  VLAN_1_COLOR,
   CONNECTOR_JUMP_RADIUS_TILES,
   type ConnectorJump
 } from 'src/utils';
@@ -17,7 +20,6 @@ import { Circle } from 'src/components/Circle/Circle';
 import { Svg } from 'src/components/Svg/Svg';
 import { useConnector } from 'src/hooks/useConnector';
 import { useScene } from 'src/hooks/useScene';
-import { useColor } from 'src/hooks/useColor';
 import { useModelStore } from 'src/stores/modelStore';
 import { useUiStateStore } from 'src/stores/uiStateStore';
 
@@ -35,6 +37,8 @@ interface Props {
   softDim?: boolean;
   /** Render-only pixel offset (stack fan-out on badge hover). */
   visualOffset?: { x: number; y: number };
+  /** Show relation / VLAN popup near the cursor tile. */
+  showHoverPopup?: boolean;
 }
 
 export const Connector2d = ({
@@ -45,10 +49,10 @@ export const Connector2d = ({
   isHighlighted,
   isDimmed,
   softDim,
-  visualOffset
+  visualOffset,
+  showHoverPopup = false
 }: Props) => {
   const theme = useTheme();
-  const paletteColor = useColor(_connector.color);
   const { currentView, items } = useScene();
   const connector = useConnector(_connector.id);
   const modelItems = useModelStore((state) => {
@@ -57,18 +61,32 @@ export const Connector2d = ({
   const mouseTile = useUiStateStore((state) => {
     return state.mouse.position.tile;
   });
+  const zoom = useUiStateStore((state) => {
+    return state.zoom;
+  });
   const selectedWaypointIds = useUiStateStore((state) => {
     return state.selectedWaypointIds;
   });
 
-  const vlanStroke = useMemo(() => {
-    return getConnectorVlanColor({
+  const linkSummary = useMemo(() => {
+    return getConnectorRelationSummary({
       anchors: connector.anchors,
-      modelItems
+      modelItems,
+      resolvePortLabel: (itemId, portId) => {
+        const modelItem = modelItems.find((item) => {
+          return item.id === itemId;
+        });
+        return getShape2dPortIfaceName(modelItem?.icon ?? '', portId);
+      }
     });
   }, [connector.anchors, modelItems]);
 
-  const strokeBase = vlanStroke ?? paletteColor.value;
+  const vlanStroke = linkSummary.linkMode === 'access' ? linkSummary.vlanColor : null;
+  const isTrunkLink = linkSummary.linkMode === 'trunk';
+  const isMismatchLink = linkSummary.linkMode === 'mismatch';
+  const rainbowGradId = `trunk-rainbow-${connector.id}`;
+  // Standard / VLAN 1 cables match access port gray; colored only by VLAN / trunk / mismatch.
+  const strokeBase = vlanStroke ?? VLAN_1_COLOR;
 
   const globalTiles = useMemo(() => {
     return connector.path.tiles.map((tile) => {
@@ -98,6 +116,21 @@ export const Connector2d = ({
       height: maxY - minY + 1 + pad * 2
     };
   }, [globalTiles, jumps.length]);
+
+  // Cancel SceneLayer zoom so the popup stays readable; grows when zooming out.
+  const popupScreenScale = Math.min(3.2, 1 / Math.max(zoom, 0.25));
+
+  const hoverPopupPos = useMemo(() => {
+    if (!showHoverPopup) return null;
+
+    return {
+      x: (mouseTile.x - bounds.minX) * TILE_SIZE_2D + TILE_SIZE_2D / 2,
+      // Scene-space lift grows when zoomed out so screen gap stays comfortable
+      y:
+        (mouseTile.y - bounds.minY) * TILE_SIZE_2D -
+        Math.round(TILE_SIZE_2D * 0.7 * popupScreenScale)
+    };
+  }, [showHoverPopup, mouseTile, bounds, popupScreenScale]);
 
   const pxSize = useMemo(() => {
     return {
@@ -203,9 +236,12 @@ export const Connector2d = ({
 
   if (globalTiles.length === 0) return null;
 
-  const handleColor = vlanStroke
-    ? strokeBase
-    : getColorVariant(paletteColor.value, 'dark', { grade: 1 });
+  const handleColor = isMismatchLink
+    ? TRUNK_MISMATCH_COLOR
+    : isTrunkLink
+      ? TRUNK_RAINBOW_COLORS[0]
+      : strokeBase;
+  const lineStroke = isTrunkLink ? `url(#${rainbowGradId})` : handleColor;
   const emphasize = Boolean(isSelected || isFocused || isHighlighted);
   const lineOpacity = isDimmed
     ? softDim
@@ -245,6 +281,33 @@ export const Connector2d = ({
       }}
     >
       <Svg viewboxSize={pxSize}>
+        {isTrunkLink && (
+          <defs>
+            {/*
+              userSpaceOnUse: objectBoundingBox breaks on straight H/V paths
+              (zero-width or zero-height bbox → invisible stroke until the
+              cable gains a bend after moving a node).
+            */}
+            <linearGradient
+              id={rainbowGradId}
+              gradientUnits="userSpaceOnUse"
+              x1={0}
+              y1={0}
+              x2={Math.max(pxSize.width, TILE_SIZE_2D)}
+              y2={Math.max(pxSize.height, TILE_SIZE_2D)}
+            >
+              {TRUNK_RAINBOW_COLORS.map((color, index) => {
+                return (
+                  <stop
+                    key={color}
+                    offset={`${(index / (TRUNK_RAINBOW_COLORS.length - 1)) * 100}%`}
+                    stopColor={color}
+                  />
+                );
+              })}
+            </linearGradient>
+          </defs>
+        )}
         {styleRuns.map((run, index) => {
           const pathD = buildConnectorSvgPathD({
             points: run.points,
@@ -256,13 +319,18 @@ export const Connector2d = ({
           const dash = run.throughNode
             ? throughNodeDashArray
             : solidDashArray;
+          const coreWidth = connectorWidthPx * widthBoost;
 
           return (
             <g key={`${run.throughNode ? 'in' : 'out'}-${index}`}>
               <path
                 d={pathD}
                 stroke={theme.palette.common.white}
-                strokeWidth={connectorWidthPx * (emphasize ? 1.8 : 1.4) * (isHighlighted ? 1.15 : 1)}
+                strokeWidth={
+                  connectorWidthPx *
+                  (emphasize ? 1.8 : 1.4) *
+                  (isHighlighted ? 1.15 : 1)
+                }
                 strokeLinecap="butt"
                 strokeLinejoin="round"
                 strokeOpacity={outlineOpacity}
@@ -271,8 +339,8 @@ export const Connector2d = ({
               />
               <path
                 d={pathD}
-                stroke={handleColor}
-                strokeWidth={connectorWidthPx * widthBoost}
+                stroke={lineStroke}
+                strokeWidth={coreWidth}
                 strokeLinecap="butt"
                 strokeLinejoin="round"
                 strokeOpacity={lineOpacity}
@@ -344,6 +412,137 @@ export const Connector2d = ({
               color: handleColor
             }}
           />
+        </Box>
+      )}
+
+      {showHoverPopup && hoverPopupPos && (
+        <Box
+          sx={{
+            position: 'absolute',
+            left: hoverPopupPos.x,
+            top: hoverPopupPos.y,
+            transform: `translate(-50%, -100%) scale(${popupScreenScale})`,
+            transformOrigin: 'bottom center',
+            pointerEvents: 'none',
+            zIndex: 6,
+            minWidth: 340,
+            maxWidth: 480,
+            px: 3,
+            py: 2.25,
+            borderRadius: 2,
+            bgcolor: 'rgba(255,255,255,0.98)',
+            border: '2px solid',
+            borderColor: isMismatchLink ? TRUNK_MISMATCH_COLOR : 'divider',
+            boxShadow: '0 12px 32px rgba(15,23,42,0.22)'
+          }}
+        >
+          <Typography
+            sx={{
+              fontSize: 16,
+              fontWeight: 700,
+              letterSpacing: 0.55,
+              color: isMismatchLink ? TRUNK_MISMATCH_COLOR : 'text.secondary',
+              textTransform: 'uppercase',
+              mb: 1.1
+            }}
+          >
+            {isMismatchLink ? 'Błąd łącza' : 'Połączenie'}
+          </Typography>
+          {linkSummary.endpoints.length === 0 ? (
+            <Typography sx={{ fontSize: 20, color: 'text.secondary' }}>
+              Brak endpointów
+            </Typography>
+          ) : (
+            linkSummary.endpoints.map((endpoint, index) => {
+              return (
+                <Box key={`${endpoint.itemId}-${endpoint.portId}-${index}`}>
+                  {index > 0 && (
+                    <Typography
+                      sx={{
+                        fontSize: 16,
+                        color: 'text.disabled',
+                        textAlign: 'center',
+                        my: 0.6
+                      }}
+                    >
+                      ↕
+                    </Typography>
+                  )}
+                  <Typography
+                    sx={{
+                      fontSize: 22,
+                      fontWeight: 700,
+                      lineHeight: 1.3,
+                      color: 'text.primary'
+                    }}
+                  >
+                    {endpoint.itemName}
+                  </Typography>
+                  <Typography
+                    sx={{
+                      fontSize: 18,
+                      color: 'text.secondary',
+                      fontFamily:
+                        'ui-monospace, SFMono-Regular, Menlo, monospace'
+                    }}
+                  >
+                    {endpoint.portLabel}
+                    {endpoint.type === 'trunk'
+                      ? ' · trunk'
+                      : endpoint.isNonVlanAware
+                        ? ' · host'
+                        : ''}
+                  </Typography>
+                </Box>
+              );
+            })
+          )}
+          {isMismatchLink && (
+            <Typography
+              sx={{
+                mt: 1.1,
+                fontSize: 16,
+                fontWeight: 600,
+                color: TRUNK_MISMATCH_COLOR,
+                lineHeight: 1.4
+              }}
+            >
+              {linkSummary.endpoints.some((endpoint) => {
+                return endpoint.isNonVlanAware;
+              })
+                ? 'Trunk nie może łączyć się z urządzeniem bez VLAN (np. PC).'
+                : 'Trunk nie może łączyć się z portem Access.'}
+            </Typography>
+          )}
+          <Box
+            sx={{
+              mt: 1.4,
+              pt: 1.4,
+              borderTop: '1px solid',
+              borderColor: 'divider',
+              display: 'flex',
+              alignItems: 'center',
+              gap: 1.25
+            }}
+          >
+            <Box
+              sx={{
+                width: 18,
+                height: 18,
+                borderRadius: '50%',
+                flexShrink: 0,
+                bgcolor: isTrunkLink
+                  ? undefined
+                  : linkSummary.vlanColor ??
+                    (isMismatchLink ? TRUNK_MISMATCH_COLOR : '#94a3b8'),
+                background: isTrunkLink ? TRUNK_RAINBOW_CSS : undefined,
+                border: '1px solid rgba(0,0,0,0.12)'
+              }}
+            />
+            <Typography sx={{ fontSize: 18, fontWeight: 600 }}>
+              {linkSummary.vlanLabel}
+            </Typography>
+          </Box>
         </Box>
       )}
     </Box>

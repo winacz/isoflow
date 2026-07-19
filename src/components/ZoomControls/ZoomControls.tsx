@@ -41,7 +41,7 @@ export const ZoomControls = () => {
             }}
           >
             <Typography variant="body2" color="text.secondary">
-              {Math.ceil(zoom * 100)}%
+              {Math.round(zoom * 100)}%
             </Typography>
           </Box>
           <Divider orientation="vertical" flexItem />

@@ -7,7 +7,9 @@ import {
   resolveConnectorAnchorsAgainstOthers,
   resolveOrthogonalDetourAfterWaypointRemoval,
   collectOtherConnectorPaths,
-  withOrthogonalPath
+  withOrthogonalPath,
+  dedupeTileWaypoints,
+  snapConnectorPathToElbowGuides
 } from 'src/utils';
 import { isShape2dIcon } from 'src/config';
 import { validateConnector } from 'src/schemas/validation';
@@ -133,9 +135,25 @@ export const syncConnector = (
         });
       };
 
-      const path = buildOrthogonal
+      let path = buildOrthogonal
         ? withOrthogonalPath(buildPath, options?.removedTile)
         : buildPath();
+
+      // Align automatic elbows with nearby cable bends (shared Y/X guides).
+      if (isTwoDView && anchors.length === 2) {
+        const guidePaths = collectOtherConnectorPaths(
+          draft.scene.connectors,
+          connector.value.id
+        );
+        path = snapConnectorPathToElbowGuides({
+          anchors,
+          path,
+          view: view.value,
+          modelItems: draft.model.items,
+          otherPaths: guidePaths,
+          orthogonal: buildOrthogonal
+        });
+      }
 
       draft.scene.connectors[connector.value.id] = { path };
     }
@@ -161,7 +179,13 @@ export const updateConnector = (
     if (!connectors) return;
 
     const connector = getItemByIdOrThrow(connectors, id);
-    const newConnector = { ...connector.value, ...updates };
+    const newConnector = {
+      ...connector.value,
+      ...updates,
+      ...(updates.anchors
+        ? { anchors: dedupeTileWaypoints(updates.anchors) }
+        : {})
+    };
     connectors[connector.index] = newConnector;
 
     if (updates.anchors) {
@@ -191,9 +215,17 @@ export const createConnector = (
     const { connectors } = draft.model.views[view.index];
 
     if (!connectors) {
-      draft.model.views[view.index].connectors = [newConnector];
+      draft.model.views[view.index].connectors = [
+        {
+          ...newConnector,
+          anchors: dedupeTileWaypoints(newConnector.anchors)
+        }
+      ];
     } else {
-      draft.model.views[view.index].connectors?.unshift(newConnector);
+      draft.model.views[view.index].connectors?.unshift({
+        ...newConnector,
+        anchors: dedupeTileWaypoints(newConnector.anchors)
+      });
     }
 
     const stateAfterSync = syncConnector(

@@ -22,7 +22,11 @@ import {
   applyOrthogonalBendAnchors,
   withOrthogonalPath,
   axisLockTile,
-  generateId
+  generateId,
+  hasTileWaypointAt,
+  dedupeTileWaypoints,
+  collectTileWaypoints,
+  snapTileToWaypointGuides
 } from 'src/utils';
 import { getShape2dSize } from 'src/config';
 
@@ -56,9 +60,24 @@ const dragItems = (
     /** Mouse-down tile — with itemOrigins enables absolute 2D node placement. */
     mousedownTile?: Coords;
     itemOrigins?: Record<string, Coords>;
+    /** Snap dragged WPs to axes of other waypoints. */
+    waypointSnap?: {
+      waypoints: ReturnType<typeof collectTileWaypoints>;
+      excludeIds: Set<string>;
+    };
   }
 ) => {
   const modelItems = options?.modelItems ?? [];
+  const snapWpTile = (candidate: Coords, selfId?: string) => {
+    if (!options?.isTwoD || !options.waypointSnap) return candidate;
+    const exclude = new Set(options.waypointSnap.excludeIds);
+    if (selfId) exclude.add(selfId);
+    return snapTileToWaypointGuides(
+      candidate,
+      options.waypointSnap.waypoints,
+      exclude
+    );
+  };
   const draggedNodeIds = items
     .filter((item) => {
       return item.type === 'ITEM';
@@ -156,15 +175,37 @@ const dragItems = (
 
       const nextAnchors = connector.anchors.map((anchor) => {
         if (!anchorIds.has(anchor.id) || !anchor.ref.tile) return anchor;
+        const nextTile = snapWpTile(
+          CoordsUtils.add(anchor.ref.tile, delta),
+          anchor.id
+        );
+        // Don't stack two WPs on one cell (skip this anchor's move).
+        if (
+          hasTileWaypointAt(connector.anchors, nextTile, anchor.id) ||
+          [...anchorIds].some((otherId) => {
+            if (otherId === anchor.id) return false;
+            const other = connector.anchors.find((candidate) => {
+              return candidate.id === otherId;
+            });
+            if (!other?.ref.tile) return false;
+            const otherNext = snapWpTile(
+              CoordsUtils.add(other.ref.tile, delta),
+              otherId
+            );
+            return CoordsUtils.isEqual(otherNext, nextTile);
+          })
+        ) {
+          return anchor;
+        }
         return {
           ...anchor,
-          ref: { tile: CoordsUtils.add(anchor.ref.tile, delta) }
+          ref: { tile: nextTile }
         };
       });
 
       scene.updateConnector(
         connectorId,
-        { anchors: nextAnchors },
+        { anchors: dedupeTileWaypoints(nextAnchors) },
         { overlapResolve: 'off' }
       );
     });
@@ -230,16 +271,29 @@ const dragItems = (
         delta
       );
 
+      const snapped = moved.map((anchor) => {
+        if (
+          (anchor.id !== startAnchorId && anchor.id !== endAnchorId) ||
+          !anchor.ref.tile
+        ) {
+          return anchor;
+        }
+        return {
+          ...anchor,
+          ref: { tile: snapWpTile(anchor.ref.tile, anchor.id) }
+        };
+      });
+
       let nextAnchors =
         options?.isTwoD && options.orthogonal
           ? applyOrthogonalBendAnchors({
-              anchors: moved,
+              anchors: snapped,
               draggedAnchorId: startAnchorId,
               hint: tile,
               view: scene.currentView,
               modelItems: options.modelItems
             })
-          : moved;
+          : snapped;
 
       if (options?.isTwoD) {
         nextAnchors = untangleAnchorHairpins(
@@ -323,6 +377,10 @@ const dragItems = (
           // Dragging a port handle off the jack: keep the port attachment and
           // place/move an exit WP at `tile` (so you can pull a vertical stub up).
           if (wasPortEndpoint) {
+            if (hasTileWaypointAt(draft.anchors, tile)) {
+              return;
+            }
+
             const isFirst = anchor.index === 0;
             const neighborIndex = isFirst
               ? 1
@@ -352,10 +410,22 @@ const dragItems = (
             return;
           }
 
+          if (hasTileWaypointAt(draft.anchors, tile, item.id)) {
+            return;
+          }
+
+          const snappedTile = snapWpTile(tile, item.id);
+          if (
+            hasTileWaypointAt(draft.anchors, snappedTile, item.id) &&
+            !CoordsUtils.isEqual(snappedTile, tile)
+          ) {
+            return;
+          }
+
           draft.anchors[anchor.index] = {
             ...anchor.value,
             ref: {
-              tile
+              tile: snappedTile
             }
           };
           return;
@@ -468,16 +538,66 @@ export const DragItems: ModeActions = {
     const orthogonal =
       isTwoD && uiState.mouse.shiftKey && isConnectorPathDrag(mode.items);
 
+    const excludeIds = new Set<string>();
+    if (isConnectorPathDrag(mode.items)) {
+      mode.items.forEach((item) => {
+        if (item.type === 'CONNECTOR_ANCHOR') {
+          excludeIds.add(item.id);
+        }
+        if (item.type === 'CONNECTOR_SEGMENT') {
+          try {
+            const parsed = parseWaypointSegmentId(item.id);
+            excludeIds.add(parsed.startAnchorId);
+            excludeIds.add(parsed.endAnchorId);
+          } catch {
+            // ignore
+          }
+        }
+      });
+    }
+
+    const waypointSnap =
+      isTwoD && excludeIds.size > 0
+        ? {
+            waypoints: collectTileWaypoints(
+              freshView?.connectors ?? scene.connectors,
+              scene.currentView,
+              freshModel.items
+            ),
+            excludeIds
+          }
+        : undefined;
+
     const dragOpts = {
       isTwoD,
       modelItems: freshModel.items,
       connectors: freshView?.connectors ?? scene.connectors,
       orthogonal,
       mousedownTile: uiState.mouse.mousedown.tile,
-      itemOrigins: mode.itemOrigins
+      itemOrigins: mode.itemOrigins,
+      waypointSnap
     };
 
-    const runDrag = (tile: Coords, delta: Coords) => {
+    const runDrag = (rawTile: Coords, rawDelta: Coords) => {
+      let tile = rawTile;
+      let delta = rawDelta;
+
+      if (waypointSnap) {
+        // Snap the drag cursor to nearby WP axes; rebuild delta from origin.
+        tile = snapTileToWaypointGuides(
+          rawTile,
+          waypointSnap.waypoints,
+          waypointSnap.excludeIds
+        );
+        if (uiState.mouse.mousedown) {
+          delta = CoordsUtils.subtract(tile, uiState.mouse.mousedown.tile);
+          if (orthogonal) {
+            delta = axisLockDelta(delta);
+            tile = CoordsUtils.add(uiState.mouse.mousedown.tile, delta);
+          }
+        }
+      }
+
       const apply = () => {
         dragItems(mode.items, tile, delta, scene, dragOpts);
       };

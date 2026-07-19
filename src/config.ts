@@ -234,7 +234,8 @@ export const RECTANGLE_DEFAULTS: Required<
   Omit<Rectangle, 'id' | 'from' | 'to' | 'color'>
 > = {};
 
-export const ZOOM_INCREMENT = 0.2;
+/** Zoom step as a fraction (0.1 = 10%). */
+export const ZOOM_INCREMENT = 0.1;
 export const MIN_ZOOM = 0.2;
 export const MAX_ZOOM = 2.5;
 export const TRANSFORM_ANCHOR_SIZE = 30;

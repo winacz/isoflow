@@ -16,7 +16,9 @@ export const useIcon = (
   name?: string,
   ports?: ModelItem['ports'],
   connectedPortIds?: ReadonlySet<string> | string[],
-  color?: string
+  color?: string,
+  mismatchPortIds?: ReadonlySet<string> | string[],
+  focusedPortId?: string | null
 ) => {
   const [hasLoaded, setHasLoaded] = React.useState(false);
   const icons = useModelStore((state) => {
@@ -66,6 +68,8 @@ export const useIcon = (
           name={name || icon.name}
           ports={ports}
           connectedPortIds={connectedPortIds}
+          mismatchPortIds={mismatchPortIds}
+          focusedPortId={focusedPortId}
           modelItems={modelItems}
           color={color}
         />
@@ -85,7 +89,16 @@ export const useIcon = (
         }}
       />
     );
-  }, [icon, name, ports, connectedPortIds, modelItems, color]);
+  }, [
+    icon,
+    name,
+    ports,
+    connectedPortIds,
+    mismatchPortIds,
+    focusedPortId,
+    modelItems,
+    color
+  ]);
 
   return {
     icon,

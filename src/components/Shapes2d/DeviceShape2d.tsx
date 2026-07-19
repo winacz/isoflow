@@ -23,6 +23,10 @@ interface Props {
   ports?: ModelItem['ports'];
   /** Port ids that currently have a cable attached. */
   connectedPortIds?: ReadonlySet<string> | string[];
+  /** Port ids on a trunk mismatch link (red border). */
+  mismatchPortIds?: ReadonlySet<string> | string[];
+  /** Currently focused port (sidebar / click) — gentle highlight. */
+  focusedPortId?: string | null;
   /** All model items — used to resolve shared VLAN colors. */
   modelItems?: ModelItem[];
   /**
@@ -48,6 +52,8 @@ export const DeviceShape2d = ({
   subtitle,
   ports: portConfigs,
   connectedPortIds,
+  mismatchPortIds,
+  focusedPortId = null,
   modelItems,
   centered = true,
   layoutOverride,
@@ -67,6 +73,7 @@ export const DeviceShape2d = ({
   const isRack = templateLayout?.formFactor === 'RACK';
   const earW = Math.max(3, Math.round(tileW * 0.35));
   const chassisTint = parseDeviceColor(color);
+  const isPc = shapeId === SHAPE_2D_PC_ID;
 
   const ports = useMemo(() => {
     if (layoutOverride) return layoutOverride.ports;
@@ -81,6 +88,13 @@ export const DeviceShape2d = ({
       ? connectedPortIds
       : new Set(connectedPortIds);
   }, [connectedPortIds]);
+
+  const mismatchSet = useMemo(() => {
+    if (!mismatchPortIds) return null;
+    return mismatchPortIds instanceof Set
+      ? mismatchPortIds
+      : new Set(mismatchPortIds);
+  }, [mismatchPortIds]);
 
   return (
     <Box
@@ -113,7 +127,9 @@ export const DeviceShape2d = ({
               position: 'absolute',
               inset: 0,
               bgcolor: chassisTint.css,
-              pointerEvents: 'none'
+              pointerEvents: 'none',
+              // Keep chassis tint under ports (ports paint their own glass face).
+              zIndex: 0
             }}
           />
         )}
@@ -250,10 +266,12 @@ export const DeviceShape2d = ({
         const iface =
           port.label ?? getShape2dPortIfaceName(shapeId, port.id);
         const config = portConfigs?.[port.id];
+        const isTrunk = !isPc && config?.type === 'trunk';
         const statusColor = getPortStatusColor(config?.vlan, index, {
-          isPc: shapeId === SHAPE_2D_PC_ID,
+          isPc,
           customColor: config?.vlanColor,
-          modelItems
+          modelItems,
+          portType: isTrunk ? 'trunk' : 'access'
         });
 
         return (
@@ -270,7 +288,8 @@ export const DeviceShape2d = ({
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
-              overflow: 'visible'
+              overflow: 'visible',
+              zIndex: 2
             }}
           >
             <Rj45Port
@@ -279,6 +298,9 @@ export const DeviceShape2d = ({
               portNumber={index + 1}
               portLabel={iface}
               statusColor={statusColor}
+              isTrunk={isTrunk}
+              hasMismatch={Boolean(mismatchSet?.has(port.id))}
+              isFocused={focusedPortId === port.id}
               isConnected={Boolean(connectedSet?.has(port.id))}
               media={port.media ?? 'RJ45'}
             />

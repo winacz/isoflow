@@ -7,7 +7,7 @@ import {
   getShape2dSize,
   isShape2dIcon
 } from 'src/config';
-import { getTilePosition, getShape2dCenterPosition } from 'src/utils';
+import { getTilePosition, getShape2dCenterPosition, getMismatchPortIdsForItem } from 'src/utils';
 import { useIcon } from 'src/hooks/useIcon';
 import { ViewItem } from 'src/types';
 import { useModelItem } from 'src/hooks/useModelItem';
@@ -15,6 +15,7 @@ import { useScene } from 'src/hooks/useScene';
 import { ExpandableLabel } from 'src/components/Label/ExpandableLabel';
 import { MarkdownEditor } from 'src/components/MarkdownEditor/MarkdownEditor';
 import { useUiStateStore } from 'src/stores/uiStateStore';
+import { useModelStore } from 'src/stores/modelStore';
 
 interface Props {
   node: ViewItem;
@@ -33,6 +34,9 @@ export const Node = ({
 }: Props) => {
   const modelItem = useModelItem(node.id);
   const { connectors } = useScene();
+  const modelItems = useModelStore((state) => {
+    return state.items;
+  });
 
   const connectedPortIds = useMemo(() => {
     const ids = new Set<string>();
@@ -48,12 +52,33 @@ export const Node = ({
     return ids;
   }, [connectors, node.id]);
 
+  const mismatchPortIds = useMemo(() => {
+    return getMismatchPortIdsForItem({
+      itemId: node.id,
+      connectors,
+      modelItems
+    });
+  }, [connectors, modelItems, node.id]);
+
+  const focusedPortId = useUiStateStore((state) => {
+    return state.focusedPortId;
+  });
+  const itemControls = useUiStateStore((state) => {
+    return state.itemControls;
+  });
+  const nodeFocusedPortId =
+    itemControls?.type === 'ITEM' && itemControls.id === node.id
+      ? focusedPortId
+      : null;
+
   const { iconComponent } = useIcon(
     modelItem.icon,
     modelItem.name,
     modelItem.ports,
     connectedPortIds,
-    modelItem.color
+    modelItem.color,
+    mismatchPortIds,
+    nodeFocusedPortId
   );
   const projectionMode = useUiStateStore((state) => {
     return state.projectionMode;

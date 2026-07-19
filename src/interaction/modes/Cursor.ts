@@ -6,7 +6,8 @@ import {
   ModeActionsAction,
   Coords,
   View,
-  ModelItem
+  ModelItem,
+  Connector as ConnectorI
 } from 'src/types';
 import {
   getItemAtTile,
@@ -24,7 +25,10 @@ import {
   encodeWaypointSegmentId,
   parseWaypointSegmentId,
   prepareWaypointSegmentDrag,
-  doShape2dFootprintsOverlap
+  doShape2dFootprintsOverlap,
+  isShape2dPortInUse,
+  BLACK_CROSSHAIR_CURSOR,
+  setWindowCursor
 } from 'src/utils';
 import { useScene } from 'src/hooks/useScene';
 import { isShape2dIcon, getShape2dSize } from 'src/config';
@@ -204,6 +208,24 @@ const getAnchor = (
   );
 
   if (!anchor) {
+    // Never place a second tile WP on an occupied cell.
+    const tileTaken = connector.anchors.some((candidate) => {
+      return (
+        Boolean(candidate.ref.tile) &&
+        CoordsUtils.isEqual(candidate.ref.tile as Coords, tile)
+      );
+    });
+    if (tileTaken) {
+      return (
+        connector.anchors.find((candidate) => {
+          return (
+            Boolean(candidate.ref.tile) &&
+            CoordsUtils.isEqual(candidate.ref.tile as Coords, tile)
+          );
+        }) ?? connector.anchors[0]
+      );
+    }
+
     const newAnchor: ConnectorAnchor = {
       id: generateId(),
       ref: { tile }
@@ -553,6 +575,56 @@ export const Cursor: ModeActions = {
   },
   mousemove: ({ scene, uiState, model }) => {
     if (uiState.mode.type !== 'CURSOR' || !hasMovedTile(uiState.mouse)) return;
+
+    // 2D: drag from an empty port → start connector tool from that port
+    if (
+      uiState.projectionMode === 'TWO_D' &&
+      uiState.mode.mousedownItem?.type === 'ITEM' &&
+      uiState.mouse.mousedown
+    ) {
+      const portHit = getShape2dPortAtTile({
+        tile: uiState.mouse.mousedown.tile,
+        scene,
+        modelItems: model.items
+      });
+
+      if (
+        portHit &&
+        portHit.itemId === uiState.mode.mousedownItem.id &&
+        !isShape2dPortInUse({
+          itemId: portHit.itemId,
+          portId: portHit.portId,
+          connectors: scene.currentView.connectors ?? []
+        })
+      ) {
+        const startRef = {
+          item: portHit.itemId,
+          port: portHit.portId
+        };
+        const endRef = {
+          tile: uiState.mouse.position.tile
+        };
+        const newConnector: ConnectorI = {
+          id: generateId(),
+          color: scene.colors[0].id,
+          anchors: [
+            { id: generateId(), ref: startRef },
+            { id: generateId(), ref: endRef }
+          ]
+        };
+
+        scene.beginHistoryTransaction();
+        scene.createConnector(newConnector);
+        uiState.actions.setFocusedPortId(portHit.portId);
+        uiState.actions.setMode({
+          type: 'CONNECTOR',
+          showCursor: true,
+          id: newConnector.id
+        });
+        setWindowCursor(BLACK_CROSSHAIR_CURSOR);
+        return;
+      }
+    }
 
     // 2D marquee on empty canvas
     if (

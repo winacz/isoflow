@@ -49,14 +49,22 @@ export const updateViewItem = (
         });
       }
 
-      // Rebuild paths only — keep topology (no bump / orthogonalDetour on node move).
-      const updatedConnectors = connectorsToUpdate.reduce((acc, connector) => {
+      // Rebuild paths (2 passes so elbow snap can align to neighbors' new bends).
+      let updatedConnectors = connectorsToUpdate.reduce((acc, connector) => {
         return syncConnector(
           connector.id,
           { viewId, state: acc },
           { overlapResolve: 'off' }
         );
       }, draft);
+
+      updatedConnectors = connectorsToUpdate.reduce((acc, connector) => {
+        return syncConnector(
+          connector.id,
+          { viewId, state: acc },
+          { overlapResolve: 'off' }
+        );
+      }, updatedConnectors);
 
       draft.model.views[view.index].connectors =
         updatedConnectors.model.views[view.index].connectors;

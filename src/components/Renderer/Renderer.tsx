@@ -9,6 +9,7 @@ import { Nodes } from 'src/components/SceneLayers/Nodes/Nodes';
 import { Rectangles } from 'src/components/SceneLayers/Rectangles/Rectangles';
 import { Connectors } from 'src/components/SceneLayers/Connectors/Connectors';
 import { ConnectorStackBadges } from 'src/components/SceneLayers/Connectors/ConnectorStackBadges';
+import { WaypointGuides } from 'src/components/SceneLayers/Connectors/WaypointGuides';
 import { ConnectorLabels } from 'src/components/SceneLayers/ConnectorLabels/ConnectorLabels';
 import { TextBoxes } from 'src/components/SceneLayers/TextBoxes/TextBoxes';
 import { SizeIndicator } from 'src/components/DebugUtils/SizeIndicator';
@@ -173,6 +174,11 @@ export const Renderer = ({ showGrid, backgroundColor }: RendererProps) => {
       {isTwoD && (
         <SceneLayer order={2} sx={{ pointerEvents: 'none' }}>
           <Connectors connectors={visibleConnectors} />
+        </SceneLayer>
+      )}
+      {isTwoD && (
+        <SceneLayer order={4} sx={{ pointerEvents: 'none' }}>
+          <WaypointGuides />
         </SceneLayer>
       )}
       {!isTwoD && (

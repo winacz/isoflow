@@ -28,11 +28,12 @@ import {
   getPortStatusColor,
   isVlan1,
   VLAN_1_COLOR,
+  TRUNK_RAINBOW_CSS,
   PORT_SPEED_OPTIONS,
-  isDeviceTemplateId,
   parseDeviceColor,
   normalizeDeviceColorInput,
-  setDeviceColorAlpha
+  setDeviceColorAlpha,
+  isDeviceTemplateId
 } from 'src/utils';
 import { useScene } from 'src/hooks/useScene';
 import { useViewItem } from 'src/hooks/useViewItem';
@@ -78,6 +79,7 @@ type PortRowProps = {
   isPc: boolean;
   config: PortConfig;
   vlanColor: string;
+  isTrunk: boolean;
   onToggle: (portId: string, expanded: boolean) => void;
   onUpdatePort: (portId: string, patch: Partial<PortConfig>) => void;
   onApplyVlanNumber: (portId: string, vlan: string) => void;
@@ -94,6 +96,7 @@ const PortRow = memo(
     isPc,
     config,
     vlanColor,
+    isTrunk,
     onToggle,
     onUpdatePort,
     onApplyVlanNumber,
@@ -149,7 +152,8 @@ const PortRow = memo(
               height: 8,
               borderRadius: '50%',
               flexShrink: 0,
-              bgcolor: vlanColor ?? '#94a3b8',
+              bgcolor: isTrunk ? undefined : vlanColor ?? '#94a3b8',
+              background: isTrunk ? TRUNK_RAINBOW_CSS : undefined,
               border: '1px solid rgba(0,0,0,0.12)'
             }}
           />
@@ -358,12 +362,14 @@ export const NodeControls2d = ({ id }: Props) => {
         ...defaultPortConfig(),
         ...(modelItem.ports?.[port.id] ?? {})
       };
+      const isTrunk = !isPc && config.type === 'trunk';
       const vlanColor = getPortStatusColor(config.vlan, index, {
         isPc,
         customColor: config.vlanColor,
-        modelItems
+        modelItems,
+        portType: isTrunk ? 'trunk' : 'access'
       });
-      return { port, index, config, vlanColor };
+      return { port, index, config, vlanColor, isTrunk };
     });
   }, [shapePorts, modelItem.ports, isPc, modelItems]);
 
@@ -579,7 +585,7 @@ export const NodeControls2d = ({ id }: Props) => {
           </AccordionSummary>
           <AccordionDetails sx={{ px: 0, pt: 0, pb: 0 }}>
             <Stack spacing={0.4}>
-              {portSummaries.map(({ port, index, config, vlanColor }) => {
+              {portSummaries.map(({ port, index, config, vlanColor, isTrunk }) => {
                 return (
                   <PortRow
                     key={port.id}
@@ -589,6 +595,7 @@ export const NodeControls2d = ({ id }: Props) => {
                     isPc={isPc}
                     config={config}
                     vlanColor={vlanColor}
+                    isTrunk={isTrunk}
                     onToggle={onTogglePort}
                     onUpdatePort={updatePort}
                     onApplyVlanNumber={applyVlanNumber}

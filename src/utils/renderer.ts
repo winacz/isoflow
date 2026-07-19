@@ -693,14 +693,15 @@ export const getTranslateCSS = (translate: Coords = { x: 0, y: 0 }) => {
   return `translate(${translate.x}px, ${translate.y}px)`;
 };
 
+/** Snap to 10% grid, then step by ZOOM_INCREMENT. */
 export const incrementZoom = (zoom: number) => {
-  const newZoom = clamp(zoom + ZOOM_INCREMENT, MIN_ZOOM, MAX_ZOOM);
-  return roundToOneDecimalPlace(newZoom);
+  const stepped = Math.round(zoom * 10) / 10 + ZOOM_INCREMENT;
+  return clamp(roundToOneDecimalPlace(stepped), MIN_ZOOM, MAX_ZOOM);
 };
 
 export const decrementZoom = (zoom: number) => {
-  const newZoom = clamp(zoom - ZOOM_INCREMENT, MIN_ZOOM, MAX_ZOOM);
-  return roundToOneDecimalPlace(newZoom);
+  const stepped = Math.round(zoom * 10) / 10 - ZOOM_INCREMENT;
+  return clamp(roundToOneDecimalPlace(stepped), MIN_ZOOM, MAX_ZOOM);
 };
 
 interface GetMouse {
