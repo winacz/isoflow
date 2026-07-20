@@ -531,14 +531,14 @@ export const DeviceShape2d = ({
               gridTemplateRows: 'auto auto',
               gridAutoFlow: 'column',
               gridAutoColumns: 'max-content',
-              columnGap: `${Math.max(4, Math.round(tileW * 0.1))}px`,
-              rowGap: `${Math.max(2, Math.round(tileH * 0.08))}px`,
+              columnGap: `${Math.max(6, Math.round(tileW * 0.14))}px`,
+              rowGap: `${Math.max(4, Math.round(tileH * 0.12))}px`,
               alignItems: 'center',
               justifyItems: 'stretch',
               flexShrink: 0,
-              maxWidth: '62%',
+              maxWidth: '72%',
               overflow: 'hidden',
-              py: `${Math.max(1, Math.round(tileH * 0.04))}px`
+              py: `${Math.max(2, Math.round(tileH * 0.06))}px`
             }}
           >
             {sviRows.map((svi) => {
@@ -551,25 +551,27 @@ export const DeviceShape2d = ({
                     flexDirection: svi.ip ? 'column' : 'row',
                     alignItems: svi.ip ? 'flex-start' : 'center',
                     gap: svi.ip
-                      ? 0
-                      : `${Math.max(2, Math.round(tileW * 0.06))}px`,
-                    px: `${Math.max(5, Math.round(tileW * 0.12))}px`,
-                    py: `${Math.max(2, Math.round(tileH * 0.06))}px`,
+                      ? `${Math.max(1, Math.round(tileH * 0.04))}px`
+                      : `${Math.max(4, Math.round(tileW * 0.1))}px`,
+                    px: `${Math.max(8, Math.round(tileW * 0.2))}px`,
+                    py: `${Math.max(4, Math.round(tileH * 0.12))}px`,
                     borderRadius: 9999,
                     bgcolor: svi.color,
-                    border: '1px solid rgba(0,0,0,0.12)',
-                    boxShadow: '0 1px 2px rgba(15,23,42,0.12)',
+                    border: '1.5px solid rgba(255,255,255,0.35)',
+                    boxShadow:
+                      '0 2px 6px rgba(15,23,42,0.28), inset 0 1px 0 rgba(255,255,255,0.25)',
                     minWidth: 0,
-                    maxWidth: Math.max(72, Math.round(tileW * 2.8))
+                    maxWidth: Math.max(110, Math.round(tileW * 4.2))
                   }}
                 >
                   <Typography
                     sx={{
                       color: '#fff',
-                      fontSize: Math.max(8, tileH * 0.32),
-                      fontWeight: 700,
+                      fontSize: Math.max(11, tileH * 0.48),
+                      fontWeight: 800,
                       lineHeight: 1.15,
-                      letterSpacing: 0.2,
+                      letterSpacing: 0.3,
+                      textShadow: '0 1px 1px rgba(0,0,0,0.25)',
                       userSelect: 'none',
                       whiteSpace: 'nowrap'
                     }}
@@ -580,12 +582,13 @@ export const DeviceShape2d = ({
                     <Typography
                       sx={{
                         color: '#fff',
-                        fontSize: Math.max(7, tileH * 0.26),
-                        fontWeight: 600,
+                        fontSize: Math.max(9, tileH * 0.36),
+                        fontWeight: 700,
                         fontFamily:
                           'ui-monospace, SFMono-Regular, Menlo, monospace',
-                        lineHeight: 1.1,
-                        opacity: 0.92,
+                        lineHeight: 1.15,
+                        opacity: 0.95,
+                        textShadow: '0 1px 1px rgba(0,0,0,0.2)',
                         userSelect: 'none',
                         whiteSpace: 'nowrap',
                         overflow: 'hidden',

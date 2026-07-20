@@ -27,6 +27,11 @@ import { TextBox } from './modes/TextBox';
 const RIGHT_MOUSE_BUTTON = 2;
 const PAN_DRAG_THRESHOLD_PX = 3;
 
+type RightButtonPanState = {
+  active: boolean;
+  didPan: boolean;
+};
+
 const modes: { [k in string]: ModeActions } = {
   CURSOR: Cursor,
   DRAG_ITEMS: DragItems,
@@ -74,7 +79,10 @@ const restoreCursorForMode = (modeType: string) => {
 export const useInteractionManager = () => {
   const rendererRef = useRef<HTMLElement>();
   const reducerTypeRef = useRef<string>();
-  const rightButtonPanRef = useRef({ active: false, didPan: false });
+  const rightButtonPanRef = useRef<RightButtonPanState>({
+    active: false,
+    didPan: false
+  });
   const uiStore = useUiStateStoreApi();
   const editorMode = useUiStateStore((state) => state.editorMode);
   const modeType = useUiStateStore((state) => state.mode.type);
@@ -97,6 +105,81 @@ export const useInteractionManager = () => {
     mouseRef.current = nextMouse;
     uiStore.getState().actions.setMouse(nextMouse);
   };
+
+  /** Open lock / connector context menu for the tile under the cursor. */
+  const openContextMenuAtTile = useCallback(() => {
+    const liveUiState = uiStore.getState();
+    const tile = liveUiState.mouse.position.tile;
+    const modelItems = model.actions.get().items;
+
+    // Prefer topmost cable (same order as Connectors paint: later = on top).
+    let connectorAtTile: (typeof scene.connectors)[number] | undefined;
+    for (let i = scene.connectors.length - 1; i >= 0; i -= 1) {
+      const con = scene.connectors[i];
+      const hits = con.path.tiles.some((pathTile) => {
+        const globalPathTile = connectorPathTileToGlobal(
+          pathTile,
+          con.path.rectangle.from
+        );
+        return CoordsUtils.isEqual(globalPathTile, tile);
+      });
+      if (hits) {
+        connectorAtTile = con;
+        break;
+      }
+    }
+
+    if (connectorAtTile) {
+      liveUiState.actions.setItemControls({
+        type: 'CONNECTOR',
+        id: connectorAtTile.id
+      });
+      liveUiState.actions.setContextMenu({
+        item: { type: 'CONNECTOR', id: connectorAtTile.id },
+        tile
+      });
+      return;
+    }
+
+    if (isPlanProjection(liveUiState.projectionMode)) {
+      const nodeHit = getShape2dItemAtTile({
+        tile,
+        scene,
+        modelItems
+      });
+      if (nodeHit?.type === 'ITEM') {
+        liveUiState.actions.setItemControls({
+          type: 'ITEM',
+          id: nodeHit.id
+        });
+        liveUiState.actions.setContextMenu({
+          item: nodeHit,
+          tile
+        });
+        return;
+      }
+    }
+
+    const itemAtTile = getItemAtTile({
+      tile,
+      scene
+    });
+
+    if (itemAtTile?.type === 'RECTANGLE' || itemAtTile?.type === 'ITEM') {
+      if (itemAtTile.type === 'ITEM') {
+        liveUiState.actions.setItemControls({
+          type: 'ITEM',
+          id: itemAtTile.id
+        });
+      }
+      liveUiState.actions.setContextMenu({
+        item: itemAtTile,
+        tile
+      });
+    } else if (liveUiState.contextMenu) {
+      liveUiState.actions.setContextMenu(null);
+    }
+  }, [scene, uiStore, model]);
 
   const onMouseEvent = useCallback(
     (e: SlimMouseEvent) => {
@@ -127,6 +210,10 @@ export const useInteractionManager = () => {
         e.preventDefault();
         rightButtonPan.active = true;
         rightButtonPan.didPan = false;
+        // Never show the lock toolbar while a possible pan is in progress.
+        if (liveUiState.contextMenu) {
+          liveUiState.actions.setContextMenu(null);
+        }
         setWindowCursor('grabbing');
         commitMouse(nextMouse);
         return;
@@ -150,6 +237,10 @@ export const useInteractionManager = () => {
 
           if (Math.hypot(dx, dy) > PAN_DRAG_THRESHOLD_PX) {
             rightButtonPan.didPan = true;
+            // Hide menu if it somehow appeared mid-drag.
+            if (uiStore.getState().contextMenu) {
+              uiStore.getState().actions.setContextMenu(null);
+            }
           }
         }
 
@@ -161,9 +252,15 @@ export const useInteractionManager = () => {
       }
 
       if (rightButtonPan.active && e.type === 'mouseup') {
+        const wasClick = !rightButtonPan.didPan;
         commitMouse(nextMouse);
         rightButtonPan.active = false;
+        rightButtonPan.didPan = false;
         restoreCursorForMode(uiStore.getState().mode.type);
+        // Open lock toolbar only on click+release (no pan).
+        if (wasClick) {
+          openContextMenuAtTile();
+        }
         return;
       }
 
@@ -208,94 +305,13 @@ export const useInteractionManager = () => {
       modeFunction(baseState);
       reducerTypeRef.current = uiStore.getState().mode.type;
     },
-    [model, scene, uiStore, rendererSize]
+    [model, scene, uiStore, rendererSize, openContextMenuAtTile]
   );
 
-  const onContextMenu = useCallback(
-    (e: SlimMouseEvent) => {
-      e.preventDefault();
-
-      if (rightButtonPanRef.current.didPan) {
-        rightButtonPanRef.current.didPan = false;
-        return;
-      }
-
-      const liveUiState = uiStore.getState();
-      const tile = liveUiState.mouse.position.tile;
-      const modelItems = model.actions.get().items;
-
-      // Prefer topmost cable (same order as Connectors paint: later = on top).
-      let connectorAtTile:
-        | (typeof scene.connectors)[number]
-        | undefined;
-      for (let i = scene.connectors.length - 1; i >= 0; i -= 1) {
-        const con = scene.connectors[i];
-        const hits = con.path.tiles.some((pathTile) => {
-          const globalPathTile = connectorPathTileToGlobal(
-            pathTile,
-            con.path.rectangle.from
-          );
-          return CoordsUtils.isEqual(globalPathTile, tile);
-        });
-        if (hits) {
-          connectorAtTile = con;
-          break;
-        }
-      }
-
-      if (connectorAtTile) {
-        liveUiState.actions.setItemControls({
-          type: 'CONNECTOR',
-          id: connectorAtTile.id
-        });
-        liveUiState.actions.setContextMenu({
-          item: { type: 'CONNECTOR', id: connectorAtTile.id },
-          tile
-        });
-        return;
-      }
-
-      if (isPlanProjection(liveUiState.projectionMode)) {
-        const nodeHit = getShape2dItemAtTile({
-          tile,
-          scene,
-          modelItems
-        });
-        if (nodeHit?.type === 'ITEM') {
-          liveUiState.actions.setItemControls({
-            type: 'ITEM',
-            id: nodeHit.id
-          });
-          liveUiState.actions.setContextMenu({
-            item: nodeHit,
-            tile
-          });
-          return;
-        }
-      }
-
-      const itemAtTile = getItemAtTile({
-        tile,
-        scene
-      });
-
-      if (itemAtTile?.type === 'RECTANGLE' || itemAtTile?.type === 'ITEM') {
-        if (itemAtTile.type === 'ITEM') {
-          liveUiState.actions.setItemControls({
-            type: 'ITEM',
-            id: itemAtTile.id
-          });
-        }
-        liveUiState.actions.setContextMenu({
-          item: itemAtTile,
-          tile
-        });
-      } else if (liveUiState.contextMenu) {
-        liveUiState.actions.setContextMenu(null);
-      }
-    },
-    [scene, uiStore, model]
-  );
+  // Native contextmenu only blocks the browser menu — app toolbar opens on RMB mouseup.
+  const onContextMenu = useCallback((e: SlimMouseEvent) => {
+    e.preventDefault();
+  }, []);
 
   useEffect(() => {
     if (modeType === 'INTERACTIONS_DISABLED') return undefined;

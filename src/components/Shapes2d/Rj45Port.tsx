@@ -4,20 +4,11 @@ import { TILE_SIZE_2D, Shape2dPortSide } from 'src/config';
 import { TRUNK_RAINBOW_CSS, TRUNK_MISMATCH_COLOR } from 'src/utils';
 
 const PORT_STATUS_COLORS = ['#4c8bf5', '#3ecf8e', '#f0a04b', '#a78bfa'];
-const PLUG_FILL = '#9aa3af';
-const PLUG_STROKE = '#7a8494';
 
-/** Frosted jack face — sits above chassis tint so device color doesn't muddy ports. */
-const PORT_GLASS_SX = {
-  bgcolor: 'rgba(255, 255, 255, 0.78)',
-  backgroundImage:
-    'linear-gradient(165deg, rgba(255,255,255,0.95) 0%, rgba(255,255,255,0.72) 45%, rgba(241,245,249,0.88) 100%)',
-  backdropFilter: 'blur(5px)',
-  WebkitBackdropFilter: 'blur(5px)',
-  boxShadow:
-    'inset 0 1px 0 rgba(255,255,255,0.95), inset 0 -1px 0 rgba(100,116,139,0.1), 0 1px 2px rgba(15,23,42,0.04)',
-  border: '1px solid rgba(107, 124, 147, 0.55)'
-} as const;
+/** LibreICONS RJ45 (MIT — Diemen Design). */
+const RJ45_BEZEL = '#cfd8dc';
+const RJ45_BODY = '#455a64';
+const RJ45_PINS = '#fdd835';
 
 interface Props {
   side: Shape2dPortSide;
@@ -43,11 +34,12 @@ interface Props {
 }
 
 /**
- * Port square matching the topology-card style.
+ * Port square with LibreICONS RJ45 jack (or SFP cage).
+ * VLAN badge is glued to the top of the jack, same width / bezel background.
  * Jack center = connection attachment point (no visible handle dots).
  */
 export const Rj45Port = ({
-  side,
+  side: _side,
   tileSize = TILE_SIZE_2D,
   portNumber = 1,
   portLabel,
@@ -61,15 +53,17 @@ export const Rj45Port = ({
   media = 'RJ45',
   compactLabel = false
 }: Props) => {
-  const facesUp = side === 'TOP';
   const jackSize = Math.round(tileSize * 0.72);
-  const barH = Math.max(3, Math.round(jackSize * 0.14));
-  const iconSize = Math.round(jackSize * 0.72);
+  const barH = Math.max(3, Math.round(jackSize * 0.16));
+  const iconSize = Math.round(jackSize * 0.92);
+  const portW = iconSize;
   const label = portLabel ?? String(portNumber);
   const numberSize = compactLabel
     ? Math.max(6, Math.round(tileSize * (label.length > 3 ? 0.14 : 0.2)))
     : Math.max(10, Math.round(tileSize * (label.length > 3 ? 0.26 : 0.34)));
   const isSfp = media === 'SFP';
+  const stackH = barH + iconSize;
+  const bezelBg = hasMismatch ? '#fecaca' : RJ45_BEZEL;
 
   return (
     <Box
@@ -109,36 +103,38 @@ export const Rj45Port = ({
           position: 'absolute',
           left: '50%',
           top: '50%',
-          width: jackSize,
-          height: jackSize,
+          width: portW,
+          height: stackH,
           transform: 'translate(-50%, -50%)',
           boxSizing: 'border-box',
-          borderRadius: isSfp ? '2px' : '3px',
           display: 'flex',
-          flexDirection: facesUp ? 'column' : 'column-reverse',
-          alignItems: 'center',
+          flexDirection: 'column',
+          alignItems: 'stretch',
           overflow: 'hidden',
-          ...PORT_GLASS_SX,
+          borderRadius: isSfp ? '2px' : '3px',
+          bgcolor: isSfp ? 'rgba(255, 255, 255, 0.78)' : bezelBg,
+          border: isSfp
+            ? '1px solid rgba(107, 124, 147, 0.55)'
+            : `1px solid ${hasMismatch ? TRUNK_MISMATCH_COLOR : 'rgba(69, 90, 100, 0.35)'}`,
           ...(hasMismatch
             ? {
                 border: `3px solid ${TRUNK_MISMATCH_COLOR}`,
                 bgcolor: 'rgba(239, 68, 68, 0.92)',
-                backgroundImage: 'none',
-                boxShadow: `0 0 0 3px rgba(239, 68, 68, 0.45), 0 0 18px rgba(239, 68, 68, 0.55), inset 0 1px 0 rgba(255,255,255,0.35)`,
+                boxShadow: `0 0 0 3px rgba(239, 68, 68, 0.45), 0 0 18px rgba(239, 68, 68, 0.55)`,
                 transform: 'translate(-50%, -50%) scale(1.15)'
               }
             : null),
           ...(isPeerHighlight && !hasMismatch
             ? {
                 border: '3px solid #f59e0b',
-                boxShadow: `0 0 0 4px rgba(245, 158, 11, 0.5), 0 0 16px rgba(245, 158, 11, 0.65), inset 0 1px 0 rgba(255,255,255,0.95)`,
+                boxShadow: `0 0 0 4px rgba(245, 158, 11, 0.5), 0 0 16px rgba(245, 158, 11, 0.65)`,
                 transform: 'translate(-50%, -50%) scale(1.12)'
               }
             : null),
           ...(isFocused && !isPeerHighlight && !hasMismatch
             ? {
                 border: '2px solid #3b82f6',
-                boxShadow: `0 0 0 3px rgba(59, 130, 246, 0.32), 0 0 10px rgba(59, 130, 246, 0.22), inset 0 1px 0 rgba(255,255,255,0.95)`
+                boxShadow: `0 0 0 3px rgba(59, 130, 246, 0.32), 0 0 10px rgba(59, 130, 246, 0.22)`
               }
             : null),
           ...(isAttentionPulse
@@ -149,29 +145,42 @@ export const Rj45Port = ({
                   : '3px solid #2563eb',
                 boxShadow: hasMismatch
                   ? `0 0 0 4px rgba(239, 68, 68, 0.5), 0 0 22px rgba(239, 68, 68, 0.55)`
-                  : '0 0 0 4px rgba(37, 99, 235, 0.45), 0 0 22px rgba(37, 99, 235, 0.55), inset 0 1px 0 rgba(255,255,255,0.95)',
+                  : '0 0 0 4px rgba(37, 99, 235, 0.45), 0 0 22px rgba(37, 99, 235, 0.55)',
                 animation: 'portAttentionShake 0.85s ease-in-out 1'
               }
             : null)
         }}
       >
+        {/* VLAN badge — glued to top, same width as port, on port bezel bg */}
         <Box
           sx={{
             width: '100%',
             height: barH,
-            bgcolor: hasMismatch
-              ? '#fecaca'
-              : isTrunk
-                ? undefined
-                : statusColor,
-            background: hasMismatch
-              ? undefined
-              : isTrunk
-                ? TRUNK_RAINBOW_CSS
-                : undefined,
-            flexShrink: 0
+            flexShrink: 0,
+            boxSizing: 'border-box',
+            bgcolor: bezelBg,
+            display: 'flex',
+            alignItems: 'stretch',
+            padding: '1px 1px 0'
           }}
-        />
+        >
+          <Box
+            sx={{
+              flex: 1,
+              borderRadius: '1px 1px 0 0',
+              bgcolor: hasMismatch
+                ? '#fecaca'
+                : isTrunk
+                  ? undefined
+                  : statusColor,
+              background: hasMismatch
+                ? undefined
+                : isTrunk
+                  ? TRUNK_RAINBOW_CSS
+                  : undefined
+            }}
+          />
+        </Box>
 
         <Box
           sx={{
@@ -180,7 +189,9 @@ export const Rj45Port = ({
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
-            position: 'relative'
+            position: 'relative',
+            bgcolor: isSfp ? 'transparent' : bezelBg,
+            minHeight: iconSize
           }}
         >
           {isSfp ? (
@@ -188,20 +199,19 @@ export const Rj45Port = ({
               component="svg"
               viewBox="0 0 24 20"
               sx={{
-                width: iconSize,
-                height: iconSize * 0.85,
+                width: iconSize * 0.92,
+                height: iconSize * 0.78,
                 display: 'block'
               }}
             >
-              {/* Open SFP cage slot */}
               <rect
                 x="3"
                 y="3"
                 width="18"
                 height="14"
                 rx="1.5"
-                fill={isConnected ? PLUG_FILL : 'none'}
-                stroke={isConnected ? PLUG_STROKE : '#9aabc2'}
+                fill="none"
+                stroke="#9aabc2"
                 strokeWidth="1.4"
               />
               <rect
@@ -211,7 +221,7 @@ export const Rj45Port = ({
                 height="8"
                 rx="0.8"
                 fill="none"
-                stroke={isConnected ? '#6b7380' : '#9aabc2'}
+                stroke="#9aabc2"
                 strokeWidth="1.2"
               />
               <line
@@ -219,7 +229,7 @@ export const Rj45Port = ({
                 y1="3"
                 x2="9"
                 y2="6"
-                stroke={isConnected ? '#6b7380' : '#9aabc2'}
+                stroke="#9aabc2"
                 strokeWidth="1.1"
               />
               <line
@@ -227,41 +237,98 @@ export const Rj45Port = ({
                 y1="3"
                 x2="15"
                 y2="6"
-                stroke={isConnected ? '#6b7380' : '#9aabc2'}
+                stroke="#9aabc2"
                 strokeWidth="1.1"
               />
+              {isConnected && (
+                <g opacity="0.55">
+                  <rect
+                    x="5.2"
+                    y="5.2"
+                    width="13.6"
+                    height="9.6"
+                    rx="0.9"
+                    fill="rgba(226, 232, 240, 0.85)"
+                    stroke="rgba(100, 116, 139, 0.55)"
+                    strokeWidth="0.9"
+                  />
+                  <rect
+                    x="7"
+                    y="7"
+                    width="10"
+                    height="6"
+                    rx="0.5"
+                    fill="rgba(148, 163, 184, 0.35)"
+                  />
+                </g>
+              )}
             </Box>
           ) : (
             <Box
               component="svg"
-              viewBox="0 0 24 20"
+              viewBox="0 0 14 14"
+              role="img"
+              aria-hidden
               sx={{
                 width: iconSize,
-                height: iconSize * 0.85,
+                height: iconSize,
                 display: 'block'
               }}
             >
+              {/* Bezel — matches stack background so badge + jack read as one unit */}
               <path
-                d="M4 3h16v8c0 1.1-.9 2-2 2h-1.2l-1.3 4H8.5l-1.3-4H6c-1.1 0-2-.9-2-2V3z"
-                fill={isConnected ? PLUG_FILL : 'none'}
-                stroke={isConnected ? PLUG_STROKE : '#9aabc2'}
-                strokeWidth="1.4"
-                strokeLinejoin="round"
+                fill={bezelBg}
+                d="M13 11.6667c0 .7363-.597 1.3333-1.3333 1.3333H2.3333C1.597 13 1 12.403 1 11.6667V2.3333C1 1.597 1.597 1 2.3333 1h9.3334C12.403 1 13 1.597 13 2.3333v9.3334z"
               />
-              {[5, 8, 11, 14, 17].map((x) => {
-                return (
-                  <line
-                    key={x}
-                    x1={x}
-                    y1={5}
-                    x2={x}
-                    y2={10}
-                    stroke={isConnected ? '#6b7380' : '#9aabc2'}
-                    strokeWidth="1.2"
-                    strokeLinecap="round"
+              <g fill={hasMismatch ? '#991b1b' : RJ45_BODY}>
+                <path d="M2.6667 3.3333h8.6666v5.3334H2.6667z" />
+                <path d="M4 7.3333h6v2.3334H4z" />
+                <path d="M5.3333 8.6667h3.3334v2H5.3333z" />
+              </g>
+              <path
+                fill={hasMismatch ? '#fef08a' : RJ45_PINS}
+                d="M3.6667 4h.6666v2.3333H3.6667zm1 0h.6666v2.3333H4.6667zm1 0h.6666v2.3333H5.6667zm1 0h.6666v2.3333H6.6667zm1 0h.6666v2.3333H7.6667zm1 0h.6666v2.3333H8.6667zm1 0h.6666v2.3333H9.6667z"
+              />
+              {/* Translucent RJ45 plug — inserted when the port has a cable */}
+              {isConnected && (
+                <g opacity="0.58">
+                  {/* Nose / contact block covering pins */}
+                  <rect
+                    x="3.15"
+                    y="3.55"
+                    width="7.7"
+                    height="4.35"
+                    rx="0.25"
+                    fill="rgba(241, 245, 249, 0.88)"
+                    stroke="rgba(71, 85, 105, 0.4)"
+                    strokeWidth="0.35"
                   />
-                );
-              })}
+                  {/* Plug body in latch well */}
+                  <path
+                    d="M4.15 7.85h5.7v2.05H4.15z"
+                    fill="rgba(203, 213, 225, 0.9)"
+                    stroke="rgba(71, 85, 105, 0.35)"
+                    strokeWidth="0.3"
+                  />
+                  {/* Latch tab */}
+                  <path
+                    d="M5.45 9.75h3.1l0.45 1.55H5z"
+                    fill="rgba(148, 163, 184, 0.75)"
+                    stroke="rgba(71, 85, 105, 0.4)"
+                    strokeWidth="0.25"
+                    strokeLinejoin="round"
+                  />
+                  {/* Boot tip hint */}
+                  <rect
+                    x="5.55"
+                    y="11.15"
+                    width="2.9"
+                    height="0.85"
+                    rx="0.2"
+                    fill="rgba(148, 163, 184, 0.55)"
+                  />
+                </g>
+              )}
             </Box>
           )}
 
@@ -285,7 +352,7 @@ export const Rj45Port = ({
         sx={{
           position: 'absolute',
           left: '50%',
-          top: `calc(50% + ${jackSize / 2}px + 2px)`,
+          top: `calc(50% + ${stackH / 2}px + 2px)`,
           transform: 'translateX(-50%)',
           fontSize: numberSize,
           lineHeight: 1,
