@@ -8,7 +8,7 @@ import {
   getModelItemSize,
   isShape2dIcon
 } from 'src/config';
-import { getTilePosition, getShape2dCenterPosition, getMismatchPortIdsForItem, getPeerHighlightedPortIdsForItem } from 'src/utils';
+import { getTilePosition, getShape2dCenterPosition, getMismatchPortIdsForItem, getPeerHighlightedPortIdsForItem, isPlanProjection, findPlanView } from 'src/utils';
 import { useIcon } from 'src/hooks/useIcon';
 import { ViewItem } from 'src/types';
 import { useModelItem } from 'src/hooks/useModelItem';
@@ -28,17 +28,31 @@ interface Props {
   dimmedOpacity?: number;
 }
 
-export const Node = ({
+export const Node = React.memo(({
   node,
   order,
   selectionTone = 'normal',
   dimmedOpacity = 0.7
 }: Props) => {
   const modelItem = useModelItem(node.id);
-  const { connectors } = useScene();
+  const { connectors: sceneConnectors } = useScene();
   const modelItems = useModelStore((state) => {
     return state.items;
   });
+  const views = useModelStore((state) => {
+    return state.views;
+  });
+  const projectionMode = useUiStateStore((state) => {
+    return state.projectionMode;
+  });
+
+  // 2Dv2 has no cables of its own — port link state comes from Plan connectors.
+  const connectors = useMemo(() => {
+    if (projectionMode === 'TWO_D_V2') {
+      return findPlanView(views)?.connectors ?? [];
+    }
+    return sceneConnectors;
+  }, [projectionMode, views, sceneConnectors]);
 
   const connectedPortIds = useMemo(() => {
     const ids = new Set<string>();
@@ -82,6 +96,14 @@ export const Node = ({
     });
   }, [node.id, selectedItemId, focusedPortIds, connectors]);
 
+  const portAttention = useUiStateStore((state) => {
+    return state.portAttention;
+  });
+  const attentionPortId =
+    portAttention?.itemId === node.id ? portAttention.portId : null;
+  const attentionToken =
+    portAttention?.itemId === node.id ? portAttention.token : null;
+
   const { iconComponent } = useIcon(
     modelItem.icon,
     modelItem.name,
@@ -93,16 +115,15 @@ export const Node = ({
     modelItem.svis,
     modelItem.rackUnits,
     node.id,
-    peerHighlightPortIds
+    peerHighlightPortIds,
+    attentionPortId,
+    attentionToken
   );
-  const projectionMode = useUiStateStore((state) => {
-    return state.projectionMode;
-  });
   const liveTile = useNodeDragStore((state) => {
     return state.tiles[node.id];
   });
 
-  const isTwoD = projectionMode === 'TWO_D';
+  const isTwoD = isPlanProjection(projectionMode);
   const isPlanShape = isShape2dIcon(modelItem.icon);
   const shapeSize = getModelItemSize(modelItem);
   const tile = liveTile ?? node.tile;
@@ -168,8 +189,9 @@ export const Node = ({
         position: 'absolute',
         zIndex: order,
         opacity: selectionTone === 'dimmed' ? dimmedOpacity : 1,
-        filter:
-          selectionTone === 'highlighted'
+        filter: node.locked
+          ? 'drop-shadow(0 0 5px rgba(234, 88, 12, 0.75))'
+          : selectionTone === 'highlighted'
             ? 'drop-shadow(0 0 6px rgba(37, 99, 235, 0.65)) drop-shadow(0 2px 6px rgba(37, 99, 235, 0.4))'
             : undefined,
         transition: 'opacity 0.15s ease, filter 0.15s ease'
@@ -240,4 +262,5 @@ export const Node = ({
       </Box>
     </Box>
   );
-};
+});
+Node.displayName = 'Node';

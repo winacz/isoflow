@@ -15,7 +15,9 @@ export const Rectangle = ({
   to,
   color: colorId,
   kind = 'area',
-  opacity
+  opacity,
+  name,
+  locked
 }: Props) => {
   const color = useColor(colorId);
   const projectionMode = useUiStateStore((state) => {
@@ -23,7 +25,9 @@ export const Rectangle = ({
   });
   const isTwoD = projectionMode === 'TWO_D';
   const fillOpacity = opacity ?? DEFAULT_OPACITY;
-  const stroke = getColorVariant(color.value, 'dark', { grade: 2 });
+  const stroke = locked
+    ? '#ea580c'
+    : getColorVariant(color.value, 'dark', { grade: 2 });
 
   if (isTwoD) {
     return (
@@ -34,6 +38,8 @@ export const Rectangle = ({
         opacity={fillOpacity}
         kind={kind}
         strokeColor={stroke}
+        name={name}
+        locked={locked}
       />
     );
   }
@@ -47,7 +53,7 @@ export const Rectangle = ({
       cornerRadius={kind === 'building' ? 12 : 22}
       stroke={{
         color: stroke,
-        width: kind === 'building' ? 2 : 1
+        width: locked ? 3 : kind === 'building' ? 2 : 1
       }}
     />
   );

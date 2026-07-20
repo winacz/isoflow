@@ -5,13 +5,16 @@ import DnsOutlined from '@mui/icons-material/DnsOutlined';
 import CropSquareOutlined from '@mui/icons-material/CropSquareOutlined';
 import ApartmentOutlined from '@mui/icons-material/ApartmentOutlined';
 import DevicesOtherOutlined from '@mui/icons-material/DevicesOtherOutlined';
+import VideocamOutlined from '@mui/icons-material/VideocamOutlined';
 import { SvgIconProps } from '@mui/material';
 import {
   SHAPE_2D_CABINET_ID,
   SHAPE_2D_PC_ID,
+  SHAPE_2D_CAMERA_ID,
   SHAPE_2D_SWITCH_ID
 } from 'src/config';
 import { isDeviceTemplateId } from 'src/utils';
+import { isMikrotikIcon } from 'src/fixtures/mikrotikIcons';
 
 export type DeviceTypeIconKind =
   | 'switch'
@@ -19,16 +22,22 @@ export type DeviceTypeIconKind =
   | 'cabinet'
   | 'area'
   | 'building'
+  | 'camera'
   | 'other';
 
 export const resolveDeviceTypeIconKind = (
   iconId: string | undefined | null
 ): DeviceTypeIconKind => {
   if (!iconId) return 'other';
-  if (iconId === SHAPE_2D_SWITCH_ID || isDeviceTemplateId(iconId)) {
+  if (
+    iconId === SHAPE_2D_SWITCH_ID ||
+    isDeviceTemplateId(iconId) ||
+    isMikrotikIcon(iconId)
+  ) {
     return 'switch';
   }
   if (iconId === SHAPE_2D_PC_ID) return 'pc';
+  if (iconId === SHAPE_2D_CAMERA_ID) return 'camera';
   if (iconId === SHAPE_2D_CABINET_ID) return 'cabinet';
   return 'other';
 };
@@ -56,6 +65,8 @@ export const DeviceTypeIcon = ({
       return <CropSquareOutlined {...props} />;
     case 'building':
       return <ApartmentOutlined {...props} />;
+    case 'camera':
+      return <VideocamOutlined {...props} />;
     default:
       return <DevicesOtherOutlined {...props} />;
   }

@@ -14,15 +14,13 @@ import { IconButton } from 'src/components/IconButton/IconButton';
 import { useUiStateStore } from 'src/stores/uiStateStore';
 import { exportAsJSON, buildExportSnapshot } from 'src/utils';
 import { useInitialDataManager } from 'src/hooks/useInitialDataManager';
-import { useModelStore } from 'src/stores/modelStore';
+import { useModelStoreApi } from 'src/stores/modelStore';
 import { useScene } from 'src/hooks/useScene';
 import { MenuItem } from './MenuItem';
 
 export const MainMenu = () => {
   const [anchorEl, setAnchorEl] = useState<null | HTMLElement>(null);
-  const modelStore = useModelStore((state) => {
-    return state;
-  });
+  const modelStoreApi = useModelStoreApi();
   const isMainMenuOpen = useUiStateStore((state) => {
     return state.isMainMenuOpen;
   });
@@ -84,13 +82,13 @@ export const MainMenu = () => {
 
   const onExportAsJSON = useCallback(() => {
     exportAsJSON(
-      buildExportSnapshot(modelStore, {
+      buildExportSnapshot(modelStoreApi.getState(), {
         view: activeViewId,
         projectionMode
       })
     );
     uiStateActions.setIsMainMenuOpen(false);
-  }, [modelStore, activeViewId, projectionMode, uiStateActions]);
+  }, [modelStoreApi, activeViewId, projectionMode, uiStateActions]);
 
   const onExportAsImage = useCallback(() => {
     uiStateActions.setIsMainMenuOpen(false);

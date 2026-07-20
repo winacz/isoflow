@@ -31,6 +31,10 @@ export const RectangleTransformControls = ({ id }: Props) => {
     [rectangle.id, uiStateActions]
   );
 
+  if (rectangle.locked) {
+    return null;
+  }
+
   if (isTwoD) {
     return (
       <TransformControls2d

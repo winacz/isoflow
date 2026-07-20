@@ -3,6 +3,8 @@ import {
   UNPROJECTED_TILE_SIZE,
   PROJECTED_TILE_SIZE,
   MAX_ZOOM,
+  MIN_ZOOM,
+  MIN_ZOOM_2D,
   TEXTBOX_PADDING,
   CONNECTOR_SEARCH_OFFSET,
   DEFAULT_FONT_FAMILY,
@@ -10,6 +12,7 @@ import {
   TEXTBOX_FONT_WEIGHT,
   PROJECT_BOUNDING_BOX_PADDING,
   TILE_SIZE_2D,
+  RACK_1U_HEIGHT_TILES,
   getShape2dSize,
   getModelItemSize,
   getShape2dPorts,
@@ -41,6 +44,7 @@ import {
   toPx,
   getItemByIdOrThrow
 } from 'src/utils';
+import { isPlanProjection } from './projection';
 import { useScene } from 'src/hooks/useScene';
 
 interface ScreenToIso {
@@ -118,12 +122,30 @@ export const screenToTile2d = ({
   };
 };
 
-/** Snap a fractional 2D tile position to the nearest integer grid cell. */
-export const snapTile2dToGrid = (tile: Coords): Coords => {
+/** Snap a fractional 2D tile position to the nearest grid cell. */
+export const snapTile2dToGrid = (
+  tile: Coords,
+  step: { x: number; y: number } = { x: 1, y: 1 }
+): Coords => {
+  const sx = Math.max(1, step.x);
+  const sy = Math.max(1, step.y);
   return {
-    x: Math.round(tile.x),
-    y: Math.round(tile.y)
+    x: Math.round(tile.x / sx) * sx,
+    y: Math.round(tile.y / sy) * sy
   };
+};
+
+/** Snap step for the active 2D grid style (RACK = square of switch height). */
+export const getGridSnapStep = (
+  gridStyle: string | undefined | null
+): { x: number; y: number } => {
+  if (gridStyle === 'rack') {
+    return {
+      x: RACK_1U_HEIGHT_TILES,
+      y: RACK_1U_HEIGHT_TILES
+    };
+  }
+  return { x: 1, y: 1 };
 };
 
 interface GetTilePosition {
@@ -194,22 +216,22 @@ export const isTileOnAnyShape2dBody = ({
   tile,
   items,
   modelItems,
-  excludeItemIds
+  excludeItemIds,
+  modelItemMap
 }: {
   tile: Coords;
   items: { id: string; tile: Coords }[];
-  modelItems: { id: string; icon?: string }[];
-  /** Skip these devices (e.g. connector endpoints — no dash on own body). */
+  modelItems?: { id: string; icon?: string }[];
   excludeItemIds?: Iterable<string>;
+  modelItemMap?: Map<string, { id: string; icon?: string }>;
 }): boolean => {
   const excluded = excludeItemIds ? new Set(excludeItemIds) : null;
+  const map = modelItemMap || new Map(modelItems?.map(i => [i.id, i]) || []);
 
   return items.some((viewItem) => {
     if (excluded?.has(viewItem.id)) return false;
 
-    const modelItem = modelItems.find((candidate) => {
-      return candidate.id === viewItem.id;
-    });
+    const modelItem = map.get(viewItem.id);
 
     if (!modelItem?.icon) return false;
     // Cabinets are furniture under devices — cables on them stay solid.
@@ -231,12 +253,12 @@ type Shape2dRect = {
 
 const getShape2dRects = (
   items: { id: string; tile: Coords }[],
-  modelItems: { id: string; icon?: string }[]
+  modelItems?: { id: string; icon?: string }[],
+  modelItemMap?: Map<string, { id: string; icon?: string }>
 ): Shape2dRect[] => {
+  const map = modelItemMap || new Map(modelItems?.map(i => [i.id, i]) || []);
   return items.flatMap((viewItem) => {
-    const modelItem = modelItems.find((candidate) => {
-      return candidate.id === viewItem.id;
-    });
+    const modelItem = map.get(viewItem.id);
 
     if (!modelItem?.icon) return [];
     if (modelItem.icon === SHAPE_2D_CABINET_ID) return [];
@@ -437,17 +459,19 @@ export const splitConnectorPathByNodeBodies = ({
 }): ConnectorPathStyleRun[] => {
   if (tiles.length === 0) return [];
 
-  const excluded = endpointItemIds ? [...endpointItemIds] : [];
-  const foreignItems = items.filter((item) => {
-    return !excluded.includes(item.id);
-  });
-  const rects = getShape2dRects(foreignItems, modelItems);
+  const modelItemMap = new Map(modelItems.map(i => [i.id, i]));
+  const excludedSet = endpointItemIds ? new Set(endpointItemIds) : null;
+  const foreignItems = excludedSet 
+    ? items.filter((item) => !excludedSet.has(item.id))
+    : items;
+  const excludedArr = endpointItemIds ? [...endpointItemIds] : [];
+  const rects = getShape2dRects(foreignItems, undefined, modelItemMap);
   const flags = tiles.map((tile) => {
     return isTileOnAnyShape2dBody({
       tile,
       items,
-      modelItems,
-      excludeItemIds: excluded
+      modelItemMap,
+      excludeItemIds: excludedArr
     });
   });
 
@@ -539,11 +563,10 @@ export const doShape2dFootprintsOverlap = (
 
 const getItemFootprint = (
   viewItem: { id: string; tile: Coords },
-  modelItems: { id: string; icon?: string; rackUnits?: number }[]
+  modelItems?: { id: string; icon?: string; rackUnits?: number }[],
+  modelItemMap?: Map<string, { id: string; icon?: string; rackUnits?: number }>
 ): { x: number; y: number; width: number; height: number } => {
-  const modelItem = modelItems.find((candidate) => {
-    return candidate.id === viewItem.id;
-  });
+  const modelItem = modelItemMap ? modelItemMap.get(viewItem.id) : modelItems?.find((candidate) => candidate.id === viewItem.id);
   const size = getModelItemSize(modelItem ?? {}) ??
     getShape2dSize(modelItem?.icon ?? '') ?? {
       width: 1,
@@ -586,20 +609,19 @@ export const isShape2dPlacementFree = ({
     height: size.height
   };
   const excluded = new Set(excludeItemIds);
+  const map = new Map(modelItems.map(i => [i.id, i]));
 
   return items.every((viewItem) => {
     if (excluded.has(viewItem.id)) return true;
 
-    const other = modelItems.find((item) => {
-      return item.id === viewItem.id;
-    });
+    const other = map.get(viewItem.id);
     if (ignoreCabinets && other?.icon === SHAPE_2D_CABINET_ID) {
       return true;
     }
 
     return !doShape2dFootprintsOverlap(
       candidate,
-      getItemFootprint(viewItem, modelItems)
+      getItemFootprint(viewItem, undefined, map)
     );
   });
 };
@@ -863,8 +885,9 @@ export const getMouse = ({
     y: clientY - offset.y
   };
 
-  const screenToTile =
-    projectionMode === 'TWO_D' ? screenToTile2d : screenToIso;
+  const screenToTile = isPlanProjection(projectionMode)
+    ? screenToTile2d
+    : screenToIso;
 
   const newPosition: Mouse['position'] = {
     screen: mousePosition,
@@ -915,16 +938,19 @@ export const getAnchorTile = (
   view: View,
   modelItems?: { id: string; icon?: string }[],
   /** Live tiles during node drag (model still has the pre-drag positions). */
-  tileOverrides?: Record<string, Coords>
+  tileOverrides?: Record<string, Coords>,
+  modelItemMap?: Map<string, { id: string; icon?: string }>
 ): Coords => {
   if (anchor.ref.item) {
     const viewItem = getItemByIdOrThrow(view.items, anchor.ref.item).value;
     const tile = tileOverrides?.[anchor.ref.item] ?? viewItem.tile;
 
     if (anchor.ref.port && modelItems) {
-      const modelItem = modelItems.find((item) => {
-        return item.id === anchor.ref.item;
-      });
+      const modelItem = modelItemMap
+        ? modelItemMap.get(anchor.ref.item)
+        : modelItems.find((item) => {
+            return item.id === anchor.ref.item;
+          });
       const port = getShape2dPorts(modelItem?.icon ?? '').find((candidate) => {
         return candidate.id === anchor.ref.port;
       });
@@ -1164,11 +1190,10 @@ export const getShape2dItemAtTile = ({
   };
 
   const hits: Hit[] = [];
+  const map = new Map(modelItems.map(i => [i.id, i]));
 
   scene.items.forEach((item) => {
-    const modelItem = modelItems.find((candidate) => {
-      return candidate.id === item.id;
-    });
+    const modelItem = map.get(item.id);
 
     if (!modelItem?.icon) return;
 
@@ -1206,21 +1231,25 @@ export const getShape2dItemAtTile = ({
     };
   }
 
-  const connector = scene.connectors.find((con) => {
-    return con.path.tiles.find((pathTile) => {
+  let hitConnectorId: string | null = null;
+  for (const con of scene.connectors) {
+    for (const pathTile of con.path.tiles) {
       const globalPathTile = connectorPathTileToGlobal(
         pathTile,
         con.path.rectangle.from
       );
+      if (globalPathTile.x === tile.x && globalPathTile.y === tile.y) {
+        hitConnectorId = con.id;
+        break;
+      }
+    }
+    if (hitConnectorId) break;
+  }
 
-      return CoordsUtils.isEqual(globalPathTile, tile);
-    });
-  });
-
-  if (connector) {
+  if (hitConnectorId) {
     return {
       type: 'CONNECTOR',
-      id: connector.id
+      id: hitConnectorId
     };
   }
 
@@ -1249,6 +1278,13 @@ export interface Shape2dPortHit {
 
 /** Max Chebyshev tile distance for connector port snap. */
 export const SHAPE_2D_PORT_SNAP_DISTANCE = 3;
+
+/**
+ * Visual RJ45/SFP box size in grid tiles (matches DeviceShape2d `portTileSize`).
+ * Hit-testing uses this AABB so clicks on the frosted jack — not only the
+ * single grid cell center — select the port.
+ */
+export const SHAPE_2D_PORT_VISUAL_SIZE_TILES = 2.25;
 
 /** Whether any connector anchor already uses this item+port pair. */
 export const isShape2dPortInUse = ({
@@ -1279,19 +1315,77 @@ export const isShape2dPortInUse = ({
   });
 };
 
+/**
+ * Port under a continuous tile-space point (visual jack box, not just cell).
+ * When several ports overlap, the nearest jack center wins.
+ */
+export const getShape2dPortAtPoint = ({
+  point,
+  scene,
+  modelItems,
+  isPortAvailable
+}: {
+  point: Coords;
+  scene: GetShape2dItemAtTile['scene'];
+  modelItems: GetShape2dItemAtTile['modelItems'];
+  isPortAvailable?: (hit: Shape2dPortHit) => boolean;
+}): Shape2dPortHit | null => {
+  const half = SHAPE_2D_PORT_VISUAL_SIZE_TILES / 2;
+  let best: Shape2dPortHit | null = null;
+  let bestDistSq = Infinity;
+
+  const map = new Map(modelItems.map(i => [i.id, i]));
+  for (const viewItem of scene.items) {
+    const modelItem = map.get(viewItem.id);
+
+    if (!modelItem?.icon) continue;
+
+    const ports = getShape2dPorts(modelItem.icon);
+
+    for (const port of ports) {
+      const worldTile = getShape2dPortWorldTile(viewItem.tile, port.tile);
+      const cx = worldTile.x + 0.5;
+      const cy = worldTile.y + 0.5;
+      const dx = Math.abs(point.x - cx);
+      const dy = Math.abs(point.y - cy);
+
+      if (dx > half || dy > half) continue;
+
+      const distSq = dx * dx + dy * dy;
+      if (distSq >= bestDistSq) continue;
+
+      const hit: Shape2dPortHit = {
+        itemId: viewItem.id,
+        portId: port.id,
+        portTile: port.tile,
+        worldTile
+      };
+
+      if (isPortAvailable && !isPortAvailable(hit)) continue;
+
+      bestDistSq = distSq;
+      best = hit;
+    }
+  }
+
+  return best;
+};
+
 export const getShape2dPortAtTile = ({
   tile,
   scene,
   modelItems,
-  isPortAvailable
+  isPortAvailable,
+  point
 }: GetShape2dItemAtTile & {
   isPortAvailable?: (hit: Shape2dPortHit) => boolean;
+  /** Continuous tile coords — preferred for accurate visual hits. */
+  point?: Coords;
 }): Shape2dPortHit | null => {
-  return getNearestShape2dPort({
-    tile,
+  return getShape2dPortAtPoint({
+    point: point ?? { x: tile.x + 0.5, y: tile.y + 0.5 },
     scene,
     modelItems,
-    maxDistance: 0,
     isPortAvailable
   });
 };
@@ -1310,10 +1404,9 @@ export const getNearestShape2dPort = ({
   let best: Shape2dPortHit | null = null;
   let bestDistance = Infinity;
 
+  const map = new Map(modelItems.map(i => [i.id, i]));
   for (const viewItem of scene.items) {
-    const modelItem = modelItems.find((candidate) => {
-      return candidate.id === viewItem.id;
-    });
+    const modelItem = map.get(viewItem.id);
 
     if (!modelItem?.icon) continue;
 
@@ -1383,21 +1476,25 @@ export const getItemAtTile = ({
     };
   }
 
-  const connector = scene.connectors.find((con) => {
-    return con.path.tiles.find((pathTile) => {
+  let hitConnectorId: string | null = null;
+  for (const con of scene.connectors) {
+    for (const pathTile of con.path.tiles) {
       const globalPathTile = connectorPathTileToGlobal(
         pathTile,
         con.path.rectangle.from
       );
+      if (globalPathTile.x === tile.x && globalPathTile.y === tile.y) {
+        hitConnectorId = con.id;
+        break;
+      }
+    }
+    if (hitConnectorId) break;
+  }
 
-      return CoordsUtils.isEqual(globalPathTile, tile);
-    });
-  });
-
-  if (connector) {
+  if (hitConnectorId) {
     return {
       type: 'CONNECTOR',
-      id: connector.id
+      id: hitConnectorId
     };
   }
 
@@ -1548,7 +1645,7 @@ export const getConnectorsByViewItem = (
   connectors: Connector[]
 ) => {
   return connectors.filter((connector) => {
-    return connector.anchors.find((anchor) => {
+    return connector.anchors.some((anchor) => {
       return anchor.ref.item === viewItemId;
     });
   });
@@ -1604,24 +1701,26 @@ export const getProjectBounds = (
   padding = PROJECT_BOUNDING_BOX_PADDING,
   options?: {
     projectionMode?: ProjectionMode;
-    modelItems?: { id: string; icon?: string }[];
+    modelItems?: { id: string; icon?: string; rackUnits?: number }[];
   }
 ): Coords[] => {
-  const isTwoD = options?.projectionMode === 'TWO_D';
+  const isTwoD = isPlanProjection(options?.projectionMode ?? 'ISOMETRIC');
   const modelItems = options?.modelItems ?? [];
 
+  const map = new Map(modelItems.map(i => [i.id, i]));
   const itemTiles = view.items.flatMap((item) => {
     if (!isTwoD) {
       return [item.tile];
     }
 
-    const modelItem = modelItems.find((candidate) => {
-      return candidate.id === item.id;
-    });
-    const size = getShape2dSize(modelItem?.icon ?? '') ?? {
-      width: 1,
-      height: 1
-    };
+    const modelItem = map.get(item.id);
+    // Prefer model size (cabinet rackUnits, custom templates) over icon defaults.
+    const size =
+      (modelItem ? getModelItemSize(modelItem) : null) ??
+      getShape2dSize(modelItem?.icon ?? '') ?? {
+        width: 1,
+        height: 1
+      };
 
     return [
       item.tile,
@@ -1690,12 +1789,12 @@ export const getUnprojectedBounds = (
   view: View,
   options?: {
     projectionMode?: ProjectionMode;
-    modelItems?: { id: string; icon?: string }[];
+    modelItems?: { id: string; icon?: string; rackUnits?: number }[];
   }
 ) => {
   const projectBounds = getProjectBounds(view, undefined, options);
 
-  if (options?.projectionMode === 'TWO_D') {
+  if (isPlanProjection(options?.projectionMode ?? 'ISOMETRIC')) {
     const sortedCorners = sortByPosition(projectBounds);
     const size = getBoundingBoxSize(projectBounds);
 
@@ -1729,23 +1828,25 @@ export const getFitToViewParams = (
   viewportSize: Size,
   options?: {
     projectionMode?: ProjectionMode;
-    modelItems?: { id: string; icon?: string }[];
+    modelItems?: { id: string; icon?: string; rackUnits?: number }[];
   }
 ) => {
   const projectBounds = getProjectBounds(view, undefined, options);
   const sortedCornerPositions = sortByPosition(projectBounds);
   const boundingBoxSize = getBoundingBoxSize(projectBounds);
   const unprojectedBounds = getUnprojectedBounds(view, options);
+  const minZoom =
+    isPlanProjection(options?.projectionMode ?? 'ISOMETRIC') ? MIN_ZOOM_2D : MIN_ZOOM;
   const zoom = clamp(
     Math.min(
       viewportSize.width / Math.max(1, unprojectedBounds.width),
       viewportSize.height / Math.max(1, unprojectedBounds.height)
     ),
-    0,
+    minZoom,
     MAX_ZOOM
   );
 
-  if (options?.projectionMode === 'TWO_D') {
+  if (isPlanProjection(options?.projectionMode ?? 'ISOMETRIC')) {
     const centerPx = {
       x:
         (sortedCornerPositions.lowX + boundingBoxSize.width / 2) *

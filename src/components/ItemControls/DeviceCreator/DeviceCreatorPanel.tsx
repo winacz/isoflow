@@ -151,6 +151,65 @@ export const DeviceCreatorPanel = ({
     >
       <Section>
         <Stack spacing={2}>
+          <FormControl>
+            <FormLabel sx={{ fontSize: 11, mb: 0.5, fontWeight: 600 }}>
+              Typ obudowy
+            </FormLabel>
+            <RadioGroup
+              row
+              value={draft.formFactor}
+              onChange={(event) => {
+                const formFactor = event.target
+                  .value as DeviceTemplate['formFactor'];
+                setDraft((prev) => {
+                  const sections =
+                    formFactor === 'RACK'
+                      ? prev.sections
+                      : prev.sections.map((section) => {
+                          // 48 is RACK-only in the UI; clamp when leaving RACK.
+                          return section.ports > 24
+                            ? { ...section, ports: 24 }
+                            : section;
+                        });
+                  return { ...prev, formFactor, sections };
+                });
+              }}
+              sx={{
+                flexWrap: 'wrap',
+                columnGap: 0.5,
+                rowGap: 0,
+                '& .MuiFormControlLabel-root': {
+                  mr: 0.75,
+                  ml: 0
+                },
+                '& .MuiFormControlLabel-label': {
+                  fontSize: 11,
+                  fontWeight: 600
+                },
+                '& .MuiRadio-root': {
+                  py: 0.25,
+                  px: 0.5
+                }
+              }}
+            >
+              <FormControlLabel
+                value="RACK"
+                control={<Radio size="small" />}
+                label="RACK"
+              />
+              <FormControlLabel
+                value="DIN"
+                control={<Radio size="small" />}
+                label="DIN"
+              />
+              <FormControlLabel
+                value="CUSTOM"
+                control={<Radio size="small" />}
+                label="Dowolna"
+              />
+            </RadioGroup>
+          </FormControl>
+
           <Box
             sx={{
               width: previewWidth,
@@ -198,38 +257,6 @@ export const DeviceCreatorPanel = ({
               });
             }}
           />
-
-          <FormControl>
-            <FormLabel sx={{ fontSize: 12, mb: 0.5 }}>Typ obudowy</FormLabel>
-            <RadioGroup
-              row
-              value={draft.formFactor}
-              onChange={(event) => {
-                const formFactor = event.target
-                  .value as DeviceTemplate['formFactor'];
-                setDraft((prev) => {
-                  const sections =
-                    formFactor === 'RACK'
-                      ? prev.sections
-                      : prev.sections.map((section) => {
-                          // 48 is RACK-only in the UI; clamp when leaving RACK.
-                          return section.ports > 24
-                            ? { ...section, ports: 24 }
-                            : section;
-                        });
-                  return { ...prev, formFactor, sections };
-                });
-              }}
-            >
-              <FormControlLabel value="RACK" control={<Radio size="small" />} label="RACK" />
-              <FormControlLabel value="DIN" control={<Radio size="small" />} label="DIN" />
-              <FormControlLabel
-                value="CUSTOM"
-                control={<Radio size="small" />}
-                label="Dowolna"
-              />
-            </RadioGroup>
-          </FormControl>
 
           <Typography variant="caption" color="text.secondary">
             Porty RJ45: 1, 2, 3… (góra L→P, potem dół)

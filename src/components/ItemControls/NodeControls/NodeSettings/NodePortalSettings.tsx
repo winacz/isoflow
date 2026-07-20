@@ -95,8 +95,8 @@ export const NodePortalSettings = ({
     const footprint = getPortalTargetFootprintPx(portal, plan, model.items);
     // Sidebar opens after jump — leave room so the target is fully visible.
     const sidebarW = Math.min(
-      300,
-      Math.max(260, Math.round(rendererSize.width * 0.2))
+      340,
+      Math.max(290, Math.round(rendererSize.width * 0.22))
     );
     const viewport = {
       width: Math.max(120, rendererSize.width - sidebarW),
@@ -107,11 +107,11 @@ export const NodePortalSettings = ({
     changeView(plan.id, model);
     uiStateActions.setProjectionMode('TWO_D');
     uiStateActions.setZoom(zoom);
-    // Bias scroll so the target sits in the free area right of the sidebar.
+    // Bias scroll so the target sits in the free area left of the sidebar.
     const scroll = getScrollToCenterPx(centerPx, zoom);
     uiStateActions.setScroll({
       position: {
-        x: scroll.x + sidebarW * 0.5,
+        x: scroll.x - sidebarW * 0.5,
         y: scroll.y
       },
       offset: CoordsUtils.zero()

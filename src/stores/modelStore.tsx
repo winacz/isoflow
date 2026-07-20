@@ -59,3 +59,14 @@ export function useModelStore<T>(
 
   return value;
 }
+
+export function useModelStoreApi() {
+  const store = useContext(ModelContext);
+
+  if (store === null) {
+    throw new Error('Missing provider in the tree');
+  }
+
+  return store;
+}
+

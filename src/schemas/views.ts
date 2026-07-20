@@ -13,7 +13,9 @@ export const viewItemSchema = z.object({
   /** Cabinet this item is mounted in (RACK switches). */
   parentId: id.optional(),
   /** 0-based rack unit from the top of the cabinet. */
-  rackUnit: z.number().int().min(0).optional()
+  rackUnit: z.number().int().min(0).optional(),
+  /** Locked — cannot be moved until unlocked (context menu). */
+  locked: z.boolean().optional()
 });
 
 export const viewSchema = z.object({

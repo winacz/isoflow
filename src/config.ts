@@ -26,6 +26,7 @@ export const PROJECTED_TILE_SIZE = {
 
 export const SHAPE_2D_SWITCH_ID = 'SWITCH';
 export const SHAPE_2D_PC_ID = 'PC';
+export const SHAPE_2D_CAMERA_ID = 'CAMERA';
 export const SHAPE_2D_CABINET_ID = 'CABINET';
 
 /** Default / min / max rack height for cabinets. */
@@ -41,6 +42,14 @@ export const CABINET_EAR_TILES = 2;
  */
 export const TILE_SIZE_2D = 40;
 
+/** Default Plan canvas backgrounds (session theme). */
+export const DIAGRAM_BG_2D_LIGHT = '#f6faff';
+export const DIAGRAM_BG_2D_DARK = '#292929';
+/** Isometric canvas stays white (independent from 2D dark theme). */
+export const DIAGRAM_BG_ISO = '#ffffff';
+/** Default grid line color in dark canvas theme. */
+export const GRID_COLOR_DARK = '#b8b8b8';
+
 /**
  * Visual 2D grid spacing in logical tiles.
  * Snapping / connectors still use every tile (TILE_SIZE_2D); only drawing is coarser.
@@ -55,7 +64,13 @@ export const SHAPE_2D_LAYOUT_GAP = 3;
  * Sized for commercial densities (~48–52 ports), e.g. 6×8 + 2 SFP.
  */
 export const RACK_1U_WIDTH_TILES = 60;
+/**
+ * Height of one rack unit (1U) in tiles — RACK switch height, PC square side,
+ * and the RACK snap/grid module.
+ */
 export const RACK_1U_HEIGHT_TILES = 9;
+/** Alias: 1U tile size (same as RACK_1U_HEIGHT_TILES). */
+export const UNIT_1U_TILES = RACK_1U_HEIGHT_TILES;
 
 /**
  * Built-in 16-port switch — same 1U height as RACK; width follows ports.
@@ -63,13 +78,13 @@ export const RACK_1U_HEIGHT_TILES = 9;
  */
 export const SWITCH_2D_SIZE: Size = {
   width: 19,
-  height: RACK_1U_HEIGHT_TILES
+  height: UNIT_1U_TILES
 };
 
-/** PC card — same 1U height as RACK; single NIC at switch port scale. */
+/** PC — square 1U × 1U with a single NIC. */
 export const PC_2D_SIZE: Size = {
-  width: 12,
-  height: RACK_1U_HEIGHT_TILES
+  width: UNIT_1U_TILES,
+  height: UNIT_1U_TILES
 };
 
 export type Shape2dPortSide = 'TOP' | 'BOTTOM' | 'LEFT' | 'RIGHT';
@@ -123,9 +138,19 @@ export const SWITCH_2D_PORTS: Shape2dPort[] = [
 export const PC_2D_PORTS: Shape2dPort[] = [
   {
     id: 'port-1',
-    tile: { x: 5, y: 7 },
+    // Centered on bottom edge of the 1U square
+    tile: { x: Math.floor(UNIT_1U_TILES / 2), y: UNIT_1U_TILES - 2 },
     side: 'BOTTOM',
     label: '1'
+  }
+];
+
+export const CAMERA_2D_PORTS: Shape2dPort[] = [
+  {
+    id: 'port-poe',
+    tile: { x: 0, y: 3 },
+    side: 'LEFT',
+    label: 'PoE'
   }
 ];
 
@@ -133,12 +158,14 @@ export const PC_2D_PORTS: Shape2dPort[] = [
 export const SHAPE_2D_SIZES: Record<string, Size> = {
   [SHAPE_2D_SWITCH_ID]: SWITCH_2D_SIZE,
   [SHAPE_2D_PC_ID]: PC_2D_SIZE,
+  [SHAPE_2D_CAMERA_ID]: { width: 6, height: 6 },
   [SHAPE_2D_CABINET_ID]: getCabinetSize(CABINET_DEFAULT_UNITS)
 };
 
 export const SHAPE_2D_PORTS: Record<string, Shape2dPort[]> = {
   [SHAPE_2D_SWITCH_ID]: SWITCH_2D_PORTS,
   [SHAPE_2D_PC_ID]: PC_2D_PORTS,
+  [SHAPE_2D_CAMERA_ID]: CAMERA_2D_PORTS,
   [SHAPE_2D_CABINET_ID]: []
 };
 
@@ -158,6 +185,13 @@ export const SHAPES_2D: Icon[] = [
     isIsometric: false
   },
   {
+    id: SHAPE_2D_CAMERA_ID,
+    name: 'Kamera IP',
+    url: '',
+    collection: 'Stacje',
+    isIsometric: false
+  },
+  {
     id: SHAPE_2D_CABINET_ID,
     name: 'Szafa rack',
     url: '',
@@ -172,6 +206,25 @@ export const getShape2dSize = (shapeId: string | undefined | null): Size | null 
     return getCabinetSize(CABINET_DEFAULT_UNITS);
   }
   if (SHAPE_2D_SIZES[shapeId]) return SHAPE_2D_SIZES[shapeId];
+
+  // eslint-disable-next-line @typescript-eslint/no-var-requires
+  const { MIKROTIK_SHAPE_SIZES, isMikrotikIcon } = require('src/fixtures/mikrotikIcons') as {
+    MIKROTIK_SHAPE_SIZES: Record<string, Size>;
+    isMikrotikIcon: (id: string) => boolean;
+  };
+  if (isMikrotikIcon(shapeId) && MIKROTIK_SHAPE_SIZES[shapeId]) {
+    return MIKROTIK_SHAPE_SIZES[shapeId];
+  }
+
+  // eslint-disable-next-line @typescript-eslint/no-var-requires
+  const { MIKROTIK_V2_SHAPE_SIZES, isMikrotikV2Icon } =
+    require('src/fixtures/mikrotikV2Icons') as {
+      MIKROTIK_V2_SHAPE_SIZES: Record<string, Size>;
+      isMikrotikV2Icon: (id: string) => boolean;
+    };
+  if (isMikrotikV2Icon(shapeId) && MIKROTIK_V2_SHAPE_SIZES[shapeId]) {
+    return MIKROTIK_V2_SHAPE_SIZES[shapeId];
+  }
 
   // Lazy require avoids circular import (registry → layout → config).
   // eslint-disable-next-line @typescript-eslint/no-var-requires
@@ -198,6 +251,18 @@ export const getShape2dPorts = (
 ): Shape2dPort[] => {
   if (!shapeId) return [];
   if (SHAPE_2D_PORTS[shapeId]) return SHAPE_2D_PORTS[shapeId];
+
+  // eslint-disable-next-line @typescript-eslint/no-var-requires
+  const { isMikrotikIcon } = require('src/fixtures/mikrotikIcons') as {
+    isMikrotikIcon: (id: string | undefined | null) => boolean;
+  };
+  if (isMikrotikIcon(shapeId)) {
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const { getMikrotikPorts } = require('src/utils/mikrotikPortLayouts') as {
+      getMikrotikPorts: (id: string) => Shape2dPort[];
+    };
+    return getMikrotikPorts(shapeId);
+  }
 
   // eslint-disable-next-line @typescript-eslint/no-var-requires
   const { getDeviceTemplatePorts } = require('src/utils/deviceTemplateRegistry') as {
@@ -239,6 +304,12 @@ export const isShape2dIcon = (iconId: string | undefined | null): boolean => {
   if (SHAPE_2D_SIZES[iconId] !== undefined) return true;
 
   // eslint-disable-next-line @typescript-eslint/no-var-requires
+  const { isMikrotikIcon } = require('src/fixtures/mikrotikIcons') as {
+    isMikrotikIcon: (id: string | undefined | null) => boolean;
+  };
+  if (isMikrotikIcon(iconId)) return true;
+
+  // eslint-disable-next-line @typescript-eslint/no-var-requires
   const { isDeviceTemplateId } = require('src/utils/deviceTemplateRegistry') as {
     isDeviceTemplateId: (id: string) => boolean;
   };
@@ -265,14 +336,16 @@ export const VIEW_DEFAULTS: Required<
 export const VIEW_ITEM_DEFAULTS: Required<
   Omit<ViewItem, 'id' | 'tile' | 'parentId' | 'rackUnit' | 'labelScale'>
 > = {
-  labelHeight: 80
+  labelHeight: 80,
+  locked: false
 };
 
 export const CONNECTOR_DEFAULTS: Required<Omit<Connector, 'id' | 'color'>> = {
   width: 10,
   description: '',
   anchors: [],
-  style: 'SOLID'
+  style: 'SOLID',
+  locked: false
 };
 
 // The boundaries of the search area for the pathfinder algorithm
@@ -318,7 +391,47 @@ export const INITIAL_UI_STATE = {
   },
   projectionMode: 'ISOMETRIC' as const,
   showGrid: true,
-  diagramBackgroundColor: null as string | null,
+  gridStyle: 'rack' as const,
+  canvasByMode: {
+    ISOMETRIC: {
+      theme: 'light' as const,
+      backgroundColor: null as string | null,
+      gridColor: null as string | null
+    },
+    TWO_D: {
+      theme: 'light' as const,
+      backgroundColor: null as string | null,
+      gridColor: null as string | null
+    },
+    TWO_D_V2: {
+      theme: 'light' as const,
+      backgroundColor: null as string | null,
+      gridColor: null as string | null
+    }
+  },
+  viewTransformByMode: {
+    ISOMETRIC: {
+      zoom: 1,
+      scroll: {
+        position: CoordsUtils.zero(),
+        offset: CoordsUtils.zero()
+      }
+    },
+    TWO_D: {
+      zoom: 1,
+      scroll: {
+        position: CoordsUtils.zero(),
+        offset: CoordsUtils.zero()
+      }
+    },
+    TWO_D_V2: {
+      zoom: 1,
+      scroll: {
+        position: CoordsUtils.zero(),
+        offset: CoordsUtils.zero()
+      }
+    }
+  },
   vlan1CableColor: null as string | null,
   simplePaths: false
 };

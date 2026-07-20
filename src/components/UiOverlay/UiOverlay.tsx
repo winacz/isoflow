@@ -11,14 +11,18 @@ import { useUiStateStore } from 'src/stores/uiStateStore';
 import { MainMenu } from 'src/components/MainMenu/MainMenu';
 import { ZoomControls } from 'src/components/ZoomControls/ZoomControls';
 import { BackgroundColorLab } from 'src/components/BackgroundColorLab/BackgroundColorLab';
+import { CanvasThemeToggle } from 'src/components/CanvasThemeToggle/CanvasThemeToggle';
 import { ConnectorRelationPanel } from 'src/components/ConnectorRelationPanel/ConnectorRelationPanel';
 import { DebugUtils } from 'src/components/DebugUtils/DebugUtils';
 import { useResizeObserver } from 'src/hooks/useResizeObserver';
 import { ContextMenuManager } from 'src/components/ContextMenu/ContextMenuManager';
 import { ViewModeTabs } from 'src/components/ViewModeTabs/ViewModeTabs';
+import { PortPipOverlay } from 'src/components/PortPipOverlay/PortPipOverlay';
+import { PortPipHoverController } from 'src/components/PortPipOverlay/PortPipHoverController';
 import { useScene } from 'src/hooks/useScene';
 import { useModelStore } from 'src/stores/modelStore';
 import { ExportImageDialog } from '../ExportImageDialog/ExportImageDialog';
+import { isPlanProjection } from 'src/utils';
 
 const ToolsEnum = {
   MAIN_MENU: 'MAIN_MENU',
@@ -104,18 +108,21 @@ export const UiOverlay = () => {
     return state.title;
   });
   const { size: rendererSize } = useResizeObserver(rendererEl);
-  const isTwoD = projectionMode === 'TWO_D';
+  const isTwoD = isPlanProjection(projectionMode);
+  const isClassic2d = projectionMode === 'TWO_D';
   const showItemControls =
     Boolean(itemControls) || (isTwoD && selectedItemIds.length >= 2);
   const selectedConnectorId =
     itemControls?.type === 'CONNECTOR' ? itemControls.id : null;
-  // Compact on smaller Mac screens — ~18–20% width, not ~28%/360–420px.
+  // Room for device creator radios + port previews (~22% width).
   const itemControlsWidth = isTwoD
-    ? Math.min(300, Math.max(260, Math.round(rendererSize.width * 0.2)))
+    ? Math.min(340, Math.max(290, Math.round(rendererSize.width * 0.22)))
     : 280;
 
   return (
     <>
+      <PortPipHoverController />
+      <PortPipOverlay />
       <Box
         sx={{
           position: 'absolute',
@@ -128,10 +135,12 @@ export const UiOverlay = () => {
       >
         {availableTools.includes('ITEM_CONTROLS') && showItemControls && (
           <UiElement
+            data-item-controls-scroll
             sx={{
               position: 'absolute',
               width: `${itemControlsWidth}px`,
               overflowY: 'scroll',
+              overscrollBehavior: 'contain',
               '&::-webkit-scrollbar': {
                 display: 'none'
               }
@@ -183,32 +192,31 @@ export const UiOverlay = () => {
           </Box>
         )}
 
-        {/* Bottom-left: cable relation (while selected) + TEMP color lab */}
-        {availableTools.includes('ZOOM_CONTROLS') && (
-          <Box
-            sx={{
-              position: 'absolute',
-              display: 'flex',
-              flexDirection: 'row',
-              alignItems: 'flex-end',
-              gap: 1
-            }}
-            style={{
-              left: appPadding.x,
-              top: rendererSize.height - appPadding.y * 2 - spacing(22)
-            }}
-          >
-            {isTwoD && selectedConnectorId && (
+        {/* Bottom-left: cable relation while a connector is selected */}
+        {availableTools.includes('ZOOM_CONTROLS') &&
+          isClassic2d &&
+          selectedConnectorId && (
+            <Box
+              sx={{
+                position: 'absolute'
+              }}
+              style={{
+                left: appPadding.x,
+                top: rendererSize.height - appPadding.y * 2 - spacing(22)
+              }}
+            >
               <ConnectorRelationPanel connectorId={selectedConnectorId} />
-            )}
-            <BackgroundColorLab />
-          </Box>
-        )}
+            </Box>
+          )}
 
         {availableTools.includes('MAIN_MENU') && (
           <Box
             sx={{
-              position: 'absolute'
+              position: 'absolute',
+              display: 'flex',
+              flexDirection: 'column',
+              alignItems: 'flex-start',
+              gap: 1
             }}
             style={{
               top: appPadding.y,
@@ -216,6 +224,8 @@ export const UiOverlay = () => {
             }}
           >
             <MainMenu />
+            <CanvasThemeToggle />
+            <BackgroundColorLab />
           </Box>
         )}
 

@@ -26,6 +26,10 @@ export const useDiagramUtils = () => {
     return state.actions;
   });
 
+  const itemControls = useUiStateStore((state) => {
+    return state.itemControls;
+  });
+
   const boundsOptions = useMemo(() => {
     return {
       projectionMode,
@@ -49,14 +53,32 @@ export const useDiagramUtils = () => {
   );
 
   const fitToView = useCallback(async () => {
-    const { zoom, scroll } = getFitToViewParams(rendererSize);
+    // Sidebar covers the right edge in 2D — fit into the free canvas only.
+    const sidebarW =
+      projectionMode === 'TWO_D' && itemControls
+        ? Math.min(340, Math.max(290, Math.round(rendererSize.width * 0.22)))
+        : 0;
+    const viewport = {
+      width: Math.max(120, rendererSize.width - sidebarW),
+      height: rendererSize.height
+    };
+    const { zoom, scroll } = getFitToViewParams(viewport);
 
     uiStateActions.setScroll({
-      position: scroll,
+      position: {
+        x: scroll.x - sidebarW * 0.5,
+        y: scroll.y
+      },
       offset: CoordsUtils.zero()
     });
     uiStateActions.setZoom(zoom);
-  }, [uiStateActions, getFitToViewParams, rendererSize]);
+  }, [
+    uiStateActions,
+    getFitToViewParams,
+    rendererSize,
+    projectionMode,
+    itemControls
+  ]);
 
   return {
     getUnprojectedBounds,

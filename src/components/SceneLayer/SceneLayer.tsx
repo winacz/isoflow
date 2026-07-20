@@ -18,6 +18,10 @@ export const SceneLayer = ({ children, order = 0, sx }: Props) => {
   const zoom = useUiStateStore((state) => {
     return state.zoom;
   });
+  const projectionMode = useUiStateStore((state) => {
+    return state.projectionMode;
+  });
+  const isTwoD = projectionMode === 'TWO_D';
 
   return (
     <Box
@@ -31,9 +35,10 @@ export const SceneLayer = ({ children, order = 0, sx }: Props) => {
         height: 0,
         userSelect: 'none',
         transformOrigin: '0 0',
-        // Composite the layer on the GPU — zoom/pan scales a cached texture
-        // instead of re-rasterizing the whole SVG scene every frame.
-        willChange: 'transform',
+        overflow: 'visible',
+        // Iso: GPU composite (original). Plan: avoid willChange — large cabinets
+        // get clipped after zoom jumps on Chromium.
+        ...(isTwoD ? null : { willChange: 'transform' }),
         ...sx
       }}
       style={{

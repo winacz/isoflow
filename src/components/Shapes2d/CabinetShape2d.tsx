@@ -74,7 +74,9 @@ export const CabinetShape2d = ({
         top: centered ? -pxHeight / 2 : 0,
         pointerEvents: 'none',
         boxSizing: 'border-box',
-        overflow: 'hidden'
+        overflow: 'hidden',
+        filter:
+          'drop-shadow(0 5px 12px rgba(15,23,42,0.22)) drop-shadow(0 2px 4px rgba(15,23,42,0.12))'
       }}
     >
       <Box
@@ -84,8 +86,7 @@ export const CabinetShape2d = ({
           bgcolor: '#c5d0dc',
           border: '1px solid #7a8ba3',
           borderRadius: Math.max(2, Math.round(tileW * 0.06)),
-          boxSizing: 'border-box',
-          boxShadow: '0 2px 6px rgba(15,23,42,0.1)'
+          boxSizing: 'border-box'
         }}
       />
 

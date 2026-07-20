@@ -1,4 +1,5 @@
 declare module '*.svg' {
-  const content: React.FunctionComponent<React.SVGAttributes<SVGElement>>;
-  export default content;
+  /** Webpack `asset/inline` → data-URI string (see webpack/*.config.js). */
+  const src: string;
+  export default src;
 }

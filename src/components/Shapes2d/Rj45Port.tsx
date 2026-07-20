@@ -33,6 +33,8 @@ interface Props {
   isFocused?: boolean;
   /** Strong ring — peer port on the other end of a cable from the selected node. */
   isPeerHighlight?: boolean;
+  /** Brief shake after jumping here from the relation panel. */
+  isAttentionPulse?: boolean;
   isConnected?: boolean;
   /** RJ45 jack (default) or open SFP cage. */
   media?: 'RJ45' | 'SFP';
@@ -54,6 +56,7 @@ export const Rj45Port = ({
   hasMismatch = false,
   isFocused = false,
   isPeerHighlight = false,
+  isAttentionPulse = false,
   isConnected = false,
   media = 'RJ45',
   compactLabel = false
@@ -75,7 +78,30 @@ export const Rj45Port = ({
         width: tileSize,
         height: tileSize,
         boxSizing: 'border-box',
-        pointerEvents: 'none'
+        pointerEvents: 'none',
+        '@keyframes portAttentionShake': {
+          '0%, 100%': {
+            transform: 'translate(-50%, -50%) rotate(0deg) scale(1)'
+          },
+          '12%': {
+            transform: 'translate(-50%, -50%) translateX(-3px) rotate(-6deg) scale(1.18)'
+          },
+          '24%': {
+            transform: 'translate(-50%, -50%) translateX(3px) rotate(6deg) scale(1.18)'
+          },
+          '36%': {
+            transform: 'translate(-50%, -50%) translateX(-2px) rotate(-4deg) scale(1.14)'
+          },
+          '48%': {
+            transform: 'translate(-50%, -50%) translateX(2px) rotate(4deg) scale(1.14)'
+          },
+          '60%': {
+            transform: 'translate(-50%, -50%) translateX(-1px) rotate(-2deg) scale(1.08)'
+          },
+          '72%': {
+            transform: 'translate(-50%, -50%) translateX(1px) rotate(2deg) scale(1.08)'
+          }
+        }
       }}
     >
       <Box
@@ -95,29 +121,36 @@ export const Rj45Port = ({
           ...PORT_GLASS_SX,
           ...(hasMismatch
             ? {
-                border: `2px solid ${TRUNK_MISMATCH_COLOR}`,
-                boxShadow: `0 0 0 2px rgba(239, 68, 68, 0.35), inset 0 1px 0 rgba(255,255,255,0.95), inset 0 -1px 0 rgba(100,116,139,0.1)`
+                border: `3px solid ${TRUNK_MISMATCH_COLOR}`,
+                bgcolor: 'rgba(239, 68, 68, 0.92)',
+                backgroundImage: 'none',
+                boxShadow: `0 0 0 3px rgba(239, 68, 68, 0.45), 0 0 18px rgba(239, 68, 68, 0.55), inset 0 1px 0 rgba(255,255,255,0.35)`,
+                transform: 'translate(-50%, -50%) scale(1.15)'
               }
             : null),
-          ...(isPeerHighlight
+          ...(isPeerHighlight && !hasMismatch
             ? {
-                border: hasMismatch
-                  ? `2px solid ${TRUNK_MISMATCH_COLOR}`
-                  : '3px solid #f59e0b',
-                boxShadow: hasMismatch
-                  ? `0 0 0 2px rgba(239, 68, 68, 0.35), 0 0 0 6px rgba(245, 158, 11, 0.45), 0 0 18px rgba(245, 158, 11, 0.55)`
-                  : `0 0 0 4px rgba(245, 158, 11, 0.5), 0 0 16px rgba(245, 158, 11, 0.65), inset 0 1px 0 rgba(255,255,255,0.95)`,
+                border: '3px solid #f59e0b',
+                boxShadow: `0 0 0 4px rgba(245, 158, 11, 0.5), 0 0 16px rgba(245, 158, 11, 0.65), inset 0 1px 0 rgba(255,255,255,0.95)`,
                 transform: 'translate(-50%, -50%) scale(1.12)'
               }
             : null),
-          ...(isFocused && !isPeerHighlight
+          ...(isFocused && !isPeerHighlight && !hasMismatch
             ? {
+                border: '2px solid #3b82f6',
+                boxShadow: `0 0 0 3px rgba(59, 130, 246, 0.32), 0 0 10px rgba(59, 130, 246, 0.22), inset 0 1px 0 rgba(255,255,255,0.95)`
+              }
+            : null),
+          ...(isAttentionPulse
+            ? {
+                zIndex: 6,
                 border: hasMismatch
-                  ? `2px solid ${TRUNK_MISMATCH_COLOR}`
-                  : '2px solid #3b82f6',
+                  ? `3px solid ${TRUNK_MISMATCH_COLOR}`
+                  : '3px solid #2563eb',
                 boxShadow: hasMismatch
-                  ? `0 0 0 2px rgba(239, 68, 68, 0.3), 0 0 0 5px rgba(59, 130, 246, 0.28), inset 0 1px 0 rgba(255,255,255,0.95)`
-                  : `0 0 0 3px rgba(59, 130, 246, 0.32), 0 0 10px rgba(59, 130, 246, 0.22), inset 0 1px 0 rgba(255,255,255,0.95)`
+                  ? `0 0 0 4px rgba(239, 68, 68, 0.5), 0 0 22px rgba(239, 68, 68, 0.55)`
+                  : '0 0 0 4px rgba(37, 99, 235, 0.45), 0 0 22px rgba(37, 99, 235, 0.55), inset 0 1px 0 rgba(255,255,255,0.95)',
+                animation: 'portAttentionShake 0.85s ease-in-out 1'
               }
             : null)
         }}
@@ -126,8 +159,16 @@ export const Rj45Port = ({
           sx={{
             width: '100%',
             height: barH,
-            bgcolor: isTrunk ? undefined : statusColor,
-            background: isTrunk ? TRUNK_RAINBOW_CSS : undefined,
+            bgcolor: hasMismatch
+              ? '#fecaca'
+              : isTrunk
+                ? undefined
+                : statusColor,
+            background: hasMismatch
+              ? undefined
+              : isTrunk
+                ? TRUNK_RAINBOW_CSS
+                : undefined,
             flexShrink: 0
           }}
         />

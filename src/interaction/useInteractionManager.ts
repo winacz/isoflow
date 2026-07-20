@@ -1,15 +1,17 @@
 import { useCallback, useEffect, useRef } from 'react';
 import { useModelStore } from 'src/stores/modelStore';
-import { useUiStateStore } from 'src/stores/uiStateStore';
+import { useUiStateStore, useUiStateStoreApi } from 'src/stores/uiStateStore';
 import { ModeActions, State, SlimMouseEvent } from 'src/types';
 import {
   getMouse,
   getItemAtTile,
+  getShape2dItemAtTile,
   getPanScrollFromDelta,
   setWindowCursor,
   BLACK_CROSSHAIR_CURSOR,
   connectorPathTileToGlobal,
-  CoordsUtils
+  CoordsUtils,
+  isPlanProjection
 } from 'src/utils';
 import { useResizeObserver } from 'src/hooks/useResizeObserver';
 import { useScene } from 'src/hooks/useScene';
@@ -73,21 +75,28 @@ export const useInteractionManager = () => {
   const rendererRef = useRef<HTMLElement>();
   const reducerTypeRef = useRef<string>();
   const rightButtonPanRef = useRef({ active: false, didPan: false });
-  const uiState = useUiStateStore((state) => {
-    return state;
-  });
+  const uiStore = useUiStateStoreApi();
+  const editorMode = useUiStateStore((state) => state.editorMode);
+  const modeType = useUiStateStore((state) => state.mode.type);
+  const rendererEl = useUiStateStore((state) => state.rendererEl);
+
   const model = useModelStore((state) => {
     return state;
   });
   const scene = useScene();
-  const { size: rendererSize } = useResizeObserver(uiState.rendererEl);
+  const { size: rendererSize } = useResizeObserver(rendererEl);
 
-  const actionsRef = useRef(uiState.actions);
-  const rendererElRef = useRef(uiState.rendererEl);
-  const mouseRef = useRef(uiState.mouse);
-  actionsRef.current = uiState.actions;
-  rendererElRef.current = uiState.rendererEl;
-  mouseRef.current = uiState.mouse;
+  const mouseRef = useRef(uiStore.getState().mouse);
+  // Do not clobber the live event-chain mouse while a button is held —
+  // a stale React snapshot would clear `mousedown` and break marquee.
+  if (!mouseRef.current.mousedown) {
+    mouseRef.current = uiStore.getState().mouse;
+  }
+
+  const commitMouse = (nextMouse: typeof mouseRef.current) => {
+    mouseRef.current = nextMouse;
+    uiStore.getState().actions.setMouse(nextMouse);
+  };
 
   const onMouseEvent = useCallback(
     (e: SlimMouseEvent) => {
@@ -95,15 +104,21 @@ export const useInteractionManager = () => {
 
       const isRendererInteraction = rendererRef.current === e.target;
       const rightButtonPan = rightButtonPanRef.current;
+      // Preserve across mouseup — getMouse clears mousedown on that event, but
+      // mode handlers (marquee select, etc.) still need the press location.
+      const activePress = mouseRef.current.mousedown;
 
+      // Use the ref chain, not the React snapshot — otherwise a mousemove in the
+      // same frame as mousedown drops `mousedown` and marquee / multi-drag break.
+      const liveUiState = uiStore.getState();
       const nextMouse = getMouse({
         interactiveElement: rendererRef.current,
-        zoom: uiState.zoom,
-        scroll: uiState.scroll,
-        lastMouse: uiState.mouse,
+        zoom: liveUiState.zoom,
+        scroll: liveUiState.scroll,
+        lastMouse: mouseRef.current,
         mouseEvent: e,
         rendererSize,
-        projectionMode: uiState.projectionMode
+        projectionMode: liveUiState.projectionMode
       });
 
       if (e.type === 'mousedown' && e.button === RIGHT_MOUSE_BUTTON) {
@@ -113,7 +128,7 @@ export const useInteractionManager = () => {
         rightButtonPan.active = true;
         rightButtonPan.didPan = false;
         setWindowCursor('grabbing');
-        uiState.actions.setMouse(nextMouse);
+        commitMouse(nextMouse);
         return;
       }
 
@@ -127,7 +142,7 @@ export const useInteractionManager = () => {
       }
 
       if (rightButtonPan.active && e.type === 'mousemove') {
-        uiState.actions.setMouse(nextMouse);
+        commitMouse(nextMouse);
 
         if (nextMouse.mousedown) {
           const dx = nextMouse.position.screen.x - nextMouse.mousedown.screen.x;
@@ -138,36 +153,45 @@ export const useInteractionManager = () => {
           }
         }
 
-        uiState.actions.setScroll(
-          getPanScrollFromDelta(uiState.scroll, nextMouse.delta?.screen)
+        const live = uiStore.getState();
+        live.actions.setScroll(
+          getPanScrollFromDelta(live.scroll, nextMouse.delta?.screen)
         );
         return;
       }
 
       if (rightButtonPan.active && e.type === 'mouseup') {
-        uiState.actions.setMouse(nextMouse);
+        commitMouse(nextMouse);
         rightButtonPan.active = false;
-        restoreCursorForMode(uiState.mode.type);
+        restoreCursorForMode(uiStore.getState().mode.type);
         return;
       }
 
-      const mode = modes[uiState.mode.type];
+      commitMouse(nextMouse);
+
+      // Read mode / selection from the store — React's snapshot lags behind
+      // setMode (marquee) and setMouse from earlier events in the same frame.
+      const liveUi = uiStore.getState();
+      const mode = modes[liveUi.mode.type];
       const modeFunction = getModeFunction(mode, e);
 
       if (!modeFunction) return;
 
-      uiState.actions.setMouse(nextMouse);
+      const uiForHandler =
+        e.type === 'mouseup' && activePress
+          ? { ...liveUi, mouse: { ...liveUi.mouse, mousedown: activePress } }
+          : liveUi;
 
       const baseState: State = {
         model,
         scene,
-        uiState,
+        uiState: uiForHandler,
         rendererRef: rendererRef.current,
         rendererSize,
         isRendererInteraction
       };
 
-      if (reducerTypeRef.current !== uiState.mode.type) {
+      if (reducerTypeRef.current !== liveUi.mode.type) {
         const prevReducer = reducerTypeRef.current
           ? modes[reducerTypeRef.current]
           : null;
@@ -182,9 +206,9 @@ export const useInteractionManager = () => {
       }
 
       modeFunction(baseState);
-      reducerTypeRef.current = uiState.mode.type;
+      reducerTypeRef.current = uiStore.getState().mode.type;
     },
-    [model, scene, uiState, rendererSize]
+    [model, scene, uiStore, rendererSize]
   );
 
   const onContextMenu = useCallback(
@@ -196,28 +220,58 @@ export const useInteractionManager = () => {
         return;
       }
 
-      const tile = uiState.mouse.position.tile;
+      const liveUiState = uiStore.getState();
+      const tile = liveUiState.mouse.position.tile;
+      const modelItems = model.actions.get().items;
 
-      const connectorAtTile = scene.connectors.find((con) => {
-        return con.path.tiles.some((pathTile) => {
+      // Prefer topmost cable (same order as Connectors paint: later = on top).
+      let connectorAtTile:
+        | (typeof scene.connectors)[number]
+        | undefined;
+      for (let i = scene.connectors.length - 1; i >= 0; i -= 1) {
+        const con = scene.connectors[i];
+        const hits = con.path.tiles.some((pathTile) => {
           const globalPathTile = connectorPathTileToGlobal(
             pathTile,
             con.path.rectangle.from
           );
           return CoordsUtils.isEqual(globalPathTile, tile);
         });
-      });
+        if (hits) {
+          connectorAtTile = con;
+          break;
+        }
+      }
 
       if (connectorAtTile) {
-        uiState.actions.setItemControls({
+        liveUiState.actions.setItemControls({
           type: 'CONNECTOR',
           id: connectorAtTile.id
         });
-        uiState.actions.setContextMenu({
+        liveUiState.actions.setContextMenu({
           item: { type: 'CONNECTOR', id: connectorAtTile.id },
           tile
         });
         return;
+      }
+
+      if (isPlanProjection(liveUiState.projectionMode)) {
+        const nodeHit = getShape2dItemAtTile({
+          tile,
+          scene,
+          modelItems
+        });
+        if (nodeHit?.type === 'ITEM') {
+          liveUiState.actions.setItemControls({
+            type: 'ITEM',
+            id: nodeHit.id
+          });
+          liveUiState.actions.setContextMenu({
+            item: nodeHit,
+            tile
+          });
+          return;
+        }
       }
 
       const itemAtTile = getItemAtTile({
@@ -225,20 +279,26 @@ export const useInteractionManager = () => {
         scene
       });
 
-      if (itemAtTile?.type === 'RECTANGLE') {
-        uiState.actions.setContextMenu({
+      if (itemAtTile?.type === 'RECTANGLE' || itemAtTile?.type === 'ITEM') {
+        if (itemAtTile.type === 'ITEM') {
+          liveUiState.actions.setItemControls({
+            type: 'ITEM',
+            id: itemAtTile.id
+          });
+        }
+        liveUiState.actions.setContextMenu({
           item: itemAtTile,
           tile
         });
-      } else if (uiState.contextMenu) {
-        uiState.actions.setContextMenu(null);
+      } else if (liveUiState.contextMenu) {
+        liveUiState.actions.setContextMenu(null);
       }
     },
-    [uiState.mouse, scene, uiState.contextMenu, uiState.actions]
+    [scene, uiStore, model]
   );
 
   useEffect(() => {
-    if (uiState.mode.type === 'INTERACTIONS_DISABLED') return undefined;
+    if (modeType === 'INTERACTIONS_DISABLED') return undefined;
 
     const el = window;
 
@@ -274,10 +334,12 @@ export const useInteractionManager = () => {
 
     const onKeyChange = (e: KeyboardEvent) => {
       if (e.key !== 'Shift') return;
-      actionsRef.current.setMouse({
+      const nextMouse = {
         ...mouseRef.current,
         shiftKey: e.type === 'keydown'
-      });
+      };
+      mouseRef.current = nextMouse;
+      uiStore.getState().actions.setMouse(nextMouse);
     };
 
     el.addEventListener('mousemove', onMouseEvent);
@@ -304,10 +366,11 @@ export const useInteractionManager = () => {
       el.removeEventListener('keyup', onKeyChange);
     };
   }, [
-    uiState.editorMode,
+    editorMode,
     onMouseEvent,
-    uiState.mode.type,
-    onContextMenu
+    modeType,
+    onContextMenu,
+    uiStore
   ]);
 
   const setInteractionsElement = useCallback((element: HTMLElement) => {

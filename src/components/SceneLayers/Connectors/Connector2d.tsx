@@ -56,13 +56,13 @@ export const Connector2d = memo(({
   const modelItems = useModelStore((state) => {
     return state.items;
   });
-  // Mouse only when selected (segment hover handle).
+  // Mouse only when selected (segment hover handle) — locked cables stay fixed.
   const mouseTile = useUiStateStore((state) => {
-    return isSelected ? state.mouse.position.tile : null;
+    return isSelected && !connector.locked ? state.mouse.position.tile : null;
   });
   // Zoom for segment drag handle (selected cable only).
   const zoom = useUiStateStore((state) => {
-    return isSelected ? state.zoom : 1;
+    return isSelected && !connector.locked ? state.zoom : 1;
   });
   const selectedWaypointIds = useUiStateStore((state) => {
     return state.selectedWaypointIds;
@@ -279,12 +279,14 @@ export const Connector2d = memo(({
       ? TRUNK_RAINBOW_COLORS[0]
       : strokeBase;
   const lineStroke = isTrunkLink ? `url(#${rainbowGradId})` : handleColor;
-  const emphasize = Boolean(isSelected || isFocused || isHighlighted);
+  const emphasize = Boolean(
+    isSelected || isFocused || isHighlighted || connector.locked
+  );
   const lineOpacity = isDimmed
     ? softDim
       ? 0.55
       : 0.4
-    : isHighlighted
+    : isHighlighted || connector.locked
       ? 1
       : emphasize
         ? 0.92
@@ -293,12 +295,12 @@ export const Connector2d = memo(({
     ? softDim
       ? 0.35
       : 0.22
-    : isHighlighted
+    : isHighlighted || connector.locked
       ? 0.85
       : emphasize
         ? 0.65
         : 0.45;
-  const widthBoost = isHighlighted ? 1.55 : emphasize ? 1.25 : 1;
+  const widthBoost = isHighlighted || connector.locked ? 1.55 : emphasize ? 1.25 : 1;
 
   return (
     <Box

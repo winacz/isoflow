@@ -5,7 +5,9 @@ import {
   getItemAtTile,
   getShape2dItemAtTile,
   getShape2dPlacementTile,
-  isShape2dPlacementFree
+  isShape2dPlacementFree,
+  snapTile2dToGrid,
+  getGridSnapStep
 } from 'src/utils';
 import {
   VIEW_ITEM_DEFAULTS,
@@ -17,6 +19,7 @@ import {
   SHAPE_2D_CABINET_ID,
   CABINET_DEFAULT_UNITS
 } from 'src/config';
+import { getMikrotikIcon, isMikrotikIcon } from 'src/fixtures/mikrotikIcons';
 
 export const PlaceIcon: ModeActions = {
   mousemove: () => {},
@@ -52,9 +55,14 @@ export const PlaceIcon: ModeActions = {
 
     if (iconId !== null) {
       const modelItemId = generateId();
-      const shape = SHAPES_2D.find((item) => {
-        return item.id === iconId;
-      });
+      const shape =
+        SHAPES_2D.find((item) => {
+          return item.id === iconId;
+        }) ??
+        getMikrotikIcon(iconId) ??
+        model.icons.find((item) => {
+          return item.id === iconId;
+        });
       const isCabinet = iconId === SHAPE_2D_CABINET_ID;
       const shapeSize =
         (isCabinet
@@ -73,11 +81,21 @@ export const PlaceIcon: ModeActions = {
         model.actions.set({
           icons: [...model.icons, shape]
         });
+      } else if (shape && isMikrotikIcon(shape.id)) {
+        // Refresh webpack SVG URL if an older empty/public path entry exists.
+        model.actions.set({
+          icons: model.icons.map((icon) => {
+            return icon.id === shape.id ? shape : icon;
+          })
+        });
       }
 
       const tile =
         uiState.projectionMode === 'TWO_D'
-          ? getShape2dPlacementTile(uiState.mouse.position.tile, shapeSize)
+          ? snapTile2dToGrid(
+              getShape2dPlacementTile(uiState.mouse.position.tile, shapeSize),
+              getGridSnapStep(uiState.gridStyle)
+            )
           : uiState.mouse.position.tile;
 
       const placingPlanShape = Boolean(getShape2dSize(iconId));
@@ -109,6 +127,8 @@ export const PlaceIcon: ModeActions = {
         defaultName = `PC-${String(existingOfType + 1).padStart(2, '0')}`;
       } else if (isCabinet) {
         defaultName = `SZAFA-${String(existingOfType + 1).padStart(2, '0')}`;
+      } else if (isMikrotikIcon(iconId) && shape?.name) {
+        defaultName = `${shape.name}-${String(existingOfType + 1).padStart(2, '0')}`;
       }
 
       scene.beginHistoryTransaction();

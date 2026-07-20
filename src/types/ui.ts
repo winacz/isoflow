@@ -19,10 +19,17 @@ interface EditDeviceTemplateControls {
   returnItemId?: string;
 }
 
+/** Sidebar: place RJ45/SFP jacks on a Mikrotik SVG faceplate. */
+interface EditMikrotikPortsControls {
+  type: 'EDIT_MIKROTIK_PORTS';
+  iconId: string;
+}
+
 export type ItemControls =
   | ItemReference
   | AddItemControls
-  | EditDeviceTemplateControls;
+  | EditDeviceTemplateControls
+  | EditMikrotikPortsControls;
 
 export interface Mouse {
   position: {
@@ -169,6 +176,37 @@ export const LayerOrderingActionOptions = {
 
 export type LayerOrderingAction = keyof typeof LayerOrderingActionOptions;
 
+/** Visual density options for the Plan (2D) background grid. */
+export type GridStyle = 'fine' | 'standard' | 'dense' | 'sparse' | 'rack';
+
+/** Canvas appearance: light (default) or dark (#292929 + light grid). */
+export type CanvasTheme = 'light' | 'dark';
+
+/** Per-projection canvas prefs (session only — not saved with the model). */
+export type CanvasModePrefs = {
+  theme: CanvasTheme;
+  backgroundColor: string | null;
+  gridColor: string | null;
+};
+
+export type CanvasPrefsByMode = {
+  ISOMETRIC: CanvasModePrefs;
+  TWO_D: CanvasModePrefs;
+  TWO_D_V2: CanvasModePrefs;
+};
+
+/** Zoom/pan remembered per projection so switching Iso ⟷ Plan does not break the other map. */
+export type ViewTransform = {
+  zoom: number;
+  scroll: Scroll;
+};
+
+export type ViewTransformByMode = {
+  ISOMETRIC: ViewTransform;
+  TWO_D: ViewTransform;
+  TWO_D_V2: ViewTransform;
+};
+
 export interface UiState {
   view: string;
   mainMenuOptions: MainMenuOptions;
@@ -187,6 +225,22 @@ export interface UiState {
    * Last entry is the primary port (expanded accordion / cable peer filter).
    */
   focusedPortIds: string[];
+  /**
+   * Brief canvas attention pulse after jumping to a port from the relation panel.
+   * `token` changes every trigger so the CSS animation can restart.
+   */
+  portAttention: { itemId: string; portId: string; token: number } | null;
+  /**
+   * 2Dv2: port under cursor → picture-in-picture of the peer device
+   * connected on the Plan topology.
+   */
+  portPipHover: {
+    hostItemId: string;
+    hostPortId: string;
+    peerItemId: string;
+    peerPortId: string | null;
+    screen: Coords;
+  } | null;
   contextMenu: ContextMenu | null;
   zoom: number;
   scroll: Scroll;
@@ -197,10 +251,21 @@ export interface UiState {
   /** Whether the background grid is drawn (logical snap grid is always active). */
   showGrid: boolean;
   /**
-   * Temporary canvas background override (experiment UI).
-   * `null` = use default theme / DIAGRAM_BG_2D.
+   * Visual density of the 2D background grid (snap is 1 tile unless `rack`).
+   * - fine: every tile
+   * - standard: fine + major every 5
+   * - dense: fine + major every 2
+   * - sparse: major every 10 only
+   * - rack: square of RACK 1U height, devices snap on drop
    */
-  diagramBackgroundColor: string | null;
+  gridStyle: GridStyle;
+  /**
+   * Canvas theme / temp colors per projection mode (iso ⟂ 2D).
+   * Isometric background stays on the theme diagram color unless overridden.
+   */
+  canvasByMode: CanvasPrefsByMode;
+  /** Zoom/scroll snapshot per projection mode (restored when switching tabs). */
+  viewTransformByMode: ViewTransformByMode;
   /**
    * Temporary stroke for untagged / VLAN 1 cables.
    * `null` = default black (#0a0a0a).
@@ -225,8 +290,15 @@ export interface UiStateActions {
   setIsMainMenuOpen: (isOpen: boolean) => void;
   setDialog: (dialog: keyof typeof DialogTypeEnum | null) => void;
   setZoom: (zoom: number) => void;
-  /** Continuous zoom from mouse wheel / trackpad. */
-  adjustZoomByWheel: (deltaY: number, deltaMode?: number) => void;
+  /** Continuous zoom from mouse wheel / trackpad pinch.
+   *  `focalFromCenter` = cursor offset from the viewport center (keeps that point fixed). */
+  adjustZoomByWheel: (
+    deltaY: number,
+    deltaMode?: number,
+    focalFromCenter?: Coords
+  ) => void;
+  /** Pan canvas from trackpad two-finger scroll / mouse wheel tilt. */
+  panByWheel: (deltaX: number, deltaY: number, deltaMode?: number) => void;
   setScroll: (scroll: Scroll) => void;
   setItemControls: (itemControls: ItemControls | null) => void;
   setSelectedItemIds: (ids: string[]) => void;
@@ -238,6 +310,13 @@ export interface UiStateActions {
   setFocusedPortId: (portId: string | null) => void;
   /** Ctrl/Cmd toggle a port in the multi-selection. */
   toggleFocusedPortId: (portId: string) => void;
+  /** Pulse a port on the canvas (relation-panel jump). Clears itself after ~1s. */
+  setPortAttention: (
+    attention: { itemId: string; portId: string } | null
+  ) => void;
+  setPortPipHover: (
+    hover: UiState['portPipHover']
+  ) => void;
   setContextMenu: (contextMenu: ContextMenu | null) => void;
   setMouse: (mouse: Mouse) => void;
   /** Imperative read — lets event handlers avoid subscribing to every mousemove. */
@@ -247,7 +326,12 @@ export interface UiStateActions {
   setProjectionMode: (projectionMode: ProjectionMode) => void;
   setShowGrid: (showGrid: boolean) => void;
   toggleShowGrid: () => void;
-  /** Temporary: override diagram canvas background, or null to reset. */
+  setGridStyle: (gridStyle: GridStyle) => void;
+  /** Temporary: override grid line color for the active projection mode. */
+  setGridColor: (color: string | null) => void;
+  setCanvasTheme: (theme: CanvasTheme) => void;
+  toggleCanvasTheme: () => void;
+  /** Temporary: override canvas background for the active projection mode. */
   setDiagramBackgroundColor: (color: string | null) => void;
   /** Temporary: override VLAN 1 / untagged cable color, or null to reset. */
   setVlan1CableColor: (color: string | null) => void;

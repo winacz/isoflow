@@ -11,21 +11,27 @@ import {
   syncDeviceTemplateCache,
   mergeDeviceTemplatesWithLibrary,
   ensureDeviceTemplateIcons,
-  saveDeviceTemplatesLibrary
+  saveDeviceTemplatesLibrary,
+  snapModelToGrid,
+  PLAN_2D_V2_VIEW_NAME,
+  findPlanView,
+  build2Dv2SnapshotFromPlan
 } from 'src/utils';
 import * as reducers from 'src/stores/reducers';
 import { useModelStore } from 'src/stores/modelStore';
 import { useView } from 'src/hooks/useView';
-import { useUiStateStore } from 'src/stores/uiStateStore';
+import { useUiStateStore, useUiStateStoreApi } from 'src/stores/uiStateStore';
 import { useHistoryStore, resetHistoryTransaction } from 'src/stores/historyStore';
 import { modelSchema } from 'src/schemas/model';
+import { ensureMikrotikIcons } from 'src/fixtures/mikrotikIcons';
 
 export const useInitialDataManager = () => {
   const [isReady, setIsReady] = useState(false);
   const prevInitialData = useRef<InitialData>();
-  const model = useModelStore((state) => {
-    return state;
+  const modelActions = useModelStore((state) => {
+    return state.actions;
   });
+  const uiStore = useUiStateStoreApi();
   const uiStateActions = useUiStateStore((state) => {
     return state.actions;
   });
@@ -54,17 +60,53 @@ export const useInitialDataManager = () => {
         return;
       }
 
-      const initialData = _initialData;
+      let initialData = _initialData;
 
       const deviceTemplates = mergeDeviceTemplatesWithLibrary(
         initialData.deviceTemplates
       );
       initialData.deviceTemplates = deviceTemplates;
-      initialData.icons = ensureDeviceTemplateIcons(
-        initialData.icons ?? [],
-        deviceTemplates
+      initialData.icons = ensureMikrotikIcons(
+        ensureDeviceTemplateIcons(
+          initialData.icons ?? [],
+          deviceTemplates
+        )
       );
       saveDeviceTemplatesLibrary(deviceTemplates);
+
+      // Ensure schematic 2Dv2 view exists (older saves / imports).
+      if (
+        !initialData.views.some((view) => {
+          return view.name === PLAN_2D_V2_VIEW_NAME;
+        })
+      ) {
+        const plan = findPlanView(initialData.views);
+        const snapshot = plan
+          ? build2Dv2SnapshotFromPlan({
+              plan,
+              modelItems: initialData.items ?? []
+            })
+          : {
+              items: [],
+              rectangles: [],
+              connectors: [],
+              textBoxes: []
+            };
+        initialData = {
+          ...initialData,
+          views: [
+            ...initialData.views,
+            {
+              id: generateId(),
+              name: PLAN_2D_V2_VIEW_NAME,
+              items: snapshot.items,
+              connectors: [],
+              rectangles: snapshot.rectangles,
+              textBoxes: []
+            }
+          ]
+        };
+      }
 
       if (initialData.views.length === 0) {
         const updates = reducers.view({
@@ -79,9 +121,19 @@ export const useInitialDataManager = () => {
         Object.assign(initialData, updates.model);
       }
 
+      // 2D: snap free devices / areas to the floor grid; reseat cabinet mounts.
+      const snapped = snapModelToGrid(initialData, {
+        gridStyle: uiStore.getState().gridStyle,
+        projectionMode: initialData.projectionMode
+      });
+      initialData = {
+        ...initialData,
+        views: snapped.views
+      };
+
       prevInitialData.current = initialData;
       syncDeviceTemplateCache(initialData.deviceTemplates);
-      model.actions.set(initialData);
+      modelActions.set(initialData);
 
       const view = getItemByIdOrThrow(
         initialData.views,
@@ -129,7 +181,7 @@ export const useInitialDataManager = () => {
 
       setIsReady(true);
     },
-    [changeView, model.actions, rendererEl, uiStateActions]
+    [changeView, modelActions, rendererEl, uiStateActions, uiStore]
   );
 
   const clear = useCallback(() => {

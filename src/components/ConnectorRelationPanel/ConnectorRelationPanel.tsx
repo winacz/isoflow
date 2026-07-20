@@ -1,11 +1,15 @@
-import React, { useMemo } from 'react';
+import React, { useCallback, useMemo } from 'react';
 import { Box, Typography } from '@mui/material';
 import { UiElement } from 'src/components/UiElement/UiElement';
 import { useConnector } from 'src/hooks/useConnector';
+import { useScene } from 'src/hooks/useScene';
 import { useModelStore } from 'src/stores/modelStore';
+import { useUiStateStore } from 'src/stores/uiStateStore';
+import { useResizeObserver } from 'src/hooks/useResizeObserver';
 import { getShape2dPortIfaceName } from 'src/config';
 import {
   getConnectorRelationSummary,
+  focusShape2dPortOnCanvas,
   TRUNK_RAINBOW_CSS,
   TRUNK_MISMATCH_COLOR
 } from 'src/utils';
@@ -16,12 +20,21 @@ interface Props {
 
 /**
  * Fixed HUD panel (bottom-left) showing cable endpoints + VLAN while selected.
+ * Endpoints are clickable — zoom/center on that port and open its device panel.
  */
 export const ConnectorRelationPanel = ({ connectorId }: Props) => {
   const connector = useConnector(connectorId);
+  const { items: viewItems } = useScene();
   const modelItems = useModelStore((state) => {
     return state.items;
   });
+  const uiStateActions = useUiStateStore((state) => {
+    return state.actions;
+  });
+  const rendererEl = useUiStateStore((state) => {
+    return state.rendererEl;
+  });
+  const { size: rendererSize } = useResizeObserver(rendererEl);
 
   const linkSummary = useMemo(() => {
     return getConnectorRelationSummary({
@@ -35,6 +48,31 @@ export const ConnectorRelationPanel = ({ connectorId }: Props) => {
       }
     });
   }, [connector.anchors, modelItems]);
+
+  const jumpToEndpoint = useCallback(
+    (itemId: string, portId: string) => {
+      focusShape2dPortOnCanvas({
+        itemId,
+        portId,
+        viewItems,
+        modelItems,
+        rendererSize: {
+          width: rendererSize.width || 800,
+          height: rendererSize.height || 600
+        },
+        setZoom: uiStateActions.setZoom,
+        setScroll: uiStateActions.setScroll,
+        setItemControls: uiStateActions.setItemControls,
+        setSelectedItemIds: uiStateActions.setSelectedItemIds,
+        setFocusedPortId: uiStateActions.setFocusedPortId,
+        setPortAttention: uiStateActions.setPortAttention,
+        clearSelectedWaypointIds: () => {
+          uiStateActions.setSelectedWaypointIds([]);
+        }
+      });
+    },
+    [viewItems, modelItems, rendererSize, uiStateActions]
+  );
 
   const isMismatchLink = linkSummary.linkMode === 'mismatch';
   const isTrunkLink = linkSummary.linkMode === 'trunk';
@@ -70,6 +108,8 @@ export const ConnectorRelationPanel = ({ connectorId }: Props) => {
         </Typography>
       ) : (
         linkSummary.endpoints.map((endpoint, index) => {
+          const canJump = Boolean(endpoint.itemId);
+
           return (
             <Box key={`${endpoint.itemId}-${endpoint.portId}-${index}`}>
               {index > 0 && (
@@ -84,30 +124,75 @@ export const ConnectorRelationPanel = ({ connectorId }: Props) => {
                   ↕
                 </Typography>
               )}
-              <Typography
+              <Box
+                component={canJump ? 'button' : 'div'}
+                type={canJump ? 'button' : undefined}
+                onClick={
+                  canJump
+                    ? () => {
+                        jumpToEndpoint(endpoint.itemId, endpoint.portId);
+                      }
+                    : undefined
+                }
+                title={
+                  canJump
+                    ? 'Przejdź do portu na canvasie'
+                    : undefined
+                }
                 sx={{
-                  fontSize: 15,
-                  fontWeight: 700,
-                  lineHeight: 1.3,
-                  color: 'text.primary'
+                  display: 'block',
+                  width: '100%',
+                  textAlign: 'left',
+                  border: 'none',
+                  background: 'transparent',
+                  p: 0.75,
+                  m: 0,
+                  mx: -0.75,
+                  borderRadius: 1,
+                  cursor: canJump ? 'pointer' : 'default',
+                  font: 'inherit',
+                  color: 'inherit',
+                  transition: 'background-color 0.12s ease',
+                  ...(canJump
+                    ? {
+                        '&:hover': {
+                          bgcolor: 'action.hover'
+                        },
+                        '&:focus-visible': {
+                          outline: '2px solid',
+                          outlineColor: 'primary.main',
+                          outlineOffset: 1
+                        }
+                      }
+                    : {})
                 }}
               >
-                {endpoint.itemName}
-              </Typography>
-              <Typography
-                sx={{
-                  fontSize: 13,
-                  color: 'text.secondary',
-                  fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace'
-                }}
-              >
-                {endpoint.portLabel}
-                {endpoint.type === 'trunk'
-                  ? ' · trunk'
-                  : endpoint.isNonVlanAware
-                    ? ' · host'
-                    : ''}
-              </Typography>
+                <Typography
+                  sx={{
+                    fontSize: 15,
+                    fontWeight: 700,
+                    lineHeight: 1.3,
+                    color: canJump ? 'primary.main' : 'text.primary'
+                  }}
+                >
+                  {endpoint.itemName}
+                </Typography>
+                <Typography
+                  sx={{
+                    fontSize: 13,
+                    color: 'text.secondary',
+                    fontFamily:
+                      'ui-monospace, SFMono-Regular, Menlo, monospace'
+                  }}
+                >
+                  {endpoint.portLabel}
+                  {endpoint.type === 'trunk'
+                    ? ' · trunk'
+                    : endpoint.isNonVlanAware
+                      ? ' · host'
+                      : ''}
+                </Typography>
+              </Box>
             </Box>
           );
         })

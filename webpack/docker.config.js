@@ -22,11 +22,18 @@ module.exports = {
         test: /\.css$/i,
         use: ['style-loader', 'css-loader']
       },
-        
-        {
-          test: /\.svg$/i,
-          type: 'asset/inline'
+      {
+        test: /\.svg$/i,
+        include: path.resolve(__dirname, '../src/assets/mikrotik-v2'),
+        type: 'asset/resource',
+        generator: {
+          filename: 'icons/mikrotik-v2/[name][ext]'
         }
+      },
+      {
+        test: /\.svg$/i,
+        type: 'asset/inline'
+      }
     ]
   },
   plugins: [
