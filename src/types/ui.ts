@@ -19,17 +19,10 @@ interface EditDeviceTemplateControls {
   returnItemId?: string;
 }
 
-/** Sidebar: place RJ45/SFP jacks on a Mikrotik SVG faceplate. */
-interface EditMikrotikPortsControls {
-  type: 'EDIT_MIKROTIK_PORTS';
-  iconId: string;
-}
-
 export type ItemControls =
   | ItemReference
   | AddItemControls
-  | EditDeviceTemplateControls
-  | EditMikrotikPortsControls;
+  | EditDeviceTemplateControls;
 
 export interface Mouse {
   position: {

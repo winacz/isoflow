@@ -12,14 +12,11 @@ import {
 } from 'src/config';
 import { getDeviceTemplateLayout } from './deviceTemplateRegistry';
 import { isTileInShape2dBounds } from './renderer';
-import { isMikrotikIcon } from 'src/fixtures/mikrotikIcons';
-import { isMikrotikV2Icon } from 'src/fixtures/mikrotikV2Icons';
 
 export const isRackFormFactorItem = (modelItem: {
   icon?: string;
 }): boolean => {
   if (!modelItem.icon) return false;
-  if (isMikrotikIcon(modelItem.icon)) return true;
   const layout = getDeviceTemplateLayout(modelItem.icon);
   return layout?.formFactor === 'RACK';
 };
@@ -28,16 +25,11 @@ export const isCabinetItem = (modelItem: { icon?: string }): boolean => {
   return modelItem.icon === SHAPE_2D_CABINET_ID;
 };
 
-/**
- * Full-bleed faceplates (Mikrotik's V1 — ears baked into SVG) span the
- * cabinet outer width. V2 uses bay width + drawn ears → standard inset mount.
- */
+/** Full-bleed faceplates span the cabinet outer width; others use standard inset mount. */
 export const isFullWidthRackItem = (modelItem: {
   icon?: string;
 }): boolean => {
   if (!modelItem.icon) return false;
-  if (isMikrotikV2Icon(modelItem.icon)) return false;
-  if (isMikrotikIcon(modelItem.icon)) return true;
   const size = getShape2dSize(modelItem.icon);
   return Boolean(
     size && size.width >= RACK_1U_WIDTH_TILES + CABINET_EAR_TILES * 2

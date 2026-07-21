@@ -23,7 +23,6 @@ import { useView } from 'src/hooks/useView';
 import { useUiStateStore, useUiStateStoreApi } from 'src/stores/uiStateStore';
 import { useHistoryStore, resetHistoryTransaction } from 'src/stores/historyStore';
 import { modelSchema } from 'src/schemas/model';
-import { ensureMikrotikIcons } from 'src/fixtures/mikrotikIcons';
 
 export const useInitialDataManager = () => {
   const [isReady, setIsReady] = useState(false);
@@ -66,11 +65,9 @@ export const useInitialDataManager = () => {
         initialData.deviceTemplates
       );
       initialData.deviceTemplates = deviceTemplates;
-      initialData.icons = ensureMikrotikIcons(
-        ensureDeviceTemplateIcons(
-          initialData.icons ?? [],
-          deviceTemplates
-        )
+      initialData.icons = ensureDeviceTemplateIcons(
+        initialData.icons ?? [],
+        deviceTemplates
       );
       saveDeviceTemplatesLibrary(deviceTemplates);
 

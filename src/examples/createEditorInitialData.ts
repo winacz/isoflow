@@ -8,8 +8,6 @@ import {
   PLAN_2D_V2_VIEW_NAME,
   ISOMETRIC_VIEW_NAME
 } from 'src/utils';
-import { MIKROTIK_ICONS, ensureMikrotikIcons } from 'src/fixtures/mikrotikIcons';
-import { MIKROTIK_V2_ICONS } from 'src/fixtures/mikrotikV2Icons';
 import { initialData as isometricDemo } from './initialData';
 import { createStartingTopology2d } from './startingTopology2d';
 
@@ -36,18 +34,14 @@ export const createEditorInitialData = (): InitialData => {
 
   const isoIcons = isometricDemo.icons ?? [];
   const planIconIds = new Set(SHAPES_2D.map((icon) => icon.id));
-  const icons = ensureMikrotikIcons(
-    ensureDeviceTemplateIcons(
-      [
-        ...isoIcons.filter((icon) => {
-          return !planIconIds.has(icon.id);
-        }),
-        ...SHAPES_2D,
-        ...MIKROTIK_ICONS,
-        ...MIKROTIK_V2_ICONS
-      ],
-      deviceTemplates
-    )
+  const icons = ensureDeviceTemplateIcons(
+    [
+      ...isoIcons.filter((icon) => {
+        return !planIconIds.has(icon.id);
+      }),
+      ...SHAPES_2D
+    ],
+    deviceTemplates
   );
 
   const isoColors = isometricDemo.colors ?? [];

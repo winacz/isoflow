@@ -28,4 +28,3 @@ export * from './canvasFocus';
 export * from './model';
 export * from './projection';
 export * from './plan2dv2';
-export * from './mikrotikPortLayouts';

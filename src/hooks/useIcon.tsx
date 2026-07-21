@@ -9,7 +9,6 @@ import { IsometricIcon } from 'src/components/SceneLayers/Nodes/Node/IconTypes/I
 import { NonIsometricIcon } from 'src/components/SceneLayers/Nodes/Node/IconTypes/NonIsometricIcon';
 import { DeviceShape2d } from 'src/components/Shapes2d/DeviceShape2d';
 import { CabinetShape2d } from 'src/components/Shapes2d/CabinetShape2d';
-import { SvgShape2d } from 'src/components/Shapes2d/SvgShape2d';
 import {
   DEFAULT_ICON,
   SHAPES_2D,
@@ -18,7 +17,6 @@ import {
   isShape2dIcon
 } from 'src/config';
 import type { ModelItem } from 'src/types';
-import { isMikrotikIcon, getMikrotikIcon } from 'src/fixtures/mikrotikIcons';
 
 export const useIcon = (
   id: string | undefined,
@@ -81,9 +79,6 @@ export const useIcon = (
   const icon = useMemo(() => {
     if (!id) return DEFAULT_ICON;
 
-    const mikrotik = getMikrotikIcon(id);
-    if (mikrotik) return mikrotik;
-
     const shape = SHAPES_2D.find((item) => {
       return item.id === id;
     });
@@ -113,24 +108,6 @@ export const useIcon = (
   }, [icon.url]);
 
   const iconComponent = useMemo(() => {
-    if (isMikrotikIcon(icon.id)) {
-      setHasLoaded(true);
-      return (
-        <SvgShape2d
-          icon={icon}
-          name={name || icon.name}
-          ports={ports}
-          connectedPortIds={connectedPortIds}
-          mismatchPortIds={mismatchPortIds}
-          focusedPortIds={focusedPortIds}
-          peerHighlightPortIds={peerHighlightPortIds}
-          attentionPortId={attentionPortId}
-          attentionToken={attentionToken}
-          modelItems={modelItems}
-        />
-      );
-    }
-
     if (isShape2dIcon(icon.id)) {
       setHasLoaded(true);
 

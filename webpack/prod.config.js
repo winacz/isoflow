@@ -41,15 +41,6 @@ module.exports = {
       },
       {
         test: /\.svg$/,
-        include: path.resolve(__dirname, '../src/assets/mikrotik-v2'),
-        type: 'asset/resource',
-        generator: {
-          filename: 'icons/mikrotik-v2/[name][ext]'
-        }
-      },
-      {
-        test: /\.svg$/,
-        exclude: path.resolve(__dirname, '../src/assets/mikrotik-v2'),
         type: 'asset/inline'
       }
     ]

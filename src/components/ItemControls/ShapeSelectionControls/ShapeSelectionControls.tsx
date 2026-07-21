@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   Box,
   Button,
@@ -40,27 +40,10 @@ import {
   mergeDeviceTemplatesWithLibrary,
   ensureDeviceTemplateIcons,
   syncDeviceTemplateCache,
-  isDeviceTemplateId,
-  subscribeMikrotikPorts,
-  getMikrotikPortsVersion
+  isDeviceTemplateId
 } from 'src/utils';
-import {
-  MIKROTIK_ICONS,
-  MIKROTIK_COLLECTION,
-  isMikrotikIcon
-} from 'src/fixtures/mikrotikIcons';
-import {
-  MIKROTIK_V2_ICONS,
-  MIKROTIK_V2_COLLECTION
-} from 'src/fixtures/mikrotikV2Icons';
-import { SvgShape2d } from 'src/components/Shapes2d/SvgShape2d';
 
-const CATEGORY_ORDER = [
-  'Switches',
-  'Stacje',
-  MIKROTIK_COLLECTION,
-  MIKROTIK_V2_COLLECTION
-] as const;
+const CATEGORY_ORDER = ['Switches', 'Stacje'] as const;
 
 const shapeCaption = (shape: Icon) => {
   if (shape.id === SHAPE_2D_SWITCH_ID) return '16× RJ45';
@@ -69,7 +52,7 @@ const shapeCaption = (shape: Icon) => {
 
   const ports = getShape2dPorts(shape.id);
   if (!ports.length) {
-    return isMikrotikIcon(shape.id) ? 'Brak portów · Edytuj' : null;
+    return null;
   }
 
   const rj45 = ports.filter((port) => {
@@ -84,45 +67,6 @@ const shapeCaption = (shape: Icon) => {
 };
 
 const ShapePreview = ({ shape }: { shape: Icon }) => {
-  if (isMikrotikIcon(shape.id)) {
-    const size = getShape2dSize(shape.id) ?? { width: 12, height: 4 };
-    const naturalW = size.width * TILE_SIZE_2D;
-    const naturalH = size.height * TILE_SIZE_2D;
-    const previewWidth = Math.min(168, Math.max(96, naturalW * 0.22));
-    const scale = previewWidth / naturalW;
-    const previewHeight = Math.max(28, Math.round(naturalH * scale));
-
-    return (
-      <Box
-        sx={{
-          width: previewWidth,
-          height: previewHeight,
-          flexShrink: 0,
-          overflow: 'hidden',
-          borderRadius: 1,
-          border: '1px solid',
-          borderColor: 'divider',
-          bgcolor: '#f8fafc',
-          position: 'relative'
-        }}
-      >
-        <Box
-          sx={{
-            position: 'absolute',
-            left: 0,
-            top: 0,
-            width: naturalW,
-            height: naturalH,
-            transform: `scale(${scale})`,
-            transformOrigin: 'top left'
-          }}
-        >
-          <SvgShape2d icon={shape} name="" centered={false} showPorts={false} />
-        </Box>
-      </Box>
-    );
-  }
-
   if (shape.id === SHAPE_2D_CABINET_ID) {
     const size = getCabinetSize(Math.min(8, CABINET_DEFAULT_UNITS));
     const naturalW = size.width * TILE_SIZE_2D;
@@ -271,10 +215,7 @@ const ShapeCategory = ({
           {shapes.map((shape) => {
             const isActive = activeId === shape.id;
             const caption = shapeCaption(shape);
-            const canEdit = Boolean(
-              onEdit &&
-                (isDeviceTemplateId(shape.id) || isMikrotikIcon(shape.id))
-            );
+            const canEdit = Boolean(onEdit && isDeviceTemplateId(shape.id));
 
             return (
               <Stack
@@ -341,11 +282,7 @@ const ShapeCategory = ({
                       fontWeight: 700,
                       letterSpacing: 0.3
                     }}
-                    title={
-                      isMikrotikIcon(shape.id)
-                        ? `Edytuj porty „${shape.name}”`
-                        : `Edytuj szablon „${shape.name}”`
-                    }
+                    title={`Edytuj szablon „${shape.name}”`}
                   >
                     <EditIcon sx={{ fontSize: 16 }} />
                     Edytuj
@@ -364,9 +301,6 @@ const ShapeCategory = ({
 const templateToIcon = deviceTemplateToIcon;
 
 export const ShapeSelectionControls = () => {
-  // Refresh captions after Mikrotik port layouts are saved.
-  useSyncExternalStore(subscribeMikrotikPorts, getMikrotikPortsVersion);
-
   const [isCreating, setIsCreating] = useState(false);
   const uiStateActions = useUiStateStore((state) => {
     return state.actions;
@@ -412,20 +346,6 @@ export const ShapeSelectionControls = () => {
       // Cabinet lives under Obiekty section, not device categories.
       if (shape.id === SHAPE_2D_CABINET_ID) return;
       const key = shape.collection || 'Inne';
-      const list = byCollection.get(key) ?? [];
-      list.push(shape);
-      byCollection.set(key, list);
-    });
-
-    MIKROTIK_ICONS.forEach((shape) => {
-      const key = shape.collection || MIKROTIK_COLLECTION;
-      const list = byCollection.get(key) ?? [];
-      list.push(shape);
-      byCollection.set(key, list);
-    });
-
-    MIKROTIK_V2_ICONS.forEach((shape) => {
-      const key = shape.collection || MIKROTIK_V2_COLLECTION;
       const list = byCollection.get(key) ?? [];
       list.push(shape);
       byCollection.set(key, list);
@@ -514,16 +434,6 @@ export const ShapeSelectionControls = () => {
     [uiStateActions]
   );
 
-  const onEditMikrotikPorts = useCallback(
-    (shape: Icon) => {
-      uiStateActions.setItemControls({
-        type: 'EDIT_MIKROTIK_PORTS',
-        iconId: shape.id
-      });
-    },
-    [uiStateActions]
-  );
-
   const onSaveTemplate = useCallback(
     (template: DeviceTemplate) => {
       const icon = templateToIcon(template);
@@ -585,9 +495,6 @@ export const ShapeSelectionControls = () => {
         <Stack spacing={1.5}>
           {categories.map((category) => {
             const isSwitches = category.title === 'Switches';
-            const isMikrotik =
-              category.title === MIKROTIK_COLLECTION ||
-              category.title === MIKROTIK_V2_COLLECTION;
 
             return (
               <ShapeCategory
@@ -596,14 +503,7 @@ export const ShapeSelectionControls = () => {
                 shapes={category.shapes}
                 activeId={activeId}
                 onSelect={onSelectShape}
-                onEdit={
-                  isSwitches
-                    ? onEditTemplate
-                    : isMikrotik
-                      ? onEditMikrotikPorts
-                      : undefined
-                }
-                defaultExpanded={category.title === MIKROTIK_V2_COLLECTION}
+                onEdit={isSwitches ? onEditTemplate : undefined}
                 footer={
                   isSwitches ? (
                     <Button

@@ -14,7 +14,6 @@ import {
   SHAPE_2D_SWITCH_ID
 } from 'src/config';
 import { isDeviceTemplateId } from 'src/utils';
-import { isMikrotikIcon } from 'src/fixtures/mikrotikIcons';
 
 export type DeviceTypeIconKind =
   | 'switch'
@@ -29,11 +28,7 @@ export const resolveDeviceTypeIconKind = (
   iconId: string | undefined | null
 ): DeviceTypeIconKind => {
   if (!iconId) return 'other';
-  if (
-    iconId === SHAPE_2D_SWITCH_ID ||
-    isDeviceTemplateId(iconId) ||
-    isMikrotikIcon(iconId)
-  ) {
+  if (iconId === SHAPE_2D_SWITCH_ID || isDeviceTemplateId(iconId)) {
     return 'switch';
   }
   if (iconId === SHAPE_2D_PC_ID) return 'pc';

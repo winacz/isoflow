@@ -6,7 +6,6 @@ import { isShape2dIcon } from 'src/config';
 import { IconSelectionControls } from 'src/components/ItemControls/IconSelectionControls/IconSelectionControls';
 import { ShapeSelectionControls } from 'src/components/ItemControls/ShapeSelectionControls/ShapeSelectionControls';
 import { DeviceTemplateEditorControls } from 'src/components/ItemControls/DeviceCreator/DeviceTemplateEditorControls';
-import { MikrotikPortEditor } from 'src/components/ItemControls/MikrotikPortEditor/MikrotikPortEditor';
 import { MultiNodeControls } from 'src/components/ItemControls/MultiNodeControls/MultiNodeControls';
 import { NodeControls } from './NodeControls/NodeControls';
 import { NodeControls2d } from './NodeControls/NodeControls2d';
@@ -77,19 +76,6 @@ export const ItemControlsManager = () => {
             key={itemControls.templateId}
             templateId={itemControls.templateId}
             returnItemId={itemControls.returnItemId}
-          />
-        );
-      case 'EDIT_MIKROTIK_PORTS':
-        return (
-          <MikrotikPortEditor
-            key={itemControls.iconId}
-            iconId={itemControls.iconId}
-            onCancel={() => {
-              uiStateActions.setItemControls({ type: 'ADD_ITEM' });
-            }}
-            onSaved={() => {
-              uiStateActions.setItemControls({ type: 'ADD_ITEM' });
-            }}
           />
         );
       default:

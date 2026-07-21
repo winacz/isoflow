@@ -207,25 +207,6 @@ export const getShape2dSize = (shapeId: string | undefined | null): Size | null 
   }
   if (SHAPE_2D_SIZES[shapeId]) return SHAPE_2D_SIZES[shapeId];
 
-  // eslint-disable-next-line @typescript-eslint/no-var-requires
-  const { MIKROTIK_SHAPE_SIZES, isMikrotikIcon } = require('src/fixtures/mikrotikIcons') as {
-    MIKROTIK_SHAPE_SIZES: Record<string, Size>;
-    isMikrotikIcon: (id: string) => boolean;
-  };
-  if (isMikrotikIcon(shapeId) && MIKROTIK_SHAPE_SIZES[shapeId]) {
-    return MIKROTIK_SHAPE_SIZES[shapeId];
-  }
-
-  // eslint-disable-next-line @typescript-eslint/no-var-requires
-  const { MIKROTIK_V2_SHAPE_SIZES, isMikrotikV2Icon } =
-    require('src/fixtures/mikrotikV2Icons') as {
-      MIKROTIK_V2_SHAPE_SIZES: Record<string, Size>;
-      isMikrotikV2Icon: (id: string) => boolean;
-    };
-  if (isMikrotikV2Icon(shapeId) && MIKROTIK_V2_SHAPE_SIZES[shapeId]) {
-    return MIKROTIK_V2_SHAPE_SIZES[shapeId];
-  }
-
   // Lazy require avoids circular import (registry → layout → config).
   // eslint-disable-next-line @typescript-eslint/no-var-requires
   const { getDeviceTemplateSize } = require('src/utils/deviceTemplateRegistry') as {
@@ -251,18 +232,6 @@ export const getShape2dPorts = (
 ): Shape2dPort[] => {
   if (!shapeId) return [];
   if (SHAPE_2D_PORTS[shapeId]) return SHAPE_2D_PORTS[shapeId];
-
-  // eslint-disable-next-line @typescript-eslint/no-var-requires
-  const { isMikrotikIcon } = require('src/fixtures/mikrotikIcons') as {
-    isMikrotikIcon: (id: string | undefined | null) => boolean;
-  };
-  if (isMikrotikIcon(shapeId)) {
-    // eslint-disable-next-line @typescript-eslint/no-var-requires
-    const { getMikrotikPorts } = require('src/utils/mikrotikPortLayouts') as {
-      getMikrotikPorts: (id: string) => Shape2dPort[];
-    };
-    return getMikrotikPorts(shapeId);
-  }
 
   // eslint-disable-next-line @typescript-eslint/no-var-requires
   const { getDeviceTemplatePorts } = require('src/utils/deviceTemplateRegistry') as {
@@ -302,12 +271,6 @@ export const getShape2dPortIfaceName = (
 export const isShape2dIcon = (iconId: string | undefined | null): boolean => {
   if (!iconId) return false;
   if (SHAPE_2D_SIZES[iconId] !== undefined) return true;
-
-  // eslint-disable-next-line @typescript-eslint/no-var-requires
-  const { isMikrotikIcon } = require('src/fixtures/mikrotikIcons') as {
-    isMikrotikIcon: (id: string | undefined | null) => boolean;
-  };
-  if (isMikrotikIcon(iconId)) return true;
 
   // eslint-disable-next-line @typescript-eslint/no-var-requires
   const { isDeviceTemplateId } = require('src/utils/deviceTemplateRegistry') as {
