@@ -4,6 +4,9 @@ import { rectangleSchema } from './rectangle';
 import { connectorSchema } from './connector';
 import { textBoxSchema } from './textBox';
 
+/** Modular tab role — Isometric / Plan 2D / schematic 2Dv2. */
+export const viewKindSchema = z.enum(['ISOMETRIC', 'PLAN_2D', 'PLAN_2D_V2']);
+
 export const viewItemSchema = z.object({
   id,
   tile: coords,
@@ -23,6 +26,10 @@ export const viewSchema = z.object({
   lastUpdated: z.string().datetime().optional(),
   name: constrainedStrings.name,
   description: constrainedStrings.description.optional(),
+  /** Modular tab role. Optional for older JSON — inferred from name on load. */
+  kind: viewKindSchema.optional(),
+  /** Tab order in the project strip (lower = left). */
+  order: z.number().optional(),
   items: z.array(viewItemSchema),
   rectangles: z.array(rectangleSchema).optional(),
   connectors: z.array(connectorSchema).optional(),

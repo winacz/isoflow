@@ -50,12 +50,6 @@ export const DIAGRAM_BG_ISO = '#ffffff';
 /** Default grid line color in dark canvas theme. */
 export const GRID_COLOR_DARK = '#b8b8b8';
 
-/**
- * Visual 2D grid spacing in logical tiles.
- * Snapping / connectors still use every tile (TILE_SIZE_2D); only drawing is coarser.
- */
-export const GRID_2D_VISUAL_STEP = 5;
-
 /** Minimum edge-to-edge gap (tiles) when auto-laying out selected 2D nodes. */
 export const SHAPE_2D_LAYOUT_GAP = 3;
 
@@ -70,7 +64,7 @@ export const RACK_1U_WIDTH_TILES = 60;
  */
 export const RACK_1U_HEIGHT_TILES = 9;
 /** Alias: 1U tile size (same as RACK_1U_HEIGHT_TILES). */
-export const UNIT_1U_TILES = RACK_1U_HEIGHT_TILES;
+const UNIT_1U_TILES = RACK_1U_HEIGHT_TILES;
 
 /**
  * Built-in 16-port switch — same 1U height as RACK; width follows ports.
@@ -116,7 +110,7 @@ export const getCabinetSize = (rackUnits = CABINET_DEFAULT_UNITS): Size => {
 /** Soft cap for custom switch templates (typical commercial max). */
 export const MAX_SWITCH_TEMPLATE_PORTS = 52;
 
-export const SWITCH_2D_PORTS: Shape2dPort[] = [
+const SWITCH_2D_PORTS: Shape2dPort[] = [
   ...Array.from({ length: 8 }, (_, index) => {
     return {
       id: `port-top-${index + 1}`,
@@ -135,7 +129,7 @@ export const SWITCH_2D_PORTS: Shape2dPort[] = [
   })
 ];
 
-export const PC_2D_PORTS: Shape2dPort[] = [
+const PC_2D_PORTS: Shape2dPort[] = [
   {
     id: 'port-1',
     // Centered on bottom edge of the 1U square
@@ -145,7 +139,7 @@ export const PC_2D_PORTS: Shape2dPort[] = [
   }
 ];
 
-export const CAMERA_2D_PORTS: Shape2dPort[] = [
+const CAMERA_2D_PORTS: Shape2dPort[] = [
   {
     id: 'port-poe',
     tile: { x: 0, y: 3 },
@@ -155,14 +149,14 @@ export const CAMERA_2D_PORTS: Shape2dPort[] = [
 ];
 
 /** Footprint of 2D shapes in grid cells (for ports / connections later). */
-export const SHAPE_2D_SIZES: Record<string, Size> = {
+const SHAPE_2D_SIZES: Record<string, Size> = {
   [SHAPE_2D_SWITCH_ID]: SWITCH_2D_SIZE,
   [SHAPE_2D_PC_ID]: PC_2D_SIZE,
   [SHAPE_2D_CAMERA_ID]: { width: 6, height: 6 },
   [SHAPE_2D_CABINET_ID]: getCabinetSize(CABINET_DEFAULT_UNITS)
 };
 
-export const SHAPE_2D_PORTS: Record<string, Shape2dPort[]> = {
+const SHAPE_2D_PORTS: Record<string, Shape2dPort[]> = {
   [SHAPE_2D_SWITCH_ID]: SWITCH_2D_PORTS,
   [SHAPE_2D_PC_ID]: PC_2D_PORTS,
   [SHAPE_2D_CAMERA_ID]: CAMERA_2D_PORTS,
@@ -290,6 +284,8 @@ export const VIEW_DEFAULTS: Required<
   Omit<View, 'id' | 'description' | 'lastUpdated'>
 > = {
   name: 'Untitled view',
+  kind: 'PLAN_2D',
+  order: 0,
   items: [],
   connectors: [],
   rectangles: [],
@@ -328,8 +324,6 @@ export const RECTANGLE_DEFAULTS: Partial<
   Omit<Rectangle, 'id' | 'from' | 'to'>
 > = {};
 
-/** Zoom step as a fraction (0.1 = 10%). */
-export const ZOOM_INCREMENT = 0.1;
 export const MIN_ZOOM = 0.2;
 /** 2D plans need deeper zoom-out to fit cabinets / large footprints. */
 export const MIN_ZOOM_2D = 0.05;
@@ -403,7 +397,10 @@ export const INITIAL_SCENE_STATE = {
   textBoxes: {}
 };
 export const MAIN_MENU_OPTIONS: MainMenuOptions = [
+  'ACTION.NEW_PROJECT',
+  'ACTION.RENAME_PROJECT',
   'ACTION.OPEN',
+  'ACTION.SAVE_PROJECT',
   'EXPORT.JSON',
   'EXPORT.PNG',
   'ACTION.CLEAR_CANVAS',

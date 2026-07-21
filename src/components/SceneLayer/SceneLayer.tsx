@@ -1,6 +1,7 @@
 import React, { useRef } from 'react';
 import { Box, SxProps } from '@mui/material';
 import { useUiStateStore } from 'src/stores/uiStateStore';
+import { isPlanProjection } from 'src/utils';
 
 interface Props {
   children?: React.ReactNode;
@@ -21,7 +22,7 @@ export const SceneLayer = ({ children, order = 0, sx }: Props) => {
   const projectionMode = useUiStateStore((state) => {
     return state.projectionMode;
   });
-  const isTwoD = projectionMode === 'TWO_D';
+  const isTwoD = isPlanProjection(projectionMode);
 
   return (
     <Box

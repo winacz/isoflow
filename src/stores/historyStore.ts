@@ -1,7 +1,7 @@
 import { create } from 'zustand';
 import { Model } from 'src/types';
 
-const MAX_HISTORY = 5;
+const MAX_HISTORY = 25;
 
 interface HistoryStore {
   stack: Model[];

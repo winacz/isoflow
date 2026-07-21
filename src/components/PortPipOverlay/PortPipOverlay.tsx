@@ -11,14 +11,14 @@ import {
   getModelItemSize
 } from 'src/config';
 import { findPlanView, getDeviceTemplateLayout } from 'src/utils';
-import type { ModelItem, ViewItem } from 'src/types';
+import type { ModelItem, Rectangle, ViewItem } from 'src/types';
 
 /** Screen size of the PiP viewport (px). */
 const VIEWPORT_W = 420;
 const VIEWPORT_H = 320;
 /** World→screen scale — lower = more pulled back (neighbors visible). */
 const WORLD_ZOOM = 0.38;
-/** How far (tiles) around the peer to include neighbors. */
+/** How far (tiles) around the focus to include neighbors. */
 const NEIGHBOR_PAD_TILES = 14;
 /** Offset from cursor. */
 const CURSOR_GAP = 56;
@@ -26,6 +26,13 @@ const CURSOR_GAP = 56;
 type Footprint = {
   viewItem: ViewItem;
   modelItem: ModelItem;
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+};
+
+type FocusRect = {
   x: number;
   y: number;
   w: number;
@@ -51,10 +58,20 @@ const footprintOf = (
   };
 };
 
-const aabbsOverlap = (
-  a: { x: number; y: number; w: number; h: number },
-  b: { x: number; y: number; w: number; h: number }
-) => {
+const rectangleBounds = (rect: Rectangle): FocusRect => {
+  const minX = Math.min(rect.from.x, rect.to.x);
+  const maxX = Math.max(rect.from.x, rect.to.x);
+  const minY = Math.min(rect.from.y, rect.to.y);
+  const maxY = Math.max(rect.from.y, rect.to.y);
+  return {
+    x: minX,
+    y: minY,
+    w: maxX - minX + 1,
+    h: maxY - minY + 1
+  };
+};
+
+const aabbsOverlap = (a: FocusRect, b: FocusRect) => {
   return !(
     a.x + a.w < b.x ||
     b.x + b.w < a.x ||
@@ -63,9 +80,76 @@ const aabbsOverlap = (
   );
 };
 
+const collectNearbyNodes = ({
+  planItems,
+  modelItems,
+  search,
+  focusItemId,
+  focusViewItem,
+  focusModelItem
+}: {
+  planItems: ViewItem[];
+  modelItems: ModelItem[];
+  search: FocusRect;
+  focusItemId: string | null;
+  focusViewItem: ViewItem | null;
+  focusModelItem: ModelItem | null;
+}): Footprint[] => {
+  const byId = new Map<string, Footprint>();
+
+  const pushNode = (viewItem: ViewItem, modelItem: ModelItem) => {
+    if (!modelItem.icon || byId.has(viewItem.id)) return;
+    byId.set(viewItem.id, {
+      ...footprintOf(viewItem, modelItem),
+      viewItem,
+      modelItem
+    });
+  };
+
+  if (focusViewItem && focusModelItem) {
+    pushNode(focusViewItem, focusModelItem);
+    if (focusViewItem.parentId) {
+      const parentView = planItems.find((item) => {
+        return item.id === focusViewItem.parentId;
+      });
+      const parentModel = parentView
+        ? modelItems.find((item) => {
+            return item.id === parentView.id;
+          })
+        : undefined;
+      if (parentView && parentModel) {
+        pushNode(parentView, parentModel);
+      }
+    }
+  }
+
+  planItems.forEach((viewItem) => {
+    if (viewItem.parentId) return;
+    if (focusItemId && viewItem.id === focusItemId) return;
+
+    const modelItem = modelItems.find((item) => {
+      return item.id === viewItem.id;
+    });
+    if (!modelItem?.icon) return;
+
+    const fp = footprintOf(viewItem, modelItem);
+    if (!aabbsOverlap(fp, search)) return;
+    pushNode(viewItem, modelItem);
+  });
+
+  const nodes = Array.from(byId.values());
+  if (focusItemId) {
+    nodes.sort((a, b) => {
+      if (a.modelItem.id === focusItemId) return 1;
+      if (b.modelItem.id === focusItemId) return -1;
+      return 0;
+    });
+  }
+  return nodes;
+};
+
 /**
- * Picture-in-picture of the peer device (2Dv2).
- * Layout + all node types (PC, switch, cabinet, …) come from the Plan (2D) view.
+ * Picture-in-picture of a Plan peer (2Dv2 port) or portal target (isometric).
  */
 export const PortPipOverlay = () => {
   const hover = useUiStateStore((state) => {
@@ -81,13 +165,20 @@ export const PortPipOverlay = () => {
     return state.views;
   });
 
-  // PiP always mirrors Plan positions — 2Dv2 only has infrastructure.
-  const planItems = useMemo(() => {
-    return findPlanView(views)?.items ?? [];
+  const plan = useMemo(() => {
+    return findPlanView(views);
   }, [views]);
 
+  const planItems = useMemo(() => {
+    return plan?.items ?? [];
+  }, [plan]);
+
+  const planRectangles = useMemo(() => {
+    return plan?.rectangles ?? [];
+  }, [plan]);
+
   const peerViewItem = useMemo(() => {
-    if (!hover) return null;
+    if (!hover?.peerItemId) return null;
     return (
       planItems.find((item) => {
         return item.id === hover.peerItemId;
@@ -96,7 +187,7 @@ export const PortPipOverlay = () => {
   }, [hover, planItems]);
 
   const peer = useMemo(() => {
-    if (!hover) return null;
+    if (!hover?.peerItemId) return null;
     return (
       modelItems.find((item) => {
         return item.id === hover.peerItemId;
@@ -104,83 +195,75 @@ export const PortPipOverlay = () => {
     );
   }, [hover, modelItems]);
 
+  const peerRectangle = useMemo(() => {
+    if (!hover?.peerRectangleId) return null;
+    return (
+      planRectangles.find((rect) => {
+        return rect.id === hover.peerRectangleId;
+      }) ?? null
+    );
+  }, [hover, planRectangles]);
+
+  const focusRect = useMemo((): FocusRect | null => {
+    if (peer && peerViewItem) return footprintOf(peerViewItem, peer);
+    if (peerRectangle) return rectangleBounds(peerRectangle);
+    return null;
+  }, [peer, peerViewItem, peerRectangle]);
+
   const sceneNodes = useMemo((): Footprint[] => {
-    if (!peer || !peerViewItem) return [];
-
-    const peerFp = footprintOf(peerViewItem, peer);
+    if (!focusRect) return [];
     const search = {
-      x: peerFp.x - NEIGHBOR_PAD_TILES,
-      y: peerFp.y - NEIGHBOR_PAD_TILES,
-      w: peerFp.w + NEIGHBOR_PAD_TILES * 2,
-      h: peerFp.h + NEIGHBOR_PAD_TILES * 2
+      x: focusRect.x - NEIGHBOR_PAD_TILES,
+      y: focusRect.y - NEIGHBOR_PAD_TILES,
+      w: focusRect.w + NEIGHBOR_PAD_TILES * 2,
+      h: focusRect.h + NEIGHBOR_PAD_TILES * 2
     };
+    return collectNearbyNodes({
+      planItems,
+      modelItems,
+      search,
+      focusItemId: peer?.id ?? null,
+      focusViewItem: peerViewItem,
+      focusModelItem: peer
+    });
+  }, [focusRect, planItems, modelItems, peer, peerViewItem]);
 
-    const byId = new Map<string, Footprint>();
-
-    const pushNode = (viewItem: ViewItem, modelItem: ModelItem) => {
-      if (!modelItem.icon || byId.has(viewItem.id)) return;
-      byId.set(viewItem.id, {
-        ...footprintOf(viewItem, modelItem),
-        viewItem,
-        modelItem
-      });
+  const nearbyRectangles = useMemo(() => {
+    if (!focusRect) return [];
+    const search = {
+      x: focusRect.x - NEIGHBOR_PAD_TILES,
+      y: focusRect.y - NEIGHBOR_PAD_TILES,
+      w: focusRect.w + NEIGHBOR_PAD_TILES * 2,
+      h: focusRect.h + NEIGHBOR_PAD_TILES * 2
     };
-
-    // Always include the peer (even if mounted in a cabinet).
-    pushNode(peerViewItem, peer);
-
-    // If peer lives in a cabinet, show that cabinet for context.
-    if (peerViewItem.parentId) {
-      const parentView = planItems.find((item) => {
-        return item.id === peerViewItem.parentId;
-      });
-      const parentModel = parentView
-        ? modelItems.find((item) => {
-            return item.id === parentView.id;
-          })
-        : undefined;
-      if (parentView && parentModel) {
-        pushNode(parentView, parentModel);
-      }
-    }
-
-    planItems.forEach((viewItem) => {
-      // Neighbors: free-standing only (mounted devices show inside cabinets).
-      if (viewItem.parentId) return;
-      if (viewItem.id === peer.id) return;
-
-      const modelItem = modelItems.find((item) => {
-        return item.id === viewItem.id;
-      });
-      if (!modelItem?.icon) return;
-
-      const fp = footprintOf(viewItem, modelItem);
-      if (!aabbsOverlap(fp, search)) return;
-      pushNode(viewItem, modelItem);
+    return planRectangles.filter((rect) => {
+      return aabbsOverlap(rectangleBounds(rect), search);
     });
+  }, [focusRect, planRectangles]);
 
-    const nodes = Array.from(byId.values());
-    // Peer last so it paints on top of neighbors.
-    nodes.sort((a, b) => {
-      if (a.modelItem.id === peer.id) return 1;
-      if (b.modelItem.id === peer.id) return -1;
-      return 0;
-    });
+  const pipAllowed =
+    projectionMode === 'TWO_D_V2' || projectionMode === 'ISOMETRIC';
 
-    return nodes;
-  }, [peer, peerViewItem, planItems, modelItems]);
-
-  if (projectionMode !== 'TWO_D_V2' || !hover || !peer || !peerViewItem) {
+  if (!pipAllowed || !hover || !focusRect) {
     return null;
   }
 
-  const peerFp = footprintOf(peerViewItem, peer);
-  const peerCenterPx = {
-    x: (peerFp.x + peerFp.w / 2) * TILE_SIZE_2D,
-    y: (peerFp.y + peerFp.h / 2) * TILE_SIZE_2D
+  const focusCenterPx = {
+    x: (focusRect.x + focusRect.w / 2) * TILE_SIZE_2D,
+    y: (focusRect.y + focusRect.h / 2) * TILE_SIZE_2D
   };
 
   const peerPortHighlight = hover.peerPortId ? [hover.peerPortId] : null;
+  const titleName =
+    hover.title?.trim() ||
+    peer?.name ||
+    (peerRectangle
+      ? peerRectangle.name?.trim() ||
+        (peerRectangle.kind === 'building' ? 'Budynek' : 'Obszar')
+      : null) ||
+    'Cel';
+  const titlePrefix =
+    hover.hostPortId == null ? 'Portal' : 'Podłączone';
 
   const vw = typeof window !== 'undefined' ? window.innerWidth : 1200;
   const vh = typeof window !== 'undefined' ? window.innerHeight : 800;
@@ -222,7 +305,7 @@ export const PortPipOverlay = () => {
           px: 0.25
         }}
       >
-        Podłączone · {peer.name}
+        {titlePrefix} · {titleName}
         {hover.peerPortId ? ` · ${hover.peerPortId}` : ''}
       </Typography>
       <Box
@@ -237,7 +320,6 @@ export const PortPipOverlay = () => {
           overflow: 'hidden'
         }}
       >
-        {/* Zoomed-out Plan world: peer centered, all nearby nodes clipped at edges. */}
         <Box
           sx={{
             position: 'absolute',
@@ -246,11 +328,83 @@ export const PortPipOverlay = () => {
             width: VIEWPORT_W,
             height: VIEWPORT_H,
             transformOrigin: '0 0',
-            transform: `translate(${VIEWPORT_W / 2}px, ${VIEWPORT_H / 2}px) scale(${WORLD_ZOOM}) translate(${-peerCenterPx.x}px, ${-peerCenterPx.y}px)`
+            transform: `translate(${VIEWPORT_W / 2}px, ${VIEWPORT_H / 2}px) scale(${WORLD_ZOOM}) translate(${-focusCenterPx.x}px, ${-focusCenterPx.y}px)`
           }}
         >
+          {nearbyRectangles.map((rect) => {
+            const bounds = rectangleBounds(rect);
+            const isFocus = rect.id === hover.peerRectangleId;
+            const isBuilding = rect.kind === 'building';
+            const pxW = bounds.w * TILE_SIZE_2D;
+            const pxH = bounds.h * TILE_SIZE_2D;
+            const headerH = Math.max(28, Math.min(56, Math.round(pxH * 0.14)));
+            return (
+              <Box
+                key={rect.id}
+                sx={{
+                  position: 'absolute',
+                  left: bounds.x * TILE_SIZE_2D,
+                  top: bounds.y * TILE_SIZE_2D,
+                  width: pxW,
+                  height: pxH,
+                  opacity: isFocus ? 1 : 0.55,
+                  zIndex: isFocus ? 0 : 0,
+                  pointerEvents: 'none'
+                }}
+              >
+                {isBuilding && (
+                  <Box
+                    sx={{
+                      position: 'absolute',
+                      left: 0,
+                      right: 0,
+                      bottom: '100%',
+                      height: headerH,
+                      mb: `${Math.round(headerH * 0.15)}px`,
+                      bgcolor: rect.color ?? '#94a3b8',
+                      border: '2px solid #475569',
+                      borderBottom: 0,
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      px: 1,
+                      boxSizing: 'border-box'
+                    }}
+                  >
+                    <Typography
+                      sx={{
+                        fontSize: Math.max(14, Math.min(28, pxW * 0.08)),
+                        fontWeight: 700,
+                        color: '#0f172a',
+                        lineHeight: 1,
+                        whiteSpace: 'nowrap',
+                        overflow: 'hidden',
+                        textOverflow: 'ellipsis'
+                      }}
+                    >
+                      {rect.name?.trim() || 'Budynek'}
+                    </Typography>
+                  </Box>
+                )}
+                <Box
+                  sx={{
+                    width: '100%',
+                    height: '100%',
+                    bgcolor: rect.color ?? '#94a3b8',
+                    opacity: rect.opacity ?? 0.35,
+                    border: `2px solid ${isBuilding ? '#475569' : '#64748b'}`,
+                    boxSizing: 'border-box',
+                    boxShadow: isFocus
+                      ? '0 0 0 3px rgba(37, 99, 235, 0.45)'
+                      : undefined
+                  }}
+                />
+              </Box>
+            );
+          })}
+
           {sceneNodes.map(({ viewItem, modelItem, x, y, w, h }) => {
-            const isPeer = modelItem.id === peer.id;
+            const isPeer = peer ? modelItem.id === peer.id : false;
             const isCabinet = modelItem.icon === SHAPE_2D_CABINET_ID;
             const pxW = w * TILE_SIZE_2D;
             const pxH = h * TILE_SIZE_2D;
@@ -275,8 +429,8 @@ export const PortPipOverlay = () => {
                   top: y * TILE_SIZE_2D,
                   width: pxW,
                   height: pxH,
-                  opacity: isPeer ? 1 : 0.72,
-                  filter: isPeer ? undefined : 'saturate(0.85)',
+                  opacity: isPeer || !peer ? 1 : 0.72,
+                  filter: isPeer || !peer ? undefined : 'saturate(0.85)',
                   zIndex: isPeer ? 2 : 1
                 }}
               >

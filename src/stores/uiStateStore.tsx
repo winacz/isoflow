@@ -12,16 +12,17 @@ import {
 import {
   incrementZoom,
   decrementZoom,
-  zoomFromWheelDelta,
-  getScrollForZoomChange
+  createSmoothZoomController
 } from 'src/utils/zoom';
-import { UiStateStore, Coords } from 'src/types';
+import { UiStateStore } from 'src/types';
 import {
   INITIAL_UI_STATE,
   MIN_ZOOM,
   MIN_ZOOM_2D,
   MAX_ZOOM
 } from 'src/config';
+
+const smoothZoom = createSmoothZoomController();
 
 const initialState = () => {
   setSimplePathsEnabled(INITIAL_UI_STATE.simplePaths);
@@ -88,6 +89,7 @@ const initialState = () => {
             zoom: 1,
             viewTransformByMode: INITIAL_UI_STATE.viewTransformByMode
           });
+          smoothZoom.sync(1);
         },
         setMode: (mode) => {
           set({ mode });
@@ -104,44 +106,42 @@ const initialState = () => {
           });
         },
         incrementZoom: () => {
-          const { zoom, scroll, projectionMode } = get();
+          const { zoom, projectionMode } = get();
           const minZoom = isPlanProjection(projectionMode)
             ? MIN_ZOOM_2D
             : MIN_ZOOM;
           const next = incrementZoom(zoom, minZoom);
-          set({
-            zoom: next,
-            scroll: getScrollForZoomChange(zoom, next, scroll)
-          });
+          smoothZoom.sync(next);
+          set({ zoom: next });
         },
         decrementZoom: () => {
-          const { zoom, scroll, projectionMode } = get();
+          const { zoom, projectionMode } = get();
           const minZoom = isPlanProjection(projectionMode)
             ? MIN_ZOOM_2D
             : MIN_ZOOM;
           const next = decrementZoom(zoom, minZoom);
-          set({
-            zoom: next,
-            scroll: getScrollForZoomChange(zoom, next, scroll)
-          });
+          smoothZoom.sync(next);
+          set({ zoom: next });
         },
         setZoom: (zoom) => {
           const minZoom = isPlanProjection(get().projectionMode)
             ? MIN_ZOOM_2D
             : MIN_ZOOM;
           const next = clamp(zoom, minZoom, MAX_ZOOM);
+          smoothZoom.sync(next);
           set({ zoom: next });
         },
-        adjustZoomByWheel: (deltaY, deltaMode = 0, focalFromCenter) => {
-          const { zoom, scroll, projectionMode } = get();
+        adjustZoomByWheel: (deltaY, deltaMode = 0) => {
+          const { zoom, projectionMode } = get();
           const minZoom = isPlanProjection(projectionMode)
             ? MIN_ZOOM_2D
             : MIN_ZOOM;
-          const focal: Coords = focalFromCenter ?? { x: 0, y: 0 };
-          const next = zoomFromWheelDelta(zoom, deltaY, deltaMode, minZoom);
-          set({
-            zoom: next,
-            scroll: getScrollForZoomChange(zoom, next, scroll, focal)
+          smoothZoom.applyWheel(deltaY, deltaMode, {
+            zoom,
+            minZoom,
+            setZoom: (next) => {
+              set({ zoom: next });
+            }
           });
         },
         panByWheel: (deltaX, deltaY, deltaMode = 0) => {
@@ -308,6 +308,7 @@ const initialState = () => {
             scroll: restored.scroll,
             portPipHover: null
           });
+          smoothZoom.sync(restored.zoom);
         },
         setShowGrid: (showGrid) => {
           set({ showGrid });

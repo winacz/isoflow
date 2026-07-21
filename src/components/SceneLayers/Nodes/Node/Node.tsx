@@ -1,5 +1,5 @@
-import React, { useMemo } from 'react';
-import { Box, Typography, Stack } from '@mui/material';
+import React, { useCallback, useMemo } from 'react';
+import { Box, Link, Typography, Stack } from '@mui/material';
 import {
   PROJECTED_TILE_SIZE,
   DEFAULT_LABEL_HEIGHT,
@@ -8,16 +8,28 @@ import {
   getModelItemSize,
   isShape2dIcon
 } from 'src/config';
-import { getTilePosition, getShape2dCenterPosition, getMismatchPortIdsForItem, getPeerHighlightedPortIdsForItem, isPlanProjection, findPlanView } from 'src/utils';
+import {
+  getTilePosition,
+  getShape2dCenterPosition,
+  getMismatchPortIdsForItem,
+  getPeerHighlightedPortIdsForItem,
+  isPlanProjection,
+  findPlanView,
+  getPortalDisplayLabel,
+  planPortalJump,
+  CoordsUtils
+} from 'src/utils';
 import { useIcon } from 'src/hooks/useIcon';
 import { ViewItem } from 'src/types';
 import { useModelItem } from 'src/hooks/useModelItem';
 import { useScene } from 'src/hooks/useScene';
 import { ExpandableLabel } from 'src/components/Label/ExpandableLabel';
 import { MarkdownEditor } from 'src/components/MarkdownEditor/MarkdownEditor';
-import { useUiStateStore } from 'src/stores/uiStateStore';
+import { useUiStateStore, useUiStateStoreApi } from 'src/stores/uiStateStore';
 import { useModelStore } from 'src/stores/modelStore';
 import { useNodeDragStore } from 'src/stores/nodeDragStore';
+import { useView } from 'src/hooks/useView';
+import { useResizeObserver } from 'src/hooks/useResizeObserver';
 
 interface Props {
   node: ViewItem;
@@ -36,6 +48,9 @@ export const Node = React.memo(({
 }: Props) => {
   const modelItem = useModelItem(node.id);
   const { connectors: sceneConnectors } = useScene();
+  const model = useModelStore((state) => {
+    return state;
+  });
   const modelItems = useModelStore((state) => {
     return state.items;
   });
@@ -45,6 +60,15 @@ export const Node = React.memo(({
   const projectionMode = useUiStateStore((state) => {
     return state.projectionMode;
   });
+  const uiStateActions = useUiStateStore((state) => {
+    return state.actions;
+  });
+  const uiStateStoreApi = useUiStateStoreApi();
+  const rendererEl = useUiStateStore((state) => {
+    return state.rendererEl;
+  });
+  const { size: rendererSize } = useResizeObserver(rendererEl);
+  const { changeView } = useView();
 
   // 2Dv2 has no cables of its own — port link state comes from Plan connectors.
   const connectors = useMemo(() => {
@@ -158,7 +182,94 @@ export const Node = React.memo(({
   // description card (same ExpandableLabel UX as isometric).
   const showFloatingLabel = isPlanShape
     ? Boolean(description)
-    : Boolean(modelItem.name || description);
+    : Boolean(modelItem.name || description || modelItem.portal);
+
+  const portalLabel = useMemo(() => {
+    if (isTwoD || !modelItem.portal) return null;
+    return getPortalDisplayLabel(modelItem.portal, model);
+  }, [isTwoD, modelItem.portal, model]);
+
+  const onPortalClick = useCallback(
+    (event: React.MouseEvent) => {
+      event.preventDefault();
+      event.stopPropagation();
+      const portal = modelItem.portal;
+      if (!portal) return;
+
+      uiStateActions.setPortPipHover(null);
+
+      const jump = planPortalJump({
+        portal,
+        model,
+        rendererSize
+      });
+      if (!jump) return;
+
+      changeView(jump.planViewId, model);
+      uiStateActions.setProjectionMode('TWO_D');
+      uiStateActions.setZoom(jump.zoom);
+      uiStateActions.setScroll({
+        position: jump.scroll,
+        offset: CoordsUtils.zero()
+      });
+      uiStateActions.setMode({
+        type: 'CURSOR',
+        showCursor: true,
+        mousedownItem: null
+      });
+      uiStateActions.clearSelectedItemIds();
+
+      if (jump.select.type === 'ITEM') {
+        uiStateActions.setItemControls({ type: 'ITEM', id: jump.select.id });
+        uiStateActions.setSelectedItemIds([jump.select.id]);
+      } else {
+        uiStateActions.setItemControls({
+          type: 'RECTANGLE',
+          id: jump.select.id
+        });
+      }
+    },
+    [modelItem.portal, model, rendererSize, changeView, uiStateActions]
+  );
+
+  const onPortalMouseEnter = useCallback(
+    (event: React.MouseEvent) => {
+      const portal = modelItem.portal;
+      if (!portal || isTwoD) return;
+
+      uiStateActions.setPortPipHover({
+        hostItemId: node.id,
+        hostPortId: null,
+        peerItemId: portal.targetType === 'ITEM' ? portal.targetId : null,
+        peerPortId: null,
+        peerRectangleId:
+          portal.targetType === 'RECTANGLE' ? portal.targetId : null,
+        title: portalLabel ?? undefined,
+        screen: { x: event.clientX, y: event.clientY }
+      });
+    },
+    [modelItem.portal, isTwoD, node.id, portalLabel, uiStateActions]
+  );
+
+  const onPortalMouseMove = useCallback(
+    (event: React.MouseEvent) => {
+      if (!modelItem.portal || isTwoD) return;
+      const current = uiStateStoreApi.getState().portPipHover;
+      if (!current || current.hostItemId !== node.id) return;
+      uiStateActions.setPortPipHover({
+        ...current,
+        screen: { x: event.clientX, y: event.clientY }
+      });
+    },
+    [modelItem.portal, isTwoD, node.id, uiStateActions, uiStateStoreApi]
+  );
+
+  const onPortalMouseLeave = useCallback(() => {
+    const current = uiStateStoreApi.getState().portPipHover;
+    if (current?.hostItemId === node.id && current.hostPortId == null) {
+      uiStateActions.setPortPipHover(null);
+    }
+  }, [node.id, uiStateActions, uiStateStoreApi]);
 
   const labelAnchorBottom =
     isPlanShape && shapeSize
@@ -230,6 +341,37 @@ export const Node = React.memo(({
                   >
                     {modelItem.name}
                   </Typography>
+                )}
+                {portalLabel && (
+                  <Link
+                    component="button"
+                    type="button"
+                    underline="hover"
+                    onClick={onPortalClick}
+                    onMouseEnter={onPortalMouseEnter}
+                    onMouseMove={onPortalMouseMove}
+                    onMouseLeave={onPortalMouseLeave}
+                    onMouseDown={(event) => {
+                      event.stopPropagation();
+                    }}
+                    sx={{
+                      pointerEvents: 'auto',
+                      alignSelf: 'flex-start',
+                      fontSize: titleFontSize
+                        ? Math.max(10, titleFontSize - 1)
+                        : 12,
+                      fontWeight: 600,
+                      lineHeight: 1.2,
+                      color: 'primary.main',
+                      cursor: 'pointer',
+                      textAlign: 'left',
+                      border: 0,
+                      background: 'none',
+                      p: 0
+                    }}
+                  >
+                    → {portalLabel}
+                  </Link>
                 )}
                 {description && (
                   <MarkdownEditor

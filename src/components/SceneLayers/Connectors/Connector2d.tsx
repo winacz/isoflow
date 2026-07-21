@@ -262,7 +262,8 @@ export const Connector2d = memo(({
     }
   }, [connector.style, connectorWidthPx]);
 
-  const throughNodeDashArray = `${Math.max(1.5, connectorWidthPx * 0.55)}, ${Math.max(1.5, connectorWidthPx * 0.55)}`;
+  // Sparse dashes when the cable tunnels under a foreign node body.
+  const throughNodeDashArray = `${Math.max(4, connectorWidthPx * 1.35)}, ${Math.max(10, connectorWidthPx * 3.4)}`;
 
   const originPx = useMemo(() => {
     return {
@@ -301,6 +302,9 @@ export const Connector2d = memo(({
         ? 0.65
         : 0.45;
   const widthBoost = isHighlighted || connector.locked ? 1.55 : emphasize ? 1.25 : 1;
+  /** Extra fade for segments under nodes that are not cable endpoints. */
+  const throughNodeLineOpacity = lineOpacity * 0.28;
+  const throughNodeOutlineOpacity = outlineOpacity * 0.22;
 
   return (
     <Box
@@ -363,6 +367,12 @@ export const Connector2d = memo(({
             ? throughNodeDashArray
             : solidDashArray;
           const coreWidth = connectorWidthPx * widthBoost;
+          const runLineOpacity = run.throughNode
+            ? throughNodeLineOpacity
+            : lineOpacity;
+          const runOutlineOpacity = run.throughNode
+            ? throughNodeOutlineOpacity
+            : outlineOpacity;
 
           return (
             <g key={`${run.throughNode ? 'in' : 'out'}-${index}`}>
@@ -376,7 +386,7 @@ export const Connector2d = memo(({
                 }
                 strokeLinecap="butt"
                 strokeLinejoin="round"
-                strokeOpacity={outlineOpacity}
+                strokeOpacity={runOutlineOpacity}
                 strokeDasharray={dash}
                 fill="none"
               />
@@ -386,7 +396,7 @@ export const Connector2d = memo(({
                 strokeWidth={coreWidth}
                 strokeLinecap="butt"
                 strokeLinejoin="round"
-                strokeOpacity={lineOpacity}
+                strokeOpacity={runLineOpacity}
                 strokeDasharray={dash}
                 fill="none"
               />

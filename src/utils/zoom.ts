@@ -13,8 +13,8 @@ export const decrementZoom = (zoom: number, minZoom = MIN_ZOOM) => {
 
 /**
  * Keep the world point under `focalFromCenter` fixed when zoom changes.
- * SceneLayer sits at the viewport center, so focal is mouse/screen offset
- * from that center (0,0 = zoom around the middle of the canvas).
+ * Kept for callers that need zoom-to-point; default 2D zoom leaves scroll alone
+ * so zooming out does not pull the map toward the viewport center.
  */
 export const getScrollForZoomChange = (
   oldZoom: number,
@@ -27,19 +27,15 @@ export const getScrollForZoomChange = (
   const ratio = newZoom / oldZoom;
   return {
     position: {
-      x:
-        focalFromCenter.x -
-        (focalFromCenter.x - scroll.position.x) * ratio,
-      y:
-        focalFromCenter.y -
-        (focalFromCenter.y - scroll.position.y) * ratio
+      x: focalFromCenter.x - (focalFromCenter.x - scroll.position.x) * ratio,
+      y: focalFromCenter.y - (focalFromCenter.y - scroll.position.y) * ratio
     },
     offset: scroll.offset
   };
 };
 
 /**
- * Apply one wheel event to a zoom value (instant — no smoothing).
+ * Apply one wheel event to a zoom value.
  * Mouse notches (±100/120) are softened; trackpad micro-deltas stay fine-grained.
  */
 export const zoomFromWheelDelta = (
@@ -60,6 +56,79 @@ export const zoomFromWheelDelta = (
   return clamp(zoom * factor, minZoom, MAX_ZOOM);
 };
 
+type ZoomSetter = (zoom: number) => void;
+
+/**
+ * Smooth zoom controller: wheel updates a target; rAF lerps the displayed zoom.
+ * Avoids discrete notch jumps on physical mouse wheels.
+ */
+export const createSmoothZoomController = () => {
+  let target: number | null = null;
+  let current = 1;
+  let minZoom = MIN_ZOOM;
+  let rafId = 0;
+  let setZoom: ZoomSetter | null = null;
+
+  const stop = () => {
+    if (rafId) {
+      cancelAnimationFrame(rafId);
+      rafId = 0;
+    }
+  };
+
+  const tick = () => {
+    rafId = 0;
+    if (target === null || !setZoom) return;
+
+    const diff = target - current;
+    if (Math.abs(diff) < 0.0008) {
+      current = target;
+      setZoom(current);
+      target = null;
+      return;
+    }
+
+    // Ease toward target — feels continuous even on notch wheels
+    current += diff * 0.28;
+    setZoom(current);
+    rafId = requestAnimationFrame(tick);
+  };
+
+  return {
+    /** Keep controller in sync when zoom is set externally (fit, buttons, etc.). */
+    sync(zoom: number) {
+      current = zoom;
+      if (target === null) return;
+      target = zoom;
+    },
+
+    applyWheel(
+      deltaY: number,
+      deltaMode: number,
+      opts: {
+        zoom: number;
+        minZoom: number;
+        setZoom: ZoomSetter;
+      }
+    ) {
+      setZoom = opts.setZoom;
+      minZoom = opts.minZoom;
+      if (target === null) {
+        current = opts.zoom;
+        target = opts.zoom;
+      }
+
+      target = zoomFromWheelDelta(target, deltaY, deltaMode, minZoom);
+
+      if (!rafId) {
+        rafId = requestAnimationFrame(tick);
+      }
+    },
+
+    dispose: stop
+  };
+};
+
 /**
  * Pinch-zoom (ctrl/meta + wheel) or discrete mouse-wheel notches → zoom.
  * Continuous trackpad two-finger scroll → pan instead (2D only).
@@ -69,10 +138,29 @@ export const isWheelZoomGesture = (e: {
   metaKey: boolean;
   deltaX: number;
   deltaY: number;
+  deltaMode?: number;
 }): boolean => {
   // Safari / Chrome report trackpad pinch as wheel + ctrlKey
   if (e.ctrlKey || e.metaKey) return true;
-  // Classic mouse wheel: large vertical steps, no horizontal
-  if (Math.abs(e.deltaX) < 0.5 && Math.abs(e.deltaY) >= 40) return true;
+
+  const deltaMode = e.deltaMode ?? 0;
+  // Line/page modes come from mouse wheels / legacy devices
+  if (deltaMode === 1 || deltaMode === 2) return true;
+
+  const ax = Math.abs(e.deltaX);
+  const ay = Math.abs(e.deltaY);
+  // Any horizontal component → trackpad pan, not zoom
+  if (ax > 0.5) return false;
+
+  // Pixel-mode mouse wheels report quantized notches (±100 / ±120 / ±150).
+  // Trackpad flicks are rarely exact — keep those as pan.
+  if (
+    Math.abs(ay - 100) < 0.51 ||
+    Math.abs(ay - 120) < 0.51 ||
+    Math.abs(ay - 150) < 0.51
+  ) {
+    return true;
+  }
+
   return false;
 };

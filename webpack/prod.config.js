@@ -26,7 +26,15 @@ module.exports = {
       commonjs2: 'react-dom',
       amd: 'ReactDOM',
       root: 'ReactDOM'
-    }
+    },
+    '@mui/material': 'commonjs2 @mui/material',
+    '@mui/icons-material': 'commonjs2 @mui/icons-material',
+    '@emotion/react': 'commonjs2 @emotion/react',
+    '@emotion/styled': 'commonjs2 @emotion/styled',
+    zustand: 'commonjs2 zustand',
+    immer: 'commonjs2 immer',
+    paper: 'commonjs2 paper',
+    gsap: 'commonjs2 gsap'
   },
   module: {
     rules: [

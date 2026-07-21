@@ -224,14 +224,20 @@ export interface UiState {
    */
   portAttention: { itemId: string; portId: string; token: number } | null;
   /**
-   * 2Dv2: port under cursor → picture-in-picture of the peer device
-   * connected on the Plan topology.
+   * Picture-in-picture hover:
+   * - 2Dv2 port → peer device on Plan
+   * - isometric portal link → Plan item / building
    */
   portPipHover: {
     hostItemId: string;
-    hostPortId: string;
-    peerItemId: string;
+    hostPortId: string | null;
+    /** Plan device in the PiP (null when target is a rectangle/building). */
+    peerItemId: string | null;
     peerPortId: string | null;
+    /** Plan rectangle / building in the PiP. */
+    peerRectangleId: string | null;
+    /** Optional card title override. */
+    title?: string;
     screen: Coords;
   } | null;
   contextMenu: ContextMenu | null;
@@ -283,13 +289,8 @@ export interface UiStateActions {
   setIsMainMenuOpen: (isOpen: boolean) => void;
   setDialog: (dialog: keyof typeof DialogTypeEnum | null) => void;
   setZoom: (zoom: number) => void;
-  /** Continuous zoom from mouse wheel / trackpad pinch.
-   *  `focalFromCenter` = cursor offset from the viewport center (keeps that point fixed). */
-  adjustZoomByWheel: (
-    deltaY: number,
-    deltaMode?: number,
-    focalFromCenter?: Coords
-  ) => void;
+  /** Continuous zoom from mouse wheel / trackpad pinch (scroll stays put). */
+  adjustZoomByWheel: (deltaY: number, deltaMode?: number) => void;
   /** Pan canvas from trackpad two-finger scroll / mouse wheel tilt. */
   panByWheel: (deltaX: number, deltaY: number, deltaMode?: number) => void;
   setScroll: (scroll: Scroll) => void;

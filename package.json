@@ -15,8 +15,8 @@
     "dev": "nodemon --watch ./src/ -e ts,tsx --exec npm run build",
     "build": "webpack --config ./webpack/prod.config.js && tsc --declaration --emitDeclarationOnly && tsc-alias",
     "test": "jest",
-    "lint": "tsc --noEmit && eslint ./src/**/* --ext .ts,.tsx",
-    "lint:fix": "eslint --fix ./src/**/* --ext .ts,.tsx",
+    "lint": "tsc --noEmit && eslint \"src/**/*.{ts,tsx}\"",
+    "lint:fix": "eslint --fix \"src/**/*.{ts,tsx}\"",
     "docker:build": "webpack --config ./webpack/docker.config.js"
   },
   "devDependencies": {
@@ -76,15 +76,14 @@
     "file-saver": "^2.0.5",
     "gsap": "^3.11.4",
     "immer": "^10.0.2",
-    "isoflow": "^0.3.30",
     "mui-color-input": "^2.0.3",
     "paper": "^0.12.17",
     "pathfinding": "^0.4.18",
     "react-hook-form": "^7.43.2",
     "react-quill": "^2.0.0",
     "react-router-dom": "^6.8.1",
-    "uuid": "^14.0.1",
-    "zod": "^3.25.76",
+    "uuid": "^10.0.0",
+    "zod": "^3.23.8",
     "zustand": "^4.3.3"
   },
   "peerDependencies": {

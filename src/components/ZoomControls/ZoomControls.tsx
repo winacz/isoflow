@@ -13,6 +13,7 @@ import { IconButton } from 'src/components/IconButton/IconButton';
 import { MAX_ZOOM, MIN_ZOOM, MIN_ZOOM_2D } from 'src/config';
 import { useUiStateStore } from 'src/stores/uiStateStore';
 import { useDiagramUtils } from 'src/hooks/useDiagramUtils';
+import { isPlanProjection } from 'src/utils';
 
 export const ZoomControls = () => {
   const uiStateStoreActions = useUiStateStore((state) => {
@@ -28,7 +29,7 @@ export const ZoomControls = () => {
     return state.projectionMode;
   });
   const { fitToView } = useDiagramUtils();
-  const minZoom = projectionMode === 'TWO_D' ? MIN_ZOOM_2D : MIN_ZOOM;
+  const minZoom = isPlanProjection(projectionMode) ? MIN_ZOOM_2D : MIN_ZOOM;
 
   return (
     <Stack direction="row" spacing={1}>

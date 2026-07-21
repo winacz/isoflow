@@ -1945,3 +1945,446 @@ export const diagonalFanShape2dRoutes = ({
   return routes;
 };
 
+export interface GraphAnalysis {
+  adjacency: Map<string, Set<string>>;
+  edges: Map<string, [string, string]>;
+  degree: Map<string, number>;
+  hubs: Set<string>;
+  rectMembership: Map<string, string | null>;
+  rectGroups: Map<string, string[]>;
+  freeNodes: string[];
+}
+
+/**
+ * Analyzes the layout graph to determine adjacency, node degrees, hubs, and rectangle memberships.
+ */
+export const analyzeGraph = ({ selectedItems, allItems, modelItems, connectors, rectangles }: {
+  selectedItems: ViewItem[];
+  allItems: ViewItem[];
+  modelItems: { id: string; icon?: string }[];
+  connectors: TidyConnector[];
+  rectangles: { id: string; from: Coords; to: Coords }[];
+}): GraphAnalysis => {
+  const adjacency = new Map<string, Set<string>>();
+  const edgesMap = new Map<string, [string, string]>();
+  const degree = new Map<string, number>();
+  const hubs = new Set<string>();
+  const rectMembership = new Map<string, string | null>();
+  const rectGroups = new Map<string, string[]>();
+  const freeNodes: string[] = [];
+
+  const selectedSet = new Set(selectedItems.map((i) => i.id));
+
+  selectedItems.forEach((i) => {
+    adjacency.set(i.id, new Set());
+    degree.set(i.id, 0);
+  });
+
+  connectors.forEach((conn) => {
+    const validAnchors = conn.anchors.filter((a) => a.ref.item);
+    if (validAnchors.length >= 2) {
+      const aId = validAnchors[0].ref.item!;
+      const bId = validAnchors[1].ref.item!;
+
+      edgesMap.set(conn.id, [aId, bId]);
+
+      if (selectedSet.has(aId)) {
+        adjacency.get(aId)?.add(bId);
+        degree.set(aId, (degree.get(aId) || 0) + 1);
+      }
+      if (selectedSet.has(bId)) {
+        adjacency.get(bId)?.add(aId);
+        degree.set(bId, (degree.get(bId) || 0) + 1);
+      }
+    }
+  });
+
+  const degrees = Array.from(degree.values()).sort((a, b) => a - b);
+  const median = degrees[Math.floor(degrees.length / 2)] || 0;
+
+  selectedItems.forEach((item) => {
+    const model = modelItems.find((m) => m.id === item.id);
+    const isHub = model?.icon === SHAPE_2D_SWITCH_ID || (degree.get(item.id) || 0) > median + 1;
+    if (isHub) hubs.add(item.id);
+  });
+
+  selectedItems.forEach((item) => {
+    let memberOf: string | null = null;
+    const footprint = getFootprint(item, modelItems);
+    const cx = footprint.tile.x + footprint.width / 2;
+    const cy = footprint.tile.y + footprint.height / 2;
+
+    for (const rect of rectangles) {
+      const minX = Math.min(rect.from.x, rect.to.x);
+      const maxX = Math.max(rect.from.x, rect.to.x);
+      const minY = Math.min(rect.from.y, rect.to.y);
+      const maxY = Math.max(rect.from.y, rect.to.y);
+
+      if (cx >= minX && cx <= maxX && cy >= minY && cy <= maxY) {
+        memberOf = rect.id;
+        break;
+      }
+    }
+
+    rectMembership.set(item.id, memberOf);
+
+    if (memberOf) {
+      const group = rectGroups.get(memberOf) || [];
+      group.push(item.id);
+      rectGroups.set(memberOf, group);
+    } else {
+      freeNodes.push(item.id);
+    }
+  });
+
+  return { adjacency, edges: edgesMap, degree, hubs, rectMembership, rectGroups, freeNodes };
+};
+
+/**
+ * Places nodes smartly, breaking them into layers and ordering them to minimize crossings.
+ */
+export const smartPlaceNodes = ({ graph, selectedItems, allItems, modelItems }: {
+  graph: GraphAnalysis;
+  selectedItems: ViewItem[];
+  allItems: ViewItem[];
+  modelItems: { id: string; icon?: string }[];
+}): Record<string, Coords> => {
+  const result: Record<string, Coords> = {};
+  const selectedMap = new Map(selectedItems.map((i) => [i.id, i]));
+  
+  const allGroups: { rectId: string | null; nodes: string[] }[] = Array.from(graph.rectGroups.keys()).map(id => ({ rectId: id, nodes: graph.rectGroups.get(id)! }));
+  if (graph.freeNodes.length > 0) {
+    allGroups.push({ rectId: null, nodes: graph.freeNodes });
+  }
+
+  const footprintCache = new Map<string, Footprint>();
+  selectedItems.forEach(i => footprintCache.set(i.id, getFootprint(i, modelItems)));
+
+  for (const group of allGroups) {
+    if (group.nodes.length === 0) continue;
+
+    let hubId = group.nodes.find(n => graph.hubs.has(n));
+    if (!hubId) {
+      hubId = group.nodes.reduce((a, b) => (graph.degree.get(a) || 0) > (graph.degree.get(b) || 0) ? a : b, group.nodes[0]);
+    }
+
+    let layers: string[][] = [[hubId]];
+    const visited = new Set<string>([hubId]);
+    let currentQueue = [hubId];
+    
+    while (currentQueue.length > 0) {
+      const nextQueue: string[] = [];
+      for (const nodeId of currentQueue) {
+        const neighbors = graph.adjacency.get(nodeId) || new Set();
+        for (const neighbor of neighbors) {
+          if (group.nodes.includes(neighbor) && !visited.has(neighbor)) {
+            visited.add(neighbor);
+            nextQueue.push(neighbor);
+          }
+        }
+      }
+      if (nextQueue.length > 0) {
+        layers.push(nextQueue);
+      }
+      currentQueue = nextQueue;
+    }
+    
+    const unvisited = group.nodes.filter(n => !visited.has(n));
+    if (unvisited.length > 0) {
+      layers.push(unvisited);
+    }
+
+    // Split long layers to prevent very wide flat rows
+    const newLayers: string[][] = [];
+    for (const l of layers) {
+      for (let i = 0; i < l.length; i += 6) {
+        newLayers.push(l.slice(i, i + 6));
+      }
+    }
+    layers = newLayers;
+
+    for (let pass = 0; pass < 3; pass++) {
+      for (let l = 1; l < layers.length; l++) {
+        const prevLayer = layers[l - 1];
+        layers[l].sort((a, b) => {
+          const avgA = getAvgPos(a, prevLayer, graph.adjacency);
+          const avgB = getAvgPos(b, prevLayer, graph.adjacency);
+          return avgA - avgB;
+        });
+      }
+    }
+
+    let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+    group.nodes.forEach(id => {
+      const i = selectedMap.get(id);
+      if (i) {
+        minX = Math.min(minX, i.tile.x);
+        maxX = Math.max(maxX, i.tile.x);
+        minY = Math.min(minY, i.tile.y);
+        maxY = Math.max(maxY, i.tile.y);
+      }
+    });
+    
+    // Anchor to the root hub to prevent vertical drifting on multiple clicks
+    const rootId = layers[0][0];
+    const rootItem = selectedMap.get(rootId);
+    let cx = rootItem ? rootItem.tile.x : 0;
+    let cy = rootItem ? rootItem.tile.y : 0;
+    if (!rootItem && group.nodes.length > 0) {
+      cx = Math.round((minX + maxX) / 2);
+      cy = Math.round((minY + maxY) / 2);
+    }
+
+    let gap = SHAPE_2D_LAYOUT_GAP;
+    if (group.rectId !== null) {
+      const maxNodesInLayer = Math.max(...layers.map(l => l.length));
+      const estWidth = maxNodesInLayer * (2 + gap);
+      const estHeight = layers.length * (2 + gap);
+      const rectWidth = maxX - minX;
+      const rectHeight = maxY - minY;
+      if (rectWidth > 0 && rectHeight > 0 && (estWidth > rectWidth || estHeight > rectHeight)) {
+        gap = 1;
+      }
+    }
+
+    const groupResult: Record<string, Coords> = {};
+    let currentY = cy;
+
+    for (const layer of layers) {
+      let rowWidth = 0;
+      layer.forEach(nodeId => {
+        const fp = footprintCache.get(nodeId);
+        rowWidth += (fp ? fp.width : 2) + gap;
+      });
+      rowWidth -= gap;
+      
+      let currentX = cx - Math.floor(rowWidth / 2);
+      let maxH = 0;
+      
+      for (const nodeId of layer) {
+        groupResult[nodeId] = { x: currentX, y: currentY };
+        const fp = footprintCache.get(nodeId);
+        const w = fp ? fp.width : 2;
+        const h = fp ? fp.height : 2;
+        currentX += w + gap;
+        if (h > maxH) maxH = h;
+      }
+      currentY += maxH + gap;
+    }
+
+    const rootPos = groupResult[rootId];
+    if (rootPos) {
+      const dx = cx - rootPos.x;
+      const dy = cy - rootPos.y;
+      for (const id in groupResult) {
+        groupResult[id].x += dx;
+        groupResult[id].y += dy;
+      }
+    }
+
+    const footprints = Object.entries(groupResult).map(([id, pos]) => {
+      const orig = footprintCache.get(id)!;
+      return { id, tile: pos, width: orig.width, height: orig.height };
+    });
+
+    let offsetX = 0, offsetY = 0;
+    const excludeIds = group.nodes;
+
+    for (let step = 0; step < 40; step++) {
+      if (step > 0) {
+        const n = Math.ceil(Math.sqrt(step));
+        offsetX = (step % 2 === 0 ? n : -n) * 2;
+        offsetY = (step % 3 === 0 ? n : -n) * 2;
+      }
+      
+      const testFootprints = footprints.map(f => ({ ...f, tile: { x: f.tile.x + offsetX, y: f.tile.y + offsetY } }));
+      const targs: Record<string, Coords> = {};
+      testFootprints.forEach(f => targs[f.id] = f.tile);
+      const isFree = placementsFree({ targets: targs, footprints: testFootprints, items: allItems, modelItems, excludeItemIds: excludeIds });
+      
+      if (isFree) {
+        break;
+      }
+    }
+
+    for (const [id, pos] of Object.entries(groupResult)) {
+      const finalX = pos.x + offsetX;
+      const finalY = pos.y + offsetY;
+      const origItem = selectedMap.get(id);
+      if (origItem && (origItem.tile.x !== finalX || origItem.tile.y !== finalY)) {
+        result[id] = { x: finalX, y: finalY };
+      }
+    }
+  }
+
+  return result;
+};
+
+function getAvgPos(nodeId: string, prevLayer: string[], adjacency: Map<string, Set<string>>) {
+  const neighbors = adjacency.get(nodeId);
+  if (!neighbors) return 0;
+  let sum = 0, count = 0;
+  for (let i = 0; i < prevLayer.length; i++) {
+    if (neighbors.has(prevLayer[i])) {
+      sum += i;
+      count++;
+    }
+  }
+  return count === 0 ? 0 : sum / count;
+}
+
+/**
+ * Routes cables using orthogonal channels around node footprints.
+ */
+export const channelRoute = ({ selectedItems, allItems, modelItems, connectors }: {
+  selectedItems: ViewItem[];
+  allItems: ViewItem[];
+  modelItems: { id: string; icon?: string }[];
+  connectors: TidyConnector[];
+}): Record<string, Coords[]> => {
+  const routes: Record<string, Coords[]> = {};
+  
+  const obstacleSet = new Set<string>();
+  const portSet = new Set<string>();
+
+  allItems.forEach(item => {
+    const fp = getFootprint(item, modelItems);
+    for (let x = 0; x < fp.width; x++) {
+      for (let y = 0; y < fp.height; y++) {
+        obstacleSet.add(`${fp.tile.x + x},${fp.tile.y + y}`);
+      }
+    }
+    
+    const model = modelItems.find(m => m.id === item.id);
+    if (model && model.icon) {
+      const ports = getShape2dPorts(model.icon);
+      ports.forEach(p => {
+        const px = fp.tile.x + p.tile.x;
+        const py = fp.tile.y + p.tile.y;
+        portSet.add(`${px},${py}`);
+      });
+    }
+  });
+
+  portSet.forEach(p => obstacleSet.delete(p));
+  const isObstacle = (x: number, y: number) => obstacleSet.has(`${x},${y}`);
+
+  const selectedIds = new Set(selectedItems.map(i => i.id));
+  const validConns = connectors.filter(c => {
+    const refs = c.anchors.map(a => a.ref.item).filter(Boolean) as string[];
+    if (refs.length < 2) return false;
+    return selectedIds.has(refs[0]) || selectedIds.has(refs[1]);
+  });
+
+  const getPortCoords = (itemId: string, portId?: string): Coords | null => {
+    const item = allItems.find(i => i.id === itemId);
+    if (!item) return null;
+    const model = modelItems.find(m => m.id === item.id);
+    if (!model || !model.icon) {
+      const fp = getFootprint(item, modelItems);
+      return { x: fp.tile.x + Math.floor(fp.width/2), y: fp.tile.y + Math.floor(fp.height/2) };
+    }
+    const ports = getShape2dPorts(model.icon);
+    let p = ports.find(p => p.id === portId);
+    if (!p && ports.length > 0) p = ports[0];
+    const fp = getFootprint(item, modelItems);
+    if (p) {
+      return { x: fp.tile.x + p.tile.x, y: fp.tile.y + p.tile.y };
+    }
+    return { x: fp.tile.x + Math.floor(fp.width/2), y: fp.tile.y + Math.floor(fp.height/2) };
+  };
+
+  type CableTask = { c: TidyConnector; p0: Coords; p1: Coords; hubId: string };
+  const iconById = new Map(modelItems.map(m => [m.id, m.icon]));
+  const isSwitch = (id: string) => iconById.get(id) === SHAPE_2D_SWITCH_ID;
+
+  const connData: CableTask[] = validConns.map(c => {
+    const a0 = c.anchors[0].ref;
+    const a1 = c.anchors[1].ref;
+    const p0 = getPortCoords(a0.item!, a0.port);
+    const p1 = getPortCoords(a1.item!, a1.port);
+    if (!p0 || !p1) return null;
+    let hubId = a0.item!;
+    if (isSwitch(a1.item!) && !isSwitch(a0.item!)) hubId = a1.item!;
+    return { c, p0, p1, hubId };
+  }).filter(Boolean) as CableTask[];
+
+  const groups = new Map<string, CableTask[]>();
+  connData.forEach(task => {
+    const arr = groups.get(task.hubId) || [];
+    arr.push(task);
+    groups.set(task.hubId, arr);
+  });
+
+  const usedEdges = new Set<string>();
+
+  const checkPathCollision = (path: Coords[]) => {
+    for (const p of path) {
+      if (isObstacle(p.x, p.y)) return true;
+    }
+    return false;
+  };
+
+  const buildLaneRoute = (start: Coords, end: Coords, laneIndex: number, maxLanes: number): Coords[] => {
+    // Determine vertical direction from start to end
+    const dirY = end.y >= start.y ? 1 : -1;
+    // Lane Y is assigned sequentially away from the destination node port 
+    const laneY = end.y + (dirY * (laneIndex + 1));
+    
+    const path: Coords[] = [{...start}];
+    let cur = {...start};
+    
+    // Go vertical to lane
+    let guard = 0;
+    while (cur.y !== laneY && guard < 800) {
+       cur.y += Math.sign(laneY - cur.y);
+       path.push({...cur});
+       guard++;
+    }
+    
+    // Go horizontal to destination column
+    while (cur.x !== end.x && guard < 800) {
+       cur.x += Math.sign(end.x - cur.x);
+       path.push({...cur});
+       guard++;
+    }
+    
+    // Go vertical to destination port
+    while (cur.y !== end.y && guard < 800) {
+       cur.y += Math.sign(end.y - cur.y);
+       path.push({...cur});
+       guard++;
+    }
+
+    return cleanRouteTiles(path);
+  };
+
+  groups.forEach((tasks, hubId) => {
+    // Sort tasks by Manhattan distance to minimize crossings
+    tasks.sort((a, b) => {
+      const distA = Math.abs(a.p0.x - a.p1.x) + Math.abs(a.p0.y - a.p1.y);
+      const distB = Math.abs(b.p0.x - b.p1.x) + Math.abs(b.p0.y - b.p1.y);
+      return distA - distB;
+    });
+
+    tasks.forEach((task, index) => {
+      let bestPath = buildLaneRoute(task.p0, task.p1, index, tasks.length);
+      
+      // If collision or busy edge, bump the lane further out
+      if (checkPathCollision(bestPath) || pathUsesBusyEdge(bestPath, usedEdges)) {
+        for (let extra = 1; extra <= tasks.length + 20; extra++) {
+           const cand = buildLaneRoute(task.p0, task.p1, index + extra, tasks.length);
+           if (!checkPathCollision(cand) && !pathUsesBusyEdge(cand, usedEdges)) {
+             bestPath = cand;
+             break;
+           }
+        }
+      }
+
+      markPathEdges(bestPath, usedEdges);
+      routes[task.c.id] = pathBendWaypoints(bestPath);
+    });
+  });
+
+  return routes;
+};

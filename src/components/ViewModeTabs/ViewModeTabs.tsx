@@ -1,40 +1,27 @@
-import React, { useCallback } from 'react';
-import { Button, Stack } from '@mui/material';
+import React, { useCallback, useMemo } from 'react';
+import { Button, IconButton, Stack, Tooltip } from '@mui/material';
+import { Add as AddIcon } from '@mui/icons-material';
 import { useUiStateStore } from 'src/stores/uiStateStore';
 import { useModelStore, useModelStoreApi } from 'src/stores/modelStore';
 import { useView } from 'src/hooks/useView';
-import { ProjectionMode, ProjectionModeEnum } from 'src/types';
 import { UiElement } from 'src/components/UiElement/UiElement';
 import {
-  ISOMETRIC_VIEW_NAME,
-  PLAN_2D_VIEW_NAME,
-  PLAN_2D_V2_VIEW_NAME,
+  ViewKind,
+  ViewKindEnum,
   build2Dv2SnapshotFromPlan,
+  createPlan2dTab,
   findPlanView,
-  findPlan2Dv2View
+  findPlan2Dv2View,
+  getProjectTabs,
+  projectionModeForKind
 } from 'src/utils';
-
-const TABS: { mode: ProjectionMode; label: string; viewName: string }[] = [
-  {
-    mode: ProjectionModeEnum.ISOMETRIC,
-    label: 'Isometric',
-    viewName: ISOMETRIC_VIEW_NAME
-  },
-  {
-    mode: ProjectionModeEnum.TWO_D,
-    label: '2D',
-    viewName: PLAN_2D_VIEW_NAME
-  },
-  {
-    mode: ProjectionModeEnum.TWO_D_V2,
-    label: '2Dv2',
-    viewName: PLAN_2D_V2_VIEW_NAME
-  }
-];
 
 export const ViewModeTabs = () => {
   const projectionMode = useUiStateStore((state) => {
     return state.projectionMode;
+  });
+  const activeViewId = useUiStateStore((state) => {
+    return state.view;
   });
   const uiStateActions = useUiStateStore((state) => {
     return state.actions;
@@ -43,7 +30,14 @@ export const ViewModeTabs = () => {
   const modelActions = useModelStore((state) => {
     return state.actions;
   });
+  const views = useModelStore((state) => {
+    return state.views;
+  });
   const { changeView } = useView();
+
+  const tabs = useMemo(() => {
+    return getProjectTabs(views);
+  }, [views]);
 
   const sync2Dv2FromPlan = useCallback(() => {
     const model = modelStore.getState();
@@ -71,18 +65,29 @@ export const ViewModeTabs = () => {
     return { ...model, views: nextViews };
   }, [modelStore, modelActions]);
 
-  const onSelectMode = useCallback(
-    (mode: ProjectionMode, viewName: string) => {
-      if (mode === projectionMode) return;
+  const resetInteraction = useCallback(() => {
+    uiStateActions.setItemControls(null);
+    uiStateActions.setPortPipHover(null);
+    uiStateActions.setMode({
+      type: 'CURSOR',
+      showCursor: true,
+      mousedownItem: null
+    });
+  }, [uiStateActions]);
+
+  const onSelectTab = useCallback(
+    (viewId: string, kind: ViewKind) => {
+      const mode = projectionModeForKind(kind);
+      if (mode === projectionMode && viewId === activeViewId) return;
 
       let nextModel = modelStore.getState();
 
-      if (mode === ProjectionModeEnum.TWO_D_V2) {
+      if (kind === ViewKindEnum.PLAN_2D_V2) {
         nextModel = sync2Dv2FromPlan() ?? nextModel;
       }
 
       const targetView = nextModel.views.find((view) => {
-        return view.name === viewName;
+        return view.id === viewId;
       });
 
       if (targetView) {
@@ -90,33 +95,48 @@ export const ViewModeTabs = () => {
       }
 
       uiStateActions.setProjectionMode(mode);
-      uiStateActions.setItemControls(null);
-      uiStateActions.setPortPipHover(null);
-      uiStateActions.setMode({
-        type: 'CURSOR',
-        showCursor: true,
-        mousedownItem: null
-      });
+      resetInteraction();
 
-      if (mode === ProjectionModeEnum.TWO_D_V2 && nextModel.views.length > 0) {
+      if (kind === ViewKindEnum.PLAN_2D_V2) {
         uiStateActions.setZoom(1);
       }
     },
-    [projectionMode, uiStateActions, modelStore, changeView, sync2Dv2FromPlan]
+    [
+      projectionMode,
+      activeViewId,
+      uiStateActions,
+      modelStore,
+      changeView,
+      sync2Dv2FromPlan,
+      resetInteraction
+    ]
   );
+
+  const onAddPlan2dTab = useCallback(() => {
+    const model = modelStore.getState();
+    const label = window.prompt('Nazwa nowej zakładki 2D', '2D 2');
+    if (label === null) return;
+
+    const tab = createPlan2dTab(model.views, label.trim() || undefined);
+    const nextViews = [...model.views, tab];
+    modelActions.set({ views: nextViews });
+    changeView(tab.id, { ...model, views: nextViews });
+    uiStateActions.setProjectionMode('TWO_D');
+    resetInteraction();
+  }, [modelStore, modelActions, changeView, uiStateActions, resetInteraction]);
 
   return (
     <UiElement>
-      <Stack direction="row">
-        {TABS.map(({ mode, label, viewName }) => {
-          const isActive = projectionMode === mode;
+      <Stack direction="row" alignItems="center">
+        {tabs.map((tab) => {
+          const isActive = activeViewId === tab.viewId;
 
           return (
             <Button
-              key={mode}
+              key={tab.viewId}
               variant="text"
               onClick={() => {
-                onSelectMode(mode, viewName);
+                onSelectTab(tab.viewId, tab.kind);
               }}
               sx={{
                 borderRadius: 0,
@@ -128,10 +148,24 @@ export const ViewModeTabs = () => {
                 bgcolor: isActive ? 'primary.light' : undefined
               }}
             >
-              {label}
+              {tab.label}
             </Button>
           );
         })}
+        <Tooltip title="Nowa zakładka 2D">
+          <IconButton
+            size="small"
+            onClick={onAddPlan2dTab}
+            aria-label="Nowa zakładka 2D"
+            sx={{
+              borderRadius: 0,
+              color: 'grey.500',
+              '&:hover': { color: 'grey.200', bgcolor: 'action.hover' }
+            }}
+          >
+            <AddIcon fontSize="small" />
+          </IconButton>
+        </Tooltip>
       </Stack>
     </UiElement>
   );

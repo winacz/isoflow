@@ -13,9 +13,7 @@ import {
   ensureDeviceTemplateIcons,
   saveDeviceTemplatesLibrary,
   snapModelToGrid,
-  PLAN_2D_V2_VIEW_NAME,
-  findPlanView,
-  build2Dv2SnapshotFromPlan
+  ensureProjectViews
 } from 'src/utils';
 import * as reducers from 'src/stores/reducers';
 import { useModelStore } from 'src/stores/modelStore';
@@ -71,39 +69,8 @@ export const useInitialDataManager = () => {
       );
       saveDeviceTemplatesLibrary(deviceTemplates);
 
-      // Ensure schematic 2Dv2 view exists (older saves / imports).
-      if (
-        !initialData.views.some((view) => {
-          return view.name === PLAN_2D_V2_VIEW_NAME;
-        })
-      ) {
-        const plan = findPlanView(initialData.views);
-        const snapshot = plan
-          ? build2Dv2SnapshotFromPlan({
-              plan,
-              modelItems: initialData.items ?? []
-            })
-          : {
-              items: [],
-              rectangles: [],
-              connectors: [],
-              textBoxes: []
-            };
-        initialData = {
-          ...initialData,
-          views: [
-            ...initialData.views,
-            {
-              id: generateId(),
-              name: PLAN_2D_V2_VIEW_NAME,
-              items: snapshot.items,
-              connectors: [],
-              rectangles: snapshot.rectangles,
-              textBoxes: []
-            }
-          ]
-        };
-      }
+      // Stamp view kinds/orders and ensure default project tabs exist.
+      initialData = ensureProjectViews(initialData);
 
       if (initialData.views.length === 0) {
         const updates = reducers.view({

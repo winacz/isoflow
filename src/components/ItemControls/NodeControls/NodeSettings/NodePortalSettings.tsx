@@ -22,11 +22,9 @@ import { useResizeObserver } from 'src/hooks/useResizeObserver';
 import {
   CoordsUtils,
   findPlan2dView,
-  getPortalJumpZoom,
-  getPortalTargetCenterPx,
-  getPortalTargetFootprintPx,
-  getScrollToCenterPx,
+  getPortalDisplayLabel,
   listPlan2dPortalTargets,
+  planPortalJump,
   type PortalTarget
 } from 'src/utils';
 import { Section } from '../../components/Section';
@@ -62,14 +60,8 @@ export const NodePortalSettings = ({
 
   const selectedLabel = useMemo(() => {
     if (!modelItem.portal) return null;
-    const match = targets.find((target: PortalTarget) => {
-      return (
-        target.targetType === modelItem.portal?.targetType &&
-        target.targetId === modelItem.portal?.targetId
-      );
-    });
-    return match?.label ?? modelItem.portal.label ?? modelItem.portal.targetId;
-  }, [modelItem.portal, targets]);
+    return getPortalDisplayLabel(modelItem.portal, model);
+  }, [modelItem.portal, model]);
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -86,34 +78,18 @@ export const NodePortalSettings = ({
     const portal = modelItem.portal;
     if (!portal) return;
 
-    const plan = findPlan2dView(model);
-    if (!plan) return;
+    const jump = planPortalJump({
+      portal,
+      model,
+      rendererSize
+    });
+    if (!jump) return;
 
-    const centerPx = getPortalTargetCenterPx(portal, plan, model.items);
-    if (!centerPx) return;
-
-    const footprint = getPortalTargetFootprintPx(portal, plan, model.items);
-    // Sidebar opens after jump — leave room so the target is fully visible.
-    const sidebarW = Math.min(
-      340,
-      Math.max(290, Math.round(rendererSize.width * 0.22))
-    );
-    const viewport = {
-      width: Math.max(120, rendererSize.width - sidebarW),
-      height: rendererSize.height
-    };
-    const zoom = getPortalJumpZoom(viewport, footprint);
-
-    changeView(plan.id, model);
+    changeView(jump.planViewId, model);
     uiStateActions.setProjectionMode('TWO_D');
-    uiStateActions.setZoom(zoom);
-    // Bias scroll so the target sits in the free area left of the sidebar.
-    const scroll = getScrollToCenterPx(centerPx, zoom);
+    uiStateActions.setZoom(jump.zoom);
     uiStateActions.setScroll({
-      position: {
-        x: scroll.x - sidebarW * 0.5,
-        y: scroll.y
-      },
+      position: jump.scroll,
       offset: CoordsUtils.zero()
     });
     uiStateActions.setMode({
@@ -123,13 +99,13 @@ export const NodePortalSettings = ({
     });
     uiStateActions.clearSelectedItemIds();
 
-    if (portal.targetType === 'ITEM') {
-      uiStateActions.setItemControls({ type: 'ITEM', id: portal.targetId });
-      uiStateActions.setSelectedItemIds([portal.targetId]);
+    if (jump.select.type === 'ITEM') {
+      uiStateActions.setItemControls({ type: 'ITEM', id: jump.select.id });
+      uiStateActions.setSelectedItemIds([jump.select.id]);
     } else {
       uiStateActions.setItemControls({
         type: 'RECTANGLE',
-        id: portal.targetId
+        id: jump.select.id
       });
     }
   }, [modelItem.portal, model, changeView, uiStateActions, rendererSize]);

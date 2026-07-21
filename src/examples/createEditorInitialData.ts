@@ -6,7 +6,9 @@ import {
   build2Dv2SnapshotFromPlan,
   PLAN_2D_VIEW_NAME,
   PLAN_2D_V2_VIEW_NAME,
-  ISOMETRIC_VIEW_NAME
+  ISOMETRIC_VIEW_NAME,
+  ViewKindEnum,
+  defaultOrderForKind
 } from 'src/utils';
 import { initialData as isometricDemo } from './initialData';
 import { createStartingTopology2d } from './startingTopology2d';
@@ -69,6 +71,8 @@ export const createEditorInitialData = (): InitialData => {
   const planAsView = {
     id: planViewId,
     name: PLAN_2D_VIEW_NAME,
+    kind: ViewKindEnum.PLAN_2D,
+    order: defaultOrderForKind(ViewKindEnum.PLAN_2D),
     items: planItems,
     connectors: planConnectors,
     rectangles: planView?.rectangles ?? [],
@@ -93,6 +97,8 @@ export const createEditorInitialData = (): InitialData => {
       {
         id: plan2Dv2ViewId,
         name: PLAN_2D_V2_VIEW_NAME,
+        kind: ViewKindEnum.PLAN_2D_V2,
+        order: defaultOrderForKind(ViewKindEnum.PLAN_2D_V2),
         items: v2Snapshot.items,
         connectors: [],
         rectangles: v2Snapshot.rectangles,
@@ -101,6 +107,8 @@ export const createEditorInitialData = (): InitialData => {
       {
         id: isometricViewId,
         name: ISOMETRIC_VIEW_NAME,
+        kind: ViewKindEnum.ISOMETRIC,
+        order: defaultOrderForKind(ViewKindEnum.ISOMETRIC),
         items: isoView?.items ?? [],
         connectors: isoView?.connectors ?? [],
         rectangles: isoView?.rectangles ?? [],

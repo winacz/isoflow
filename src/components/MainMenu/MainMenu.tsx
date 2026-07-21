@@ -7,20 +7,34 @@ import {
   DataObject as ExportJsonIcon,
   ImageOutlined as ExportImageIcon,
   FolderOpen as FolderOpenIcon,
-  DeleteOutline as DeleteOutlineIcon
+  Save as SaveIcon,
+  DeleteOutline as DeleteOutlineIcon,
+  NoteAdd as NoteAddIcon,
+  DriveFileRenameOutline as RenameIcon
 } from '@mui/icons-material';
 import { UiElement } from 'src/components/UiElement/UiElement';
 import { IconButton } from 'src/components/IconButton/IconButton';
 import { useUiStateStore } from 'src/stores/uiStateStore';
-import { exportAsJSON, buildExportSnapshot } from 'src/utils';
+import {
+  createEmptyProject,
+  exportAsJSON,
+  buildProjectSnapshot,
+  generateProjectFilename
+} from 'src/utils';
 import { useInitialDataManager } from 'src/hooks/useInitialDataManager';
-import { useModelStoreApi } from 'src/stores/modelStore';
+import { useModelStore, useModelStoreApi } from 'src/stores/modelStore';
 import { useScene } from 'src/hooks/useScene';
 import { MenuItem } from './MenuItem';
 
 export const MainMenu = () => {
   const [anchorEl, setAnchorEl] = useState<null | HTMLElement>(null);
   const modelStoreApi = useModelStoreApi();
+  const projectTitle = useModelStore((state) => {
+    return state.title;
+  });
+  const modelActions = useModelStore((state) => {
+    return state.actions;
+  });
   const isMainMenuOpen = useUiStateStore((state) => {
     return state.isMainMenuOpen;
   });
@@ -53,6 +67,29 @@ export const MainMenu = () => {
 
   const { load } = initialDataManager;
 
+  const onNewProject = useCallback(() => {
+    const name = window.prompt('Nazwa nowego projektu', 'Untitled project');
+    if (name === null) return;
+
+    const confirmed = window.confirm(
+      'Utworzyć nowy pusty projekt? Niezapisane zmiany w bieżącym dokumencie zostaną utracone.'
+    );
+    if (!confirmed) return;
+
+    uiStateActions.resetUiState();
+    load(createEmptyProject(name.trim() || 'Untitled project'));
+    uiStateActions.setIsMainMenuOpen(false);
+  }, [load, uiStateActions]);
+
+  const onRenameProject = useCallback(() => {
+    const next = window.prompt('Nazwa projektu', projectTitle || 'Untitled project');
+    if (next === null) return;
+    const trimmed = next.trim();
+    if (!trimmed) return;
+    modelActions.set({ title: trimmed });
+    uiStateActions.setIsMainMenuOpen(false);
+  }, [projectTitle, modelActions, uiStateActions]);
+
   const onOpenModel = useCallback(async () => {
     const fileInput = document.createElement('input');
     fileInput.type = 'file';
@@ -80,9 +117,27 @@ export const MainMenu = () => {
     uiStateActions.setIsMainMenuOpen(false);
   }, [uiStateActions, load]);
 
+  const onSaveProject = useCallback(() => {
+    const model = modelStoreApi.getState();
+    exportAsJSON(
+      buildProjectSnapshot(model, {
+        view: activeViewId,
+        projectionMode
+      }),
+      generateProjectFilename(model.title || projectTitle || 'Untitled project')
+    );
+    uiStateActions.setIsMainMenuOpen(false);
+  }, [
+    modelStoreApi,
+    activeViewId,
+    projectionMode,
+    projectTitle,
+    uiStateActions
+  ]);
+
   const onExportAsJSON = useCallback(() => {
     exportAsJSON(
-      buildExportSnapshot(modelStoreApi.getState(), {
+      buildProjectSnapshot(modelStoreApi.getState(), {
         view: activeViewId,
         projectionMode
       })
@@ -170,9 +225,27 @@ export const MainMenu = () => {
         }}
       >
         <Card sx={{ py: 1 }}>
+          {mainMenuOptions.includes('ACTION.NEW_PROJECT') && (
+            <MenuItem onClick={onNewProject} Icon={<NoteAddIcon />}>
+              New project
+            </MenuItem>
+          )}
+
+          {mainMenuOptions.includes('ACTION.RENAME_PROJECT') && (
+            <MenuItem onClick={onRenameProject} Icon={<RenameIcon />}>
+              Rename project
+            </MenuItem>
+          )}
+
           {mainMenuOptions.includes('ACTION.OPEN') && (
             <MenuItem onClick={onOpenModel} Icon={<FolderOpenIcon />}>
-              Open
+              Open project
+            </MenuItem>
+          )}
+
+          {mainMenuOptions.includes('ACTION.SAVE_PROJECT') && (
+            <MenuItem onClick={onSaveProject} Icon={<SaveIcon />}>
+              Save project
             </MenuItem>
           )}
 

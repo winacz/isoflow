@@ -34,10 +34,24 @@ export const findPlan2dViewByName = (
 };
 
 export const findPlanView = (views: View[]): View | null => {
+  const byKind = views
+    .filter((view) => {
+      if (view.kind === 'PLAN_2D') return true;
+      if (view.kind) return false;
+      return view.name === PLAN_2D_VIEW_NAME;
+    })
+    .sort((a, b) => {
+      return (a.order ?? 0) - (b.order ?? 0);
+    });
+  if (byKind.length > 0) return byKind[0];
   return findPlan2dViewByName(views, PLAN_2D_VIEW_NAME);
 };
 
 export const findPlan2Dv2View = (views: View[]): View | null => {
+  const byKind = views.find((view) => {
+    return view.kind === 'PLAN_2D_V2';
+  });
+  if (byKind) return byKind;
   return findPlan2dViewByName(views, PLAN_2D_V2_VIEW_NAME);
 };
 

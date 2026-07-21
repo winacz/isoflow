@@ -7,6 +7,17 @@ export const generateGenericFilename = (extension: string) => {
   return `isoflow-export-${new Date().toISOString()}.${extension}`;
 };
 
+/** Safe download name from project title, e.g. "IDF Core" → "IDF-Core.json". */
+export const generateProjectFilename = (title: string, extension = 'json') => {
+  const slug = (title || 'Untitled project')
+    .trim()
+    .replace(/[^\p{L}\p{N}]+/gu, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 80);
+  const safe = slug || 'Untitled-project';
+  return `${safe}.${extension}`;
+};
+
 export const base64ToBlob = (
   base64: string,
   contentType: string,
@@ -37,12 +48,12 @@ export const downloadFile = (data: Blob, filename: string) => {
   FileSaver.saveAs(data, filename);
 };
 
-export const exportAsJSON = (snapshot: ExportSnapshot) => {
+export const exportAsJSON = (snapshot: ExportSnapshot, filename?: string) => {
   const data = new Blob([JSON.stringify(snapshot, null, 2)], {
     type: 'application/json;charset=utf-8'
   });
 
-  downloadFile(data, generateGenericFilename('json'));
+  downloadFile(data, filename || generateGenericFilename('json'));
 };
 
 export const exportAsImage = async (el: HTMLDivElement, size?: Size) => {

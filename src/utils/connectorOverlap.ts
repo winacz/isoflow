@@ -46,18 +46,21 @@ export const hasEdgeOverlapWithOthers = (
   return countEdgeOverlapsWithOthers(candidateTiles, otherPaths) > 0;
 };
 
-export const countEdgeOverlapsWithOthers = (
-  candidateTiles: Coords[],
-  otherPaths: Coords[][]
-): number => {
-  if (candidateTiles.length < 2 || otherPaths.length === 0) return 0;
-
+export const buildOtherEdgesSet = (otherPaths: Coords[][]): Set<string> => {
   const otherEdges = new Set<string>();
   otherPaths.forEach((tiles) => {
     pathEdges(tiles).forEach((edge) => {
       otherEdges.add(edge);
     });
   });
+  return otherEdges;
+};
+
+export const countEdgeOverlapsWithEdges = (
+  candidateTiles: Coords[],
+  otherEdges: Set<string>
+): number => {
+  if (candidateTiles.length < 2 || otherEdges.size === 0) return 0;
 
   let count = 0;
   for (const edge of pathEdges(candidateTiles)) {
@@ -65,6 +68,15 @@ export const countEdgeOverlapsWithOthers = (
   }
 
   return count;
+};
+
+export const countEdgeOverlapsWithOthers = (
+  candidateTiles: Coords[],
+  otherPaths: Coords[][]
+): number => {
+  if (candidateTiles.length < 2 || otherPaths.length === 0) return 0;
+  const otherEdges = buildOtherEdgesSet(otherPaths);
+  return countEdgeOverlapsWithEdges(candidateTiles, otherEdges);
 };
 
 type OverlapRun = {
@@ -716,8 +728,9 @@ export const resolveOrthogonalDetourAfterWaypointRemoval = ({
     return [first, ...middle, last];
   };
 
+  const otherEdges = buildOtherEdgesSet(otherPaths);
   let bestAnchors = anchors;
-  let bestOverlap = countEdgeOverlapsWithOthers(currentTiles, otherPaths);
+  let bestOverlap = countEdgeOverlapsWithEdges(currentTiles, otherEdges);
 
   for (const hint of detourHintCandidates(from, to, removedTile, laneIndex)) {
     for (const helpers of helperPatternsForHint(from, to, hint)) {
@@ -725,7 +738,7 @@ export const resolveOrthogonalDetourAfterWaypointRemoval = ({
       const tiles = buildOrthogonalPathTiles(candidate, view, modelItems);
       if (!tiles) continue;
 
-      const overlap = countEdgeOverlapsWithOthers(tiles, otherPaths);
+      const overlap = countEdgeOverlapsWithEdges(tiles, otherEdges);
       if (overlap === 0) {
         return candidate;
       }

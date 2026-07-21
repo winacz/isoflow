@@ -82,21 +82,11 @@ export const Renderer = ({ showGrid, backgroundColor }: RendererProps) => {
       e.preventDefault();
       e.stopPropagation();
 
-      const rect = el.getBoundingClientRect();
-      const focalFromCenter = {
-        x: e.clientX - rect.left - rect.width / 2,
-        y: e.clientY - rect.top - rect.height / 2
-      };
-
       const shouldZoom =
         !isPlanProjection(projectionMode) || isWheelZoomGesture(e);
 
       if (shouldZoom) {
-        uiStateActions.adjustZoomByWheel(
-          e.deltaY,
-          e.deltaMode,
-          focalFromCenter
-        );
+        uiStateActions.adjustZoomByWheel(e.deltaY, e.deltaMode);
         return;
       }
 

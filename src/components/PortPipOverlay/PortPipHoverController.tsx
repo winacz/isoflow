@@ -40,6 +40,11 @@ export const PortPipHoverController = () => {
   const { size: rendererSize } = useResizeObserver(rendererEl);
 
   useEffect(() => {
+    // Isometric portal links own PiP — leave hover alone.
+    if (projectionMode === 'ISOMETRIC') {
+      return;
+    }
+
     if (projectionMode !== 'TWO_D_V2') {
       setPortPipHover(null);
       return;
@@ -104,6 +109,7 @@ export const PortPipHoverController = () => {
       hostPortId: portHit.portId,
       peerItemId: peer.itemId,
       peerPortId: peer.portId,
+      peerRectangleId: null,
       screen: {
         x:
           (rendererEl?.getBoundingClientRect().left ?? 0) +

@@ -14,9 +14,7 @@ import {
   TILE_SIZE_2D
 } from 'src/config';
 import { getShape2dCenterPosition } from './renderer';
-
-/** Must match Plan view name in createEditorInitialData (avoid circular import). */
-const PLAN_2D_VIEW_NAME = 'Plan';
+import { findPlanView } from './plan2dv2';
 
 export type PortalTargetType = 'ITEM' | 'RECTANGLE';
 
@@ -30,11 +28,7 @@ export type PortalTarget = {
 export type ModelItemPortal = NonNullable<ModelItem['portal']>;
 
 export const findPlan2dView = (model: Pick<Model, 'views'>): View | null => {
-  return (
-    model.views.find((view) => {
-      return view.name === PLAN_2D_VIEW_NAME;
-    }) ?? null
-  );
+  return findPlanView(model.views);
 };
 
 const rectangleLabel = (rect: Rectangle) => {
@@ -49,6 +43,21 @@ const itemKindLabel = (modelItem: ModelItem | undefined) => {
   if (!modelItem?.icon) return 'Urządzenie';
   if (modelItem.icon === SHAPE_2D_CABINET_ID) return 'Szafa';
   return 'Urządzenie';
+};
+
+/** Resolve portal link text (building / device name on the Plan). */
+export const getPortalDisplayLabel = (
+  portal: ModelItemPortal,
+  model: Model
+): string => {
+  if (portal.label?.trim()) return portal.label.trim();
+  const match = listPlan2dPortalTargets(model).find((target) => {
+    return (
+      target.targetType === portal.targetType &&
+      target.targetId === portal.targetId
+    );
+  });
+  return match?.label ?? portal.targetId;
 };
 
 /** All Plan-view nodes, cabinets and areas available as portal targets. */
@@ -179,5 +188,56 @@ export const getPortalTargetFootprintPx = (
   return {
     width: Math.abs(rect.to.x - rect.from.x) * TILE_SIZE_2D || TILE_SIZE_2D,
     height: Math.abs(rect.to.y - rect.from.y) * TILE_SIZE_2D || TILE_SIZE_2D
+  };
+};
+
+export type PortalJumpPlan = {
+  planViewId: string;
+  zoom: number;
+  scroll: Coords;
+  select:
+    | { type: 'ITEM'; id: string }
+    | { type: 'RECTANGLE'; id: string };
+};
+
+/** Compute 2D jump (zoom/scroll/selection) for an isometric→Plan portal. */
+export const planPortalJump = ({
+  portal,
+  model,
+  rendererSize
+}: {
+  portal: ModelItemPortal;
+  model: Model;
+  rendererSize: Size;
+}): PortalJumpPlan | null => {
+  const plan = findPlan2dView(model);
+  if (!plan) return null;
+
+  const centerPx = getPortalTargetCenterPx(portal, plan, model.items);
+  if (!centerPx) return null;
+
+  const footprint = getPortalTargetFootprintPx(portal, plan, model.items);
+  const sidebarW = Math.min(
+    340,
+    Math.max(290, Math.round(rendererSize.width * 0.22))
+  );
+  const viewport = {
+    width: Math.max(120, rendererSize.width - sidebarW),
+    height: rendererSize.height
+  };
+  const zoom = getPortalJumpZoom(viewport, footprint);
+  const scroll = getScrollToCenterPx(centerPx, zoom);
+
+  return {
+    planViewId: plan.id,
+    zoom,
+    scroll: {
+      x: scroll.x - sidebarW * 0.5,
+      y: scroll.y
+    },
+    select:
+      portal.targetType === 'ITEM'
+        ? { type: 'ITEM', id: portal.targetId }
+        : { type: 'RECTANGLE', id: portal.targetId }
   };
 };
