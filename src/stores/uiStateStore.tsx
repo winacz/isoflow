@@ -4,22 +4,24 @@ import {
   CoordsUtils,
   getStartingMode,
   clamp,
-  setSimplePathsEnabled
+  setSimplePathsEnabled,
+  getPanScrollFromDelta,
+  projectionPrefsKey,
+  isPlanProjection
 } from 'src/utils';
 import {
   incrementZoom,
   decrementZoom,
-  createSmoothZoomController
+  zoomFromWheelDelta,
+  getScrollForZoomChange
 } from 'src/utils/zoom';
-import { UiStateStore } from 'src/types';
+import { UiStateStore, Coords } from 'src/types';
 import {
   INITIAL_UI_STATE,
   MIN_ZOOM,
   MIN_ZOOM_2D,
   MAX_ZOOM
 } from 'src/config';
-
-const smoothZoom = createSmoothZoomController();
 
 const initialState = () => {
   setSimplePathsEnabled(INITIAL_UI_STATE.simplePaths);
@@ -50,9 +52,13 @@ const initialState = () => {
       selectedItemIds: [],
       selectedWaypointIds: [],
       focusedPortIds: [],
+      portAttention: null,
+      portPipHover: null,
       enableDebugTools: false,
       showGrid: INITIAL_UI_STATE.showGrid,
-      diagramBackgroundColor: INITIAL_UI_STATE.diagramBackgroundColor,
+      gridStyle: INITIAL_UI_STATE.gridStyle,
+      canvasByMode: INITIAL_UI_STATE.canvasByMode,
+      viewTransformByMode: INITIAL_UI_STATE.viewTransformByMode,
       vlan1CableColor: INITIAL_UI_STATE.vlan1CableColor,
       simplePaths: INITIAL_UI_STATE.simplePaths,
       actions: {
@@ -78,7 +84,9 @@ const initialState = () => {
             itemControls: null,
             selectedItemIds: [],
             focusedPortIds: [],
-            zoom: 1
+            portAttention: null,
+            zoom: 1,
+            viewTransformByMode: INITIAL_UI_STATE.viewTransformByMode
           });
         },
         setMode: (mode) => {
@@ -96,39 +104,62 @@ const initialState = () => {
           });
         },
         incrementZoom: () => {
-          const { zoom, projectionMode } = get();
-          const minZoom =
-            projectionMode === 'TWO_D' ? MIN_ZOOM_2D : MIN_ZOOM;
+          const { zoom, scroll, projectionMode } = get();
+          const minZoom = isPlanProjection(projectionMode)
+            ? MIN_ZOOM_2D
+            : MIN_ZOOM;
           const next = incrementZoom(zoom, minZoom);
-          smoothZoom.sync(next);
-          set({ zoom: next });
+          set({
+            zoom: next,
+            scroll: getScrollForZoomChange(zoom, next, scroll)
+          });
         },
         decrementZoom: () => {
-          const { zoom, projectionMode } = get();
-          const minZoom =
-            projectionMode === 'TWO_D' ? MIN_ZOOM_2D : MIN_ZOOM;
+          const { zoom, scroll, projectionMode } = get();
+          const minZoom = isPlanProjection(projectionMode)
+            ? MIN_ZOOM_2D
+            : MIN_ZOOM;
           const next = decrementZoom(zoom, minZoom);
-          smoothZoom.sync(next);
-          set({ zoom: next });
+          set({
+            zoom: next,
+            scroll: getScrollForZoomChange(zoom, next, scroll)
+          });
         },
         setZoom: (zoom) => {
-          const minZoom =
-            get().projectionMode === 'TWO_D' ? MIN_ZOOM_2D : MIN_ZOOM;
+          const minZoom = isPlanProjection(get().projectionMode)
+            ? MIN_ZOOM_2D
+            : MIN_ZOOM;
           const next = clamp(zoom, minZoom, MAX_ZOOM);
-          smoothZoom.sync(next);
           set({ zoom: next });
         },
-        adjustZoomByWheel: (deltaY, deltaMode = 0) => {
-          const { zoom, projectionMode } = get();
-          const minZoom =
-            projectionMode === 'TWO_D' ? MIN_ZOOM_2D : MIN_ZOOM;
-          smoothZoom.applyWheel(deltaY, deltaMode, {
-            zoom,
-            minZoom,
-            setZoom: (next) => {
-              set({ zoom: next });
-            }
+        adjustZoomByWheel: (deltaY, deltaMode = 0, focalFromCenter) => {
+          const { zoom, scroll, projectionMode } = get();
+          const minZoom = isPlanProjection(projectionMode)
+            ? MIN_ZOOM_2D
+            : MIN_ZOOM;
+          const focal: Coords = focalFromCenter ?? { x: 0, y: 0 };
+          const next = zoomFromWheelDelta(zoom, deltaY, deltaMode, minZoom);
+          set({
+            zoom: next,
+            scroll: getScrollForZoomChange(zoom, next, scroll, focal)
           });
+        },
+        panByWheel: (deltaX, deltaY, deltaMode = 0) => {
+          let dx = deltaX;
+          let dy = deltaY;
+          if (deltaMode === 1) {
+            dx *= 16;
+            dy *= 16;
+          } else if (deltaMode === 2) {
+            dx *= 800;
+            dy *= 800;
+          }
+          // Negate so natural two-finger scroll moves the canvas with the fingers.
+          const next = getPanScrollFromDelta(get().scroll, {
+            x: -dx,
+            y: -dy
+          });
+          set({ scroll: next });
         },
         setScroll: ({ position, offset }) => {
           set({ scroll: { position, offset: offset ?? get().scroll.offset } });
@@ -214,6 +245,29 @@ const initialState = () => {
           }
           set({ focusedPortIds: [...current, portId] });
         },
+        setPortAttention: (attention) => {
+          if (!attention) {
+            set({ portAttention: null });
+            return;
+          }
+          const token = Date.now();
+          set({
+            portAttention: {
+              itemId: attention.itemId,
+              portId: attention.portId,
+              token
+            }
+          });
+          window.setTimeout(() => {
+            const current = get().portAttention;
+            if (current?.token === token) {
+              set({ portAttention: null });
+            }
+          }, 1100);
+        },
+        setPortPipHover: (portPipHover) => {
+          set({ portPipHover });
+        },
         setContextMenu: (contextMenu) => {
           set({ contextMenu });
         },
@@ -230,7 +284,30 @@ const initialState = () => {
           set({ rendererEl: el });
         },
         setProjectionMode: (projectionMode) => {
-          set({ projectionMode });
+          const prev = get().projectionMode;
+          if (prev === projectionMode) {
+            set({ projectionMode });
+            return;
+          }
+
+          const prevKey = projectionPrefsKey(prev);
+          const nextKey = projectionPrefsKey(projectionMode);
+          const viewTransformByMode = {
+            ...get().viewTransformByMode,
+            [prevKey]: {
+              zoom: get().zoom,
+              scroll: get().scroll
+            }
+          };
+          const restored = viewTransformByMode[nextKey];
+
+          set({
+            projectionMode,
+            viewTransformByMode,
+            zoom: restored.zoom,
+            scroll: restored.scroll,
+            portPipHover: null
+          });
         },
         setShowGrid: (showGrid) => {
           set({ showGrid });
@@ -238,8 +315,45 @@ const initialState = () => {
         toggleShowGrid: () => {
           set({ showGrid: !get().showGrid });
         },
-        setDiagramBackgroundColor: (diagramBackgroundColor) => {
-          set({ diagramBackgroundColor });
+        setGridStyle: (gridStyle) => {
+          set({ gridStyle, showGrid: true });
+        },
+        setGridColor: (gridColor) => {
+          const key = projectionPrefsKey(get().projectionMode);
+          set({
+            canvasByMode: {
+              ...get().canvasByMode,
+              [key]: { ...get().canvasByMode[key], gridColor }
+            }
+          });
+        },
+        setCanvasTheme: (theme) => {
+          const key = projectionPrefsKey(get().projectionMode);
+          // Clear temp overrides for this mode so theme defaults apply.
+          set({
+            canvasByMode: {
+              ...get().canvasByMode,
+              [key]: {
+                theme,
+                backgroundColor: null,
+                gridColor: null
+              }
+            }
+          });
+        },
+        toggleCanvasTheme: () => {
+          const key = projectionPrefsKey(get().projectionMode);
+          const current = get().canvasByMode[key].theme;
+          get().actions.setCanvasTheme(current === 'dark' ? 'light' : 'dark');
+        },
+        setDiagramBackgroundColor: (backgroundColor) => {
+          const key = projectionPrefsKey(get().projectionMode);
+          set({
+            canvasByMode: {
+              ...get().canvasByMode,
+              [key]: { ...get().canvasByMode[key], backgroundColor }
+            }
+          });
         },
         setVlan1CableColor: (vlan1CableColor) => {
           set({ vlan1CableColor });
@@ -291,4 +405,15 @@ export function useUiStateStore<T>(selector: (state: UiStateStore) => T) {
 
   const value = useStore(store, selector);
   return value;
+}
+
+/** Imperative store access for event handlers that must not wait for a React render. */
+export function useUiStateStoreApi() {
+  const store = useContext(UiStateContext);
+
+  if (store === null) {
+    throw new Error('Missing provider in the tree');
+  }
+
+  return store;
 }

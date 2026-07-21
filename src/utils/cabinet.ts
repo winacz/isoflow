@@ -5,8 +5,10 @@ import {
   CABINET_EAR_TILES,
   CABINET_HEADER_TILES,
   RACK_1U_HEIGHT_TILES,
+  RACK_1U_WIDTH_TILES,
   getCabinetSize,
-  getModelItemSize
+  getModelItemSize,
+  getShape2dSize
 } from 'src/config';
 import { getDeviceTemplateLayout } from './deviceTemplateRegistry';
 import { isTileInShape2dBounds } from './renderer';
@@ -23,13 +25,26 @@ export const isCabinetItem = (modelItem: { icon?: string }): boolean => {
   return modelItem.icon === SHAPE_2D_CABINET_ID;
 };
 
+/** Full-bleed faceplates span the cabinet outer width; others use standard inset mount. */
+export const isFullWidthRackItem = (modelItem: {
+  icon?: string;
+}): boolean => {
+  if (!modelItem.icon) return false;
+  const size = getShape2dSize(modelItem.icon);
+  return Boolean(
+    size && size.width >= RACK_1U_WIDTH_TILES + CABINET_EAR_TILES * 2
+  );
+};
+
 /** Top-left tile for a switch mounted at rackUnit inside a cabinet. */
 export const getCabinetSlotTile = (
   cabinetTile: Coords,
-  rackUnit: number
+  rackUnit: number,
+  options?: { fullWidth?: boolean }
 ): Coords => {
+  const xOffset = options?.fullWidth ? 0 : CABINET_EAR_TILES;
   return {
-    x: cabinetTile.x + CABINET_EAR_TILES,
+    x: cabinetTile.x + xOffset,
     y: cabinetTile.y + CABINET_HEADER_TILES + rackUnit * RACK_1U_HEIGHT_TILES
   };
 };
@@ -71,13 +86,16 @@ export const resolveCabinetSnap = ({
   cabinetViewItem,
   cabinetModelItem,
   viewItems,
-  excludeItemIds
+  excludeItemIds,
+  fullWidth = false
 }: {
   cursorTile: Coords;
   cabinetViewItem: ViewItem;
   cabinetModelItem: { rackUnits?: number };
   viewItems: ViewItem[];
   excludeItemIds?: Iterable<string>;
+  /** Faceplate spans cabinet outer width (ears baked into SVG). */
+  fullWidth?: boolean;
 }): { rackUnit: number; tile: Coords } | null => {
   const units = cabinetModelItem.rackUnits ?? CABINET_DEFAULT_UNITS;
   const excluded = excludeItemIds ? new Set(excludeItemIds) : null;
@@ -100,7 +118,7 @@ export const resolveCabinetSnap = ({
     if (unit < 0 || unit >= units || occupied.has(unit)) return null;
     return {
       rackUnit: unit,
-      tile: getCabinetSlotTile(cabinetViewItem.tile, unit)
+      tile: getCabinetSlotTile(cabinetViewItem.tile, unit, { fullWidth })
     };
   };
 

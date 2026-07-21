@@ -1,11 +1,21 @@
 import { InitialData } from 'src/types';
 import { DEFAULT_COLOR, SHAPES_2D } from 'src/config';
-import { generateId, ensureDeviceTemplateIcons } from 'src/utils';
+import {
+  generateId,
+  ensureDeviceTemplateIcons,
+  build2Dv2SnapshotFromPlan,
+  PLAN_2D_VIEW_NAME,
+  PLAN_2D_V2_VIEW_NAME,
+  ISOMETRIC_VIEW_NAME
+} from 'src/utils';
 import { initialData as isometricDemo } from './initialData';
 import { createStartingTopology2d } from './startingTopology2d';
 
-export const ISOMETRIC_VIEW_NAME = 'Isometric';
-export const PLAN_2D_VIEW_NAME = 'Plan';
+export {
+  ISOMETRIC_VIEW_NAME,
+  PLAN_2D_VIEW_NAME,
+  PLAN_2D_V2_VIEW_NAME
+} from 'src/utils';
 
 /**
  * Full editor bootstrap: classic isometric demo + 2D practice topology
@@ -18,6 +28,7 @@ export const createEditorInitialData = (): InitialData => {
 
   const isometricViewId = isoView?.id ?? generateId();
   const planViewId = planView?.id ?? generateId();
+  const plan2Dv2ViewId = generateId();
 
   const deviceTemplates = plan.deviceTemplates ?? [];
 
@@ -54,6 +65,20 @@ export const createEditorInitialData = (): InitialData => {
     };
   });
 
+  const planItems = planView?.items ?? [];
+  const planAsView = {
+    id: planViewId,
+    name: PLAN_2D_VIEW_NAME,
+    items: planItems,
+    connectors: planConnectors,
+    rectangles: planView?.rectangles ?? [],
+    textBoxes: []
+  };
+  const v2Snapshot = build2Dv2SnapshotFromPlan({
+    plan: planAsView,
+    modelItems: plan.items ?? []
+  });
+
   return {
     title: plan.title ?? isometricDemo.title ?? 'Isoflow',
     version: isometricDemo.version ?? '1.0',
@@ -64,12 +89,13 @@ export const createEditorInitialData = (): InitialData => {
     items: [...(isometricDemo.items ?? []), ...(plan.items ?? [])],
     deviceTemplates,
     views: [
+      planAsView,
       {
-        id: planViewId,
-        name: PLAN_2D_VIEW_NAME,
-        items: planView?.items ?? [],
-        connectors: planConnectors,
-        rectangles: [],
+        id: plan2Dv2ViewId,
+        name: PLAN_2D_V2_VIEW_NAME,
+        items: v2Snapshot.items,
+        connectors: [],
+        rectangles: v2Snapshot.rectangles,
         textBoxes: []
       },
       {

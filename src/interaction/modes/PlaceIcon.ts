@@ -5,7 +5,9 @@ import {
   getItemAtTile,
   getShape2dItemAtTile,
   getShape2dPlacementTile,
-  isShape2dPlacementFree
+  isShape2dPlacementFree,
+  snapTile2dToGrid,
+  getGridSnapStep
 } from 'src/utils';
 import {
   VIEW_ITEM_DEFAULTS,
@@ -52,9 +54,13 @@ export const PlaceIcon: ModeActions = {
 
     if (iconId !== null) {
       const modelItemId = generateId();
-      const shape = SHAPES_2D.find((item) => {
-        return item.id === iconId;
-      });
+      const shape =
+        SHAPES_2D.find((item) => {
+          return item.id === iconId;
+        }) ??
+        model.icons.find((item) => {
+          return item.id === iconId;
+        });
       const isCabinet = iconId === SHAPE_2D_CABINET_ID;
       const shapeSize =
         (isCabinet
@@ -77,7 +83,10 @@ export const PlaceIcon: ModeActions = {
 
       const tile =
         uiState.projectionMode === 'TWO_D'
-          ? getShape2dPlacementTile(uiState.mouse.position.tile, shapeSize)
+          ? snapTile2dToGrid(
+              getShape2dPlacementTile(uiState.mouse.position.tile, shapeSize),
+              getGridSnapStep(uiState.gridStyle)
+            )
           : uiState.mouse.position.tile;
 
       const placingPlanShape = Boolean(getShape2dSize(iconId));

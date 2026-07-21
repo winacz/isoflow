@@ -21,24 +21,9 @@ export const TRUNK_RAINBOW_CSS = `linear-gradient(90deg, ${TRUNK_RAINBOW_COLORS.
 /** Outline for invalid trunk links (trunk↔access / trunk↔host). */
 export const TRUNK_MISMATCH_COLOR = '#ef4444';
 
-const VLAN_PALETTE = [
-  '#4c8bf5',
-  '#3ecf8e',
-  '#f0a04b',
-  '#a78bfa',
-  '#ef4444',
-  '#14b8a6',
-  '#ec4899',
-  '#84cc16',
-  '#06b6d4',
-  '#f97316',
-  '#8b5cf6',
-  '#22c55e',
-  '#eab308',
-  '#3b82f6',
-  '#d946ef',
-  '#64748b'
-];
+export const normalizeVlanKey = (vlan: string | undefined | null) => {
+  return vlan?.trim().toLowerCase() ?? '';
+};
 
 const hashString = (value: string) => {
   let hash = 2166136261;
@@ -51,9 +36,92 @@ const hashString = (value: string) => {
   return hash >>> 0;
 };
 
-export const normalizeVlanKey = (vlan: string | undefined | null) => {
-  return vlan?.trim().toLowerCase() ?? '';
+/** First run of digits in a VLAN key (`10`, `vlan 20`, `VLAN100` → number). */
+export const parseVlanNumber = (
+  vlan: string | undefined | null
+): number | null => {
+  const key = normalizeVlanKey(vlan);
+  if (!key) return null;
+  const match = key.match(/(\d{1,4})/);
+  if (!match) return null;
+  const n = Number(match[1]);
+  if (!Number.isFinite(n) || n < 0) return null;
+  return n;
 };
+
+const clampByte = (value: number) => {
+  return Math.max(0, Math.min(255, Math.round(value)));
+};
+
+const hslToHex = (h: number, s: number, l: number): string => {
+  const sat = Math.max(0, Math.min(100, s)) / 100;
+  const lit = Math.max(0, Math.min(100, l)) / 100;
+  const hue = ((h % 360) + 360) % 360;
+  const c = (1 - Math.abs(2 * lit - 1)) * sat;
+  const x = c * (1 - Math.abs(((hue / 60) % 2) - 1));
+  const m = lit - c / 2;
+  let r = 0;
+  let g = 0;
+  let b = 0;
+
+  if (hue < 60) {
+    r = c;
+    g = x;
+  } else if (hue < 120) {
+    r = x;
+    g = c;
+  } else if (hue < 180) {
+    g = c;
+    b = x;
+  } else if (hue < 240) {
+    g = x;
+    b = c;
+  } else if (hue < 300) {
+    r = x;
+    b = c;
+  } else {
+    r = c;
+    b = x;
+  }
+
+  const toHex = (channel: number) => {
+    return clampByte((channel + m) * 255)
+      .toString(16)
+      .padStart(2, '0');
+  };
+
+  return `#${toHex(r)}${toHex(g)}${toHex(b)}`;
+};
+
+/**
+ * Golden angle (°) — successive VLAN numbers land ~137° apart on the hue
+ * wheel, so neighbors never look alike (and the first 25 are all unique).
+ */
+const VLAN_HUE_STEP = 137.508;
+
+/**
+ * Stable auto color from a numeric VLAN id.
+ * Same id → same color; different ids → clearly separated hues.
+ */
+export const colorFromVlanNumber = (vlanNumber: number): string => {
+  const n = Math.abs(Math.trunc(vlanNumber));
+  const hue = (n * VLAN_HUE_STEP) % 360;
+  // Mild S/L jitter so even far wrap-arounds stay distinguishable.
+  const sat = 72 - (n % 3) * 5;
+  const lit = 48 + (n % 4) * 3;
+  return hslToHex(hue, sat, lit);
+};
+
+/**
+ * Reference swatch of the first 25 auto colors (VLAN ids 2..26).
+ * Useful for UI / docs; runtime coloring always goes through `colorFromVlanNumber`.
+ */
+export const VLAN_AUTO_PALETTE: readonly string[] = Array.from(
+  { length: 25 },
+  (_, index) => {
+    return colorFromVlanNumber(index + 2);
+  }
+);
 
 const normalizeHexColor = (color: string | undefined | null) => {
   const value = color?.trim();
@@ -142,14 +210,20 @@ export const findSharedVlanColor = (
 };
 
 /**
- * Auto color for a VLAN id. Returns null for empty / VLAN 1
+ * Auto color for a VLAN id (from its number). Returns null for empty / VLAN 1
  * (VLAN 1 must not tint cables or invent a brand color).
  */
 export const getVlanColor = (vlan: string | undefined | null): string | null => {
   const key = normalizeVlanKey(vlan);
   if (!key || isVlan1(key)) return null;
 
-  return VLAN_PALETTE[hashString(key) % VLAN_PALETTE.length];
+  const num = parseVlanNumber(key);
+  if (num != null) {
+    return colorFromVlanNumber(num);
+  }
+
+  // Named VLANs without digits — stable seed into the same space as numbers.
+  return colorFromVlanNumber((hashString(key) % 4094) + 2);
 };
 
 /** Port jack color. PC / VLAN 1 → gray. Trunk → first rainbow stop (use CSS gradient for full rainbow). */

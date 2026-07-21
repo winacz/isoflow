@@ -18,11 +18,14 @@ type Footprint = {
 
 const getFootprint = (
   viewItem: ViewItem,
-  modelItems: { id: string; icon?: string }[]
+  modelItems: { id: string; icon?: string }[],
+  modelItemMap?: Map<string, { id: string; icon?: string }>
 ): Footprint => {
-  const modelItem = modelItems.find((item) => {
-    return item.id === viewItem.id;
-  });
+  const modelItem = modelItemMap
+    ? modelItemMap.get(viewItem.id)
+    : modelItems.find((item) => {
+        return item.id === viewItem.id;
+      });
   const size = getShape2dSize(modelItem?.icon ?? '') ?? {
     width: 1,
     height: 1
@@ -189,8 +192,9 @@ export const layoutShape2dItems = ({
 }): Record<string, Coords> => {
   if (selectedItems.length === 0) return {};
 
+  const modelItemMap = new Map(modelItems.map(i => [i.id, i]));
   const footprints = selectedItems.map((item) => {
-    return getFootprint(item, modelItems);
+    return getFootprint(item, modelItems, modelItemMap);
   });
 
   const ordered =
@@ -921,6 +925,7 @@ export const bundleShape2dRoutes = ({
       return [item.id, item.icon] as const;
     })
   );
+  const modelItemMap = new Map(modelItems.map(i => [i.id, i]));
 
   const isSwitch = (id: string) => {
     return iconById.get(id) === SHAPE_2D_SWITCH_ID;
@@ -1023,7 +1028,7 @@ export const bundleShape2dRoutes = ({
     // Bbox of the leaves in this bundle.
     const leafFootprints = group.map((cable) => {
       const viewItem = itemById.get(cable.leafId)!;
-      return getFootprint(viewItem, modelItems);
+      return getFootprint(viewItem, modelItems, modelItemMap);
     });
     const bboxMinX = Math.min(...leafFootprints.map((f) => f.tile.x));
     const bboxMaxX = Math.max(

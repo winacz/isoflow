@@ -64,10 +64,9 @@ const viewUsesShape2d = (
   viewItems: { id: string }[],
   modelItems: { id: string; icon?: string }[]
 ) => {
+  const map = new Map(modelItems.map(i => [i.id, i]));
   return viewItems.some((viewItem) => {
-    const modelItem = modelItems.find((candidate) => {
-      return candidate.id === viewItem.id;
-    });
+    const modelItem = map.get(viewItem.id);
     return Boolean(modelItem?.icon && isShape2dIcon(modelItem.icon));
   });
 };

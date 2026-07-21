@@ -11,6 +11,7 @@ import {
   getShape2dPlacementTile,
   getTilePosition2d,
   isShape2dPortInUse,
+  isPlanProjection,
   SHAPE_2D_PORT_SNAP_DISTANCE
 } from 'src/utils';
 import { TILE_SIZE_2D, getShape2dSize } from 'src/config';
@@ -54,7 +55,7 @@ export const Cursor = () => {
     : null;
 
   const snappedPort = useMemo(() => {
-    if (projectionMode !== 'TWO_D' || !isConnectorMode || placingSize) {
+    if (!isPlanProjection(projectionMode) || !isConnectorMode || placingSize) {
       return null;
     }
 
@@ -110,7 +111,7 @@ export const Cursor = () => {
     };
   }, [tile, displayTile, placingSize]);
 
-  if (projectionMode === 'TWO_D') {
+  if (isPlanProjection(projectionMode)) {
     if (isConnectorMode && !placingSize) {
       const arm = TILE_SIZE_2D * 0.42;
       const gap = TILE_SIZE_2D * 0.12;

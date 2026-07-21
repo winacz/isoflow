@@ -54,6 +54,15 @@ export const Connectors = ({ connectors }: Props) => {
   const focusedPortIds = useUiStateStore((state) => {
     return state.focusedPortIds;
   });
+  const mouseTileX = useUiStateStore((state) => {
+    return state.mouse.position.tile.x;
+  });
+  const mouseTileY = useUiStateStore((state) => {
+    return state.mouse.position.tile.y;
+  });
+  const hasMouseDown = useUiStateStore((state) => {
+    return Boolean(state.mouse.mousedown);
+  });
 
   const activeStackKey = useStackFanStore(getActiveStackKey);
   const highlightedConnectorId = useStackFanStore((state) => {
@@ -92,6 +101,46 @@ export const Connectors = ({ connectors }: Props) => {
     });
   }, [connectors, projectionMode, softDim]);
 
+  /** Cable under cursor — emphasize before click (idle CURSOR only). */
+  const hoveredConnectorId = useMemo(() => {
+    if (projectionMode !== 'TWO_D') return null;
+    if (mode.type !== 'CURSOR') return null;
+    if (hasMouseDown || softDim) return null;
+
+    const tile = { x: mouseTileX, y: mouseTileY };
+    const onTile = (tiles: { x: number; y: number }[]) => {
+      return tiles.some((pathTile) => {
+        return pathTile.x === tile.x && pathTile.y === tile.y;
+      });
+    };
+
+    if (selectedConnectorId) {
+      const selected = pathInputs.find((entry) => {
+        return entry.id === selectedConnectorId;
+      });
+      if (selected && onTile(selected.tiles)) {
+        return selectedConnectorId;
+      }
+    }
+
+    for (let i = pathInputs.length - 1; i >= 0; i -= 1) {
+      if (onTile(pathInputs[i].tiles)) {
+        return pathInputs[i].id;
+      }
+    }
+
+    return null;
+  }, [
+    projectionMode,
+    mode.type,
+    hasMouseDown,
+    softDim,
+    mouseTileX,
+    mouseTileY,
+    selectedConnectorId,
+    pathInputs
+  ]);
+
   const jumpsByConnectorId = useMemo(() => {
     if (projectionMode !== 'TWO_D' || softDim) return {};
 
@@ -118,6 +167,7 @@ export const Connectors = ({ connectors }: Props) => {
     <>
       {[...connectors].reverse().map((connector) => {
         const isSelected = selectedConnectorId === connector.id;
+        const isHovered = hoveredConnectorId === connector.id;
         const isRelatedToItem = Boolean(
           selectedItemId &&
             (focusedPortIds.length > 0
@@ -134,6 +184,7 @@ export const Connectors = ({ connectors }: Props) => {
         const isHandleTarget = highlightedConnectorId === connector.id;
         const isFocused =
           isSelected ||
+          isHovered ||
           isRelatedToItem ||
           Boolean(offset) ||
           isHandleTarget;
@@ -149,7 +200,7 @@ export const Connectors = ({ connectors }: Props) => {
               jumps={jumpsByConnectorId[connector.id] ?? []}
               isSelected={isSelected}
               isFocused={isFocused}
-              isHighlighted={isHandleTarget}
+              isHighlighted={isHandleTarget || (isHovered && !isSelected)}
               isDimmed={isDimmed}
               softDim={softDim}
               visualOffset={offset}

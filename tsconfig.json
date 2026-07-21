@@ -21,6 +21,7 @@
   "include": [
     "**/*.ts",
     "**/*.tsx",
-    "src/global.d.ts"
+    "src/global.d.ts",
+    "src/module.d.ts"
   ],
 }

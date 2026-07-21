@@ -1,4 +1,5 @@
 import { useCallback, useMemo } from 'react';
+import { unstable_batchedUpdates } from 'react-dom';
 import { produce } from 'immer';
 import {
   ModelItem,
@@ -44,13 +45,13 @@ import {
 } from 'src/config';
 
 export const useScene = () => {
-  const model = useModelStore((state) => {
-    return state;
-  });
+  const modelActions = useModelStore((state) => state.actions);
+  const modelViews = useModelStore((state) => state.views);
+  const colors = useModelStore((state) => state.colors);
 
-  const scene = useSceneStore((state) => {
-    return state;
-  });
+  const sceneActions = useSceneStore((state) => state.actions);
+  const sceneConnectors = useSceneStore((state) => state.connectors);
+  const sceneTextBoxes = useSceneStore((state) => state.textBoxes);
 
   const currentViewId = useUiStateStore((state) => {
     return state.view;
@@ -66,20 +67,14 @@ export const useScene = () => {
   });
 
   const currentView = useMemo(() => {
-    return getItemByIdOrThrow(model.views, currentViewId).value;
-  }, [currentViewId, model.views]);
+    return getItemByIdOrThrow(modelViews, currentViewId).value;
+  }, [currentViewId, modelViews]);
 
-  const items = useMemo(() => {
-    return currentView.items ?? [];
-  }, [currentView.items]);
-
-  const colors = useMemo(() => {
-    return model.colors;
-  }, [model.colors]);
+  const items = currentView.items ?? [];
 
   const connectors = useMemo(() => {
     return (currentView.connectors ?? []).map((connector) => {
-      const sceneConnector = scene.connectors[connector.id];
+      const sceneConnector = sceneConnectors[connector.id];
 
       return {
         ...CONNECTOR_DEFAULTS,
@@ -87,7 +82,7 @@ export const useScene = () => {
         ...sceneConnector
       };
     });
-  }, [currentView.connectors, scene.connectors]);
+  }, [currentView.connectors, sceneConnectors]);
 
   const rectangles = useMemo(() => {
     return (currentView.rectangles ?? []).map((rectangle) => {
@@ -100,7 +95,7 @@ export const useScene = () => {
 
   const textBoxes = useMemo(() => {
     return (currentView.textBoxes ?? []).map((textBox) => {
-      const sceneTextBox = scene.textBoxes[textBox.id];
+      const sceneTextBox = sceneTextBoxes[textBox.id];
 
       return {
         ...TEXTBOX_DEFAULTS,
@@ -108,18 +103,18 @@ export const useScene = () => {
         ...sceneTextBox
       };
     });
-  }, [currentView.textBoxes, scene.textBoxes]);
+  }, [currentView.textBoxes, sceneTextBoxes]);
 
   const getState = useCallback(() => {
     return {
-      model: model.actions.get(),
-      scene: scene.actions.get()
+      model: modelActions.get(),
+      scene: sceneActions.get()
     };
-  }, [model.actions, scene.actions]);
+  }, [modelActions, sceneActions]);
 
   const recordHistory = useCallback(() => {
-    historyPush(structuredClone(modelFromModelStore(model.actions.get())));
-  }, [historyPush, model.actions]);
+    historyPush(structuredClone(modelFromModelStore(modelActions.get())));
+  }, [historyPush, modelActions]);
 
   const setState = useCallback(
     (newState: State, options?: { skipHistory?: boolean }) => {
@@ -127,10 +122,12 @@ export const useScene = () => {
         recordHistory();
       }
 
-      model.actions.set(newState.model);
-      scene.actions.set(newState.scene);
+      unstable_batchedUpdates(() => {
+        modelActions.set(newState.model);
+        sceneActions.set(newState.scene);
+      });
     },
-    [model.actions, scene.actions, recordHistory]
+    [modelActions, sceneActions, recordHistory]
   );
 
   const beginHistoryTransaction = useCallback(() => {
@@ -150,8 +147,8 @@ export const useScene = () => {
 
     resetHistoryTransaction();
 
-    const current = model.actions.get();
-    model.actions.set({
+    const current = modelActions.get();
+    modelActions.set({
       ...previous,
       actions: current.actions
     });
@@ -162,15 +159,15 @@ export const useScene = () => {
       ctx: {
         viewId: currentViewId,
         state: {
-          model: model.actions.get(),
+          model: modelActions.get(),
           scene: INITIAL_SCENE_STATE
         }
       }
     });
 
-    scene.actions.set(synced.scene);
+    sceneActions.set(synced.scene);
     return true;
-  }, [historyPop, model.actions, scene.actions, currentViewId]);
+  }, [historyPop, modelActions, sceneActions, currentViewId]);
 
   const createModelItem = useCallback(
     (newModelItem: ModelItem) => {

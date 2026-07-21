@@ -26,6 +26,7 @@ import {
   getShape2dPorts,
   isShape2dIcon,
   SHAPE_2D_PC_ID,
+  SHAPE_2D_CAMERA_ID,
   SHAPE_2D_CABINET_ID,
   CABINET_DEFAULT_UNITS,
   CABINET_MIN_UNITS,
@@ -46,7 +47,8 @@ import {
   isDeviceTemplateId,
   generateId,
   getMountedChildren,
-  getCabinetSlotTile
+  getCabinetSlotTile,
+  isFullWidthRackItem
 } from 'src/utils';
 import { useScene } from 'src/hooks/useScene';
 import { useViewItem } from 'src/hooks/useViewItem';
@@ -75,6 +77,37 @@ const defaultPortConfig = (): PortConfig => {
     type: 'access',
     speed: '1G'
   };
+};
+
+/** Scroll only inside the item-controls sidebar — never the page/canvas. */
+const scrollSidebarTo = (el: HTMLElement | null | undefined) => {
+  if (!el) return;
+
+  const parent =
+    (el.closest('[data-item-controls-scroll]') as HTMLElement | null) ??
+    (() => {
+      let node: HTMLElement | null = el.parentElement;
+      while (node) {
+        const { overflowY } = window.getComputedStyle(node);
+        if (
+          (overflowY === 'auto' ||
+            overflowY === 'scroll' ||
+            overflowY === 'overlay') &&
+          node.scrollHeight > node.clientHeight + 1
+        ) {
+          return node;
+        }
+        node = node.parentElement;
+      }
+      return null;
+    })();
+
+  if (!parent) return;
+
+  const parentRect = parent.getBoundingClientRect();
+  const elRect = el.getBoundingClientRect();
+  const nextTop = parent.scrollTop + (elRect.top - parentRect.top) - 8;
+  parent.scrollTo({ top: Math.max(0, nextTop), behavior: 'smooth' });
 };
 
 const fieldSx = {
@@ -377,13 +410,16 @@ export const NodeControls2d = ({ id }: Props) => {
   );
   const [expandedSviId, setExpandedSviId] = useState<string | null>(null);
   const portRefs = useRef<Record<string, HTMLDivElement | null>>({});
+  const multiPanelRef = useRef<HTMLDivElement | null>(null);
 
   const shapePorts = useMemo(() => {
     if (!isShape2dIcon(modelItem.icon)) return [];
     return getShape2dPorts(modelItem.icon ?? '');
   }, [modelItem.icon]);
 
-  const isPc = modelItem.icon === SHAPE_2D_PC_ID;
+  const isPc =
+    modelItem.icon === SHAPE_2D_PC_ID ||
+    modelItem.icon === SHAPE_2D_CAMERA_ID;
   const isCabinet = modelItem.icon === SHAPE_2D_CABINET_ID;
   const isSwitch = !isPc && !isCabinet && isShape2dIcon(modelItem.icon);
   const canEditTemplate = isDeviceTemplateId(modelItem.icon);
@@ -416,7 +452,14 @@ export const NodeControls2d = ({ id }: Props) => {
 
   const multiPortDraft = useMemo(() => {
     if (!multiPort) {
-      return { name: '', vlan: '', mixedName: false, mixedVlan: false };
+      return {
+        name: '',
+        vlan: '',
+        type: 'access' as 'access' | 'trunk',
+        mixedName: false,
+        mixedVlan: false,
+        mixedType: false
+      };
     }
     const configs = focusedPortIds.map((portId) => {
       return {
@@ -430,17 +473,25 @@ export const NodeControls2d = ({ id }: Props) => {
     const vlans = configs.map((c) => {
       return c.vlan ?? '';
     });
+    const types = configs.map((c) => {
+      return (c.type ?? 'access') as 'access' | 'trunk';
+    });
     const mixedName = names.some((n) => {
       return n !== names[0];
     });
     const mixedVlan = vlans.some((v) => {
       return v !== vlans[0];
     });
+    const mixedType = types.some((t) => {
+      return t !== types[0];
+    });
     return {
       name: mixedName ? '' : names[0],
       vlan: mixedVlan ? '' : vlans[0],
+      type: mixedType ? 'access' : types[0],
       mixedName,
-      mixedVlan
+      mixedVlan,
+      mixedType
     };
   }, [multiPort, focusedPortIds, modelItem.ports]);
 
@@ -453,23 +504,23 @@ export const NodeControls2d = ({ id }: Props) => {
     if (focusedPortIds.length === 1) {
       const portId = focusedPortIds[0];
       setExpandedPortId(portId);
-      const el = portRefs.current[portId];
-      if (el) {
-        requestAnimationFrame(() => {
-          el.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
-        });
-      }
-      return;
+      // Wait for accordion expand + details mount before scrolling.
+      const timer = window.setTimeout(() => {
+        scrollSidebarTo(portRefs.current[portId]);
+      }, 100);
+      return () => {
+        window.clearTimeout(timer);
+      };
     }
 
-    // Multi-select: collapse single accordion, scroll to first selected.
+    // Multi-select: keep rows collapsed, show group panel, scroll to it.
     setExpandedPortId(null);
-    const el = portRefs.current[focusedPortIds[0]];
-    if (el) {
-      requestAnimationFrame(() => {
-        el.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
-      });
-    }
+    const timer = window.setTimeout(() => {
+      scrollSidebarTo(multiPanelRef.current);
+    }, 50);
+    return () => {
+      window.clearTimeout(timer);
+    };
   }, [focusedPortIds]);
 
   const updatePort = useCallback(
@@ -759,8 +810,19 @@ export const NodeControls2d = ({ id }: Props) => {
                         rackUnit: undefined
                       });
                     } else if (child.rackUnit !== undefined) {
+                      const childModel = modelItems.find((candidate) => {
+                        return candidate.id === child.id;
+                      });
                       updateViewItem(child.id, {
-                        tile: getCabinetSlotTile(viewItem.tile, child.rackUnit)
+                        tile: getCabinetSlotTile(
+                          viewItem.tile,
+                          child.rackUnit,
+                          {
+                            fullWidth: Boolean(
+                              childModel && isFullWidthRackItem(childModel)
+                            )
+                          }
+                        )
                       });
                     }
                   });
@@ -946,6 +1008,105 @@ export const NodeControls2d = ({ id }: Props) => {
             </Tabs>
 
             {sidebarTab === 'ports' && (
+              <>
+                {multiPort && (
+                  <Box
+                    ref={multiPanelRef}
+                    sx={{
+                      mb: 1,
+                      p: 1,
+                      borderRadius: 1,
+                      border: '1px solid',
+                      borderColor: 'primary.main',
+                      bgcolor: 'action.hover'
+                    }}
+                  >
+                    <Typography
+                      sx={{
+                        fontSize: 11,
+                        fontWeight: 700,
+                        mb: 0.75
+                      }}
+                    >
+                      Zaznaczono {focusedPortIds.length} portów
+                    </Typography>
+                    <Typography
+                      sx={{
+                        fontSize: 10,
+                        color: 'text.secondary',
+                        mb: 1
+                      }}
+                    >
+                      Ustawienia grupowe — Ctrl/Cmd+klik dodaje lub usuwa port.
+                    </Typography>
+                    <Stack spacing={1}>
+                      <TextField
+                        label="Nazwa"
+                        size="small"
+                        fullWidth
+                        sx={fieldSx}
+                        placeholder={
+                          multiPortDraft.mixedName
+                            ? '(różne wartości)'
+                            : undefined
+                        }
+                        value={multiPortDraft.name}
+                        onChange={(e) => {
+                          updatePorts(focusedPortIds, {
+                            name: e.target.value
+                          });
+                        }}
+                      />
+                      {!isPc && (
+                        <TextField
+                          label="VLAN"
+                          size="small"
+                          fullWidth
+                          sx={fieldSx}
+                          placeholder={
+                            multiPortDraft.mixedVlan
+                              ? '(różne wartości)'
+                              : undefined
+                          }
+                          value={multiPortDraft.vlan}
+                          onChange={(e) => {
+                            applyVlanNumberMulti(e.target.value);
+                          }}
+                        />
+                      )}
+                      {!isPc && (
+                        <FormControl size="small" fullWidth sx={fieldSx}>
+                          <InputLabel id="multi-port-type">Typ</InputLabel>
+                          <Select
+                            labelId="multi-port-type"
+                            label="Typ"
+                            value={
+                              multiPortDraft.mixedType
+                                ? ''
+                                : multiPortDraft.type
+                            }
+                            displayEmpty={multiPortDraft.mixedType}
+                            onChange={(e) => {
+                              const next = e.target.value as
+                                | 'access'
+                                | 'trunk';
+                              if (!next) return;
+                              updatePorts(focusedPortIds, { type: next });
+                            }}
+                          >
+                            {multiPortDraft.mixedType && (
+                              <MenuItem value="" disabled>
+                                (różne wartości)
+                              </MenuItem>
+                            )}
+                            <MenuItem value="access">Access</MenuItem>
+                            <MenuItem value="trunk">Trunk</MenuItem>
+                          </Select>
+                        </FormControl>
+                      )}
+                    </Stack>
+                  </Box>
+                )}
               <Accordion
                 disableGutters
                 elevation={0}
@@ -977,74 +1138,6 @@ export const NodeControls2d = ({ id }: Props) => {
                   </Typography>
                 </AccordionSummary>
                 <AccordionDetails sx={{ px: 0, pt: 0, pb: 0 }}>
-                  {multiPort && (
-                    <Box
-                      sx={{
-                        mb: 0.75,
-                        p: 1,
-                        borderRadius: 1,
-                        border: '1px solid',
-                        borderColor: 'primary.main',
-                        bgcolor: 'action.hover'
-                      }}
-                    >
-                      <Typography
-                        sx={{
-                          fontSize: 11,
-                          fontWeight: 700,
-                          mb: 0.75
-                        }}
-                      >
-                        Zaznaczono {focusedPortIds.length} portów
-                      </Typography>
-                      <Typography
-                        sx={{
-                          fontSize: 10,
-                          color: 'text.secondary',
-                          mb: 1
-                        }}
-                      >
-                        Ctrl+klik na porcie lub na liście — dodaj/usuń z
-                        zaznaczenia.
-                      </Typography>
-                      <Stack spacing={1}>
-                        <TextField
-                          label="Nazwa"
-                          size="small"
-                          fullWidth
-                          sx={fieldSx}
-                          placeholder={
-                            multiPortDraft.mixedName
-                              ? '(różne wartości)'
-                              : undefined
-                          }
-                          value={multiPortDraft.name}
-                          onChange={(e) => {
-                            updatePorts(focusedPortIds, {
-                              name: e.target.value
-                            });
-                          }}
-                        />
-                        {!isPc && (
-                          <TextField
-                            label="VLAN"
-                            size="small"
-                            fullWidth
-                            sx={fieldSx}
-                            placeholder={
-                              multiPortDraft.mixedVlan
-                                ? '(różne wartości)'
-                                : undefined
-                            }
-                            value={multiPortDraft.vlan}
-                            onChange={(e) => {
-                              applyVlanNumberMulti(e.target.value);
-                            }}
-                          />
-                        )}
-                      </Stack>
-                    </Box>
-                  )}
                   <Stack spacing={0.4}>
                     {portSummaries.map(
                       ({ port, index, config, vlanColor, isTrunk }) => {
@@ -1073,6 +1166,7 @@ export const NodeControls2d = ({ id }: Props) => {
                   </Stack>
                 </AccordionDetails>
               </Accordion>
+              </>
             )}
 
             {sidebarTab === 'svi' && (
@@ -1277,6 +1371,7 @@ export const NodeControls2d = ({ id }: Props) => {
             <AccordionDetails sx={{ px: 0, pt: 0, pb: 0 }}>
               {multiPort && (
                 <Box
+                  ref={multiPanelRef}
                   sx={{
                     mb: 0.75,
                     p: 1,
@@ -1289,21 +1384,66 @@ export const NodeControls2d = ({ id }: Props) => {
                   <Typography sx={{ fontSize: 11, fontWeight: 700, mb: 0.75 }}>
                     Zaznaczono {focusedPortIds.length} portów
                   </Typography>
-                  <TextField
-                    label="Nazwa"
-                    size="small"
-                    fullWidth
-                    sx={fieldSx}
-                    placeholder={
-                      multiPortDraft.mixedName
-                        ? '(różne wartości)'
-                        : undefined
-                    }
-                    value={multiPortDraft.name}
-                    onChange={(e) => {
-                      updatePorts(focusedPortIds, { name: e.target.value });
-                    }}
-                  />
+                  <Stack spacing={1}>
+                    <TextField
+                      label="Nazwa"
+                      size="small"
+                      fullWidth
+                      sx={fieldSx}
+                      placeholder={
+                        multiPortDraft.mixedName
+                          ? '(różne wartości)'
+                          : undefined
+                      }
+                      value={multiPortDraft.name}
+                      onChange={(e) => {
+                        updatePorts(focusedPortIds, { name: e.target.value });
+                      }}
+                    />
+                    {!isPc && (
+                      <TextField
+                        label="VLAN"
+                        size="small"
+                        fullWidth
+                        sx={fieldSx}
+                        placeholder={
+                          multiPortDraft.mixedVlan
+                            ? '(różne wartości)'
+                            : undefined
+                        }
+                        value={multiPortDraft.vlan}
+                        onChange={(e) => {
+                          applyVlanNumberMulti(e.target.value);
+                        }}
+                      />
+                    )}
+                    {!isPc && (
+                      <FormControl size="small" fullWidth sx={fieldSx}>
+                        <InputLabel id="multi-port-type-simple">Typ</InputLabel>
+                        <Select
+                          labelId="multi-port-type-simple"
+                          label="Typ"
+                          value={
+                            multiPortDraft.mixedType ? '' : multiPortDraft.type
+                          }
+                          displayEmpty={multiPortDraft.mixedType}
+                          onChange={(e) => {
+                            const next = e.target.value as 'access' | 'trunk';
+                            if (!next) return;
+                            updatePorts(focusedPortIds, { type: next });
+                          }}
+                        >
+                          {multiPortDraft.mixedType && (
+                            <MenuItem value="" disabled>
+                              (różne wartości)
+                            </MenuItem>
+                          )}
+                          <MenuItem value="access">Access</MenuItem>
+                          <MenuItem value="trunk">Trunk</MenuItem>
+                        </Select>
+                      </FormControl>
+                    )}
+                  </Stack>
                 </Box>
               )}
               <Stack spacing={0.4}>

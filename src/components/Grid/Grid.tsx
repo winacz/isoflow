@@ -1,16 +1,90 @@
 import React, { useEffect, useMemo, useRef } from 'react';
 import { Box } from '@mui/material';
-import { Size } from 'src/types';
+import { Size, GridStyle } from 'src/types';
 import gridTileSvg from 'src/assets/grid-tile-bg.svg';
 import { useUiStateStore } from 'src/stores/uiStateStore';
-import { PROJECTED_TILE_SIZE, TILE_SIZE_2D, GRID_2D_VISUAL_STEP } from 'src/config';
+import {
+  PROJECTED_TILE_SIZE,
+  TILE_SIZE_2D,
+  RACK_1U_HEIGHT_TILES,
+  GRID_COLOR_DARK
+} from 'src/config';
 import { SizeUtils } from 'src/utils/SizeUtils';
 import { useResizeObserver } from 'src/hooks/useResizeObserver';
+import { isPlanProjection } from 'src/utils';
 
-/** Major (sparse) grid lines */
-const GRID_MAJOR_COLOR = 'rgba(0, 0, 0, 0.15)';
-/** Fine logical-tile grid — very faint under the major grid */
-const GRID_FINE_COLOR = 'rgba(0, 0, 0, 0.045)';
+type GridVisualConfig = {
+  majorStepX: number;
+  majorStepY: number;
+  showFine: boolean;
+  majorColor: string;
+  fineColor: string;
+};
+
+const GRID_STYLES: Record<GridStyle, GridVisualConfig> = {
+  fine: {
+    majorStepX: 1,
+    majorStepY: 1,
+    showFine: false,
+    majorColor: 'rgba(0, 0, 0, 0.09)',
+    fineColor: 'rgba(0, 0, 0, 0)'
+  },
+  standard: {
+    majorStepX: 5,
+    majorStepY: 5,
+    showFine: true,
+    majorColor: 'rgba(0, 0, 0, 0.15)',
+    fineColor: 'rgba(0, 0, 0, 0.045)'
+  },
+  dense: {
+    majorStepX: 2,
+    majorStepY: 2,
+    showFine: true,
+    majorColor: 'rgba(0, 0, 0, 0.18)',
+    fineColor: 'rgba(0, 0, 0, 0.07)'
+  },
+  sparse: {
+    majorStepX: 10,
+    majorStepY: 10,
+    showFine: false,
+    majorColor: 'rgba(0, 0, 0, 0.14)',
+    fineColor: 'rgba(0, 0, 0, 0)'
+  },
+  rack: {
+    // Square cells: side = RACK switch 1U height
+    majorStepX: RACK_1U_HEIGHT_TILES,
+    majorStepY: RACK_1U_HEIGHT_TILES,
+    showFine: false,
+    majorColor: 'rgba(15, 23, 42, 0.22)',
+    fineColor: 'rgba(0, 0, 0, 0)'
+  }
+};
+
+const lineBackground = (color: string) => {
+  return [
+    `linear-gradient(to right, ${color} 1px, transparent 1px)`,
+    `linear-gradient(to bottom, ${color} 1px, transparent 1px)`
+  ].join(', ');
+};
+
+const hexToRgba = (hex: string, alpha: number): string | null => {
+  const raw = hex.trim();
+  let r = 0;
+  let g = 0;
+  let b = 0;
+  if (/^#([0-9a-fA-F]{6})$/.test(raw)) {
+    r = parseInt(raw.slice(1, 3), 16);
+    g = parseInt(raw.slice(3, 5), 16);
+    b = parseInt(raw.slice(5, 7), 16);
+  } else if (/^#([0-9a-fA-F]{3})$/.test(raw)) {
+    r = parseInt(raw[1] + raw[1], 16);
+    g = parseInt(raw[2] + raw[2], 16);
+    b = parseInt(raw[3] + raw[3], 16);
+  } else {
+    return null;
+  }
+  return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+};
 
 export const Grid = () => {
   const majorRef = useRef<HTMLDivElement>(null);
@@ -26,22 +100,39 @@ export const Grid = () => {
   const projectionMode = useUiStateStore((state) => {
     return state.projectionMode;
   });
+  const gridStyle = useUiStateStore((state) => {
+    return state.gridStyle;
+  });
+  const gridColor = useUiStateStore((state) => {
+    return state.canvasByMode.TWO_D.gridColor;
+  });
+  const canvasTheme = useUiStateStore((state) => {
+    return state.canvasByMode.TWO_D.theme;
+  });
 
-  const isTwoD = projectionMode === 'TWO_D';
+  const isTwoD = isPlanProjection(projectionMode);
+  const style = GRID_STYLES[gridStyle] ?? GRID_STYLES.standard;
+
+  const majorColor = useMemo(() => {
+    const tint = gridColor ?? (canvasTheme === 'dark' ? GRID_COLOR_DARK : null);
+    if (!tint) return style.majorColor;
+    return hexToRgba(tint, canvasTheme === 'dark' ? 0.55 : 0.45) ?? style.majorColor;
+  }, [gridColor, canvasTheme, style.majorColor]);
+
+  const fineColor = useMemo(() => {
+    if (!style.showFine) return style.fineColor;
+    const tint = gridColor ?? (canvasTheme === 'dark' ? GRID_COLOR_DARK : null);
+    if (!tint) return style.fineColor;
+    return hexToRgba(tint, canvasTheme === 'dark' ? 0.28 : 0.18) ?? style.fineColor;
+  }, [gridColor, canvasTheme, style.fineColor, style.showFine]);
 
   const majorBackgroundImage = useMemo(() => {
-    return [
-      `linear-gradient(to right, ${GRID_MAJOR_COLOR} 1px, transparent 1px)`,
-      `linear-gradient(to bottom, ${GRID_MAJOR_COLOR} 1px, transparent 1px)`
-    ].join(', ');
-  }, []);
+    return lineBackground(majorColor);
+  }, [majorColor]);
 
   const fineBackgroundImage = useMemo(() => {
-    return [
-      `linear-gradient(to right, ${GRID_FINE_COLOR} 1px, transparent 1px)`,
-      `linear-gradient(to bottom, ${GRID_FINE_COLOR} 1px, transparent 1px)`
-    ].join(', ');
-  }, []);
+    return lineBackground(fineColor);
+  }, [fineColor]);
 
   useEffect(() => {
     if (!isTwoD) {
@@ -59,7 +150,7 @@ export const Grid = () => {
       return;
     }
 
-    if (!majorRef.current || !fineRef.current) return;
+    if (!majorRef.current) return;
 
     const elSize = majorRef.current.getBoundingClientRect();
     const fine = {
@@ -67,8 +158,8 @@ export const Grid = () => {
       height: TILE_SIZE_2D * zoom
     };
     const major = {
-      width: TILE_SIZE_2D * GRID_2D_VISUAL_STEP * zoom,
-      height: TILE_SIZE_2D * GRID_2D_VISUAL_STEP * zoom
+      width: TILE_SIZE_2D * style.majorStepX * zoom,
+      height: TILE_SIZE_2D * style.majorStepY * zoom
     };
     const backgroundPosition: Size = {
       width: elSize.width / 2 + scroll.position.x,
@@ -76,11 +167,21 @@ export const Grid = () => {
     };
     const pos = `${backgroundPosition.width}px ${backgroundPosition.height}px`;
 
-    fineRef.current.style.backgroundSize = `${fine.width}px ${fine.height}px`;
-    fineRef.current.style.backgroundPosition = pos;
+    if (fineRef.current) {
+      fineRef.current.style.backgroundSize = `${fine.width}px ${fine.height}px`;
+      fineRef.current.style.backgroundPosition = pos;
+    }
     majorRef.current.style.backgroundSize = `${major.width}px ${major.height}px`;
     majorRef.current.style.backgroundPosition = pos;
-  }, [scroll, zoom, size, projectionMode, isTwoD]);
+  }, [
+    scroll,
+    zoom,
+    size,
+    projectionMode,
+    isTwoD,
+    style.majorStepX,
+    style.majorStepY
+  ]);
 
   return (
     <Box
@@ -95,7 +196,7 @@ export const Grid = () => {
         pointerEvents: 'none'
       }}
     >
-      {isTwoD && (
+      {isTwoD && style.showFine && (
         <Box
           ref={fineRef}
           sx={{

@@ -10,7 +10,8 @@ import {
   isLockedTileWaypoint,
   lockWaypointAtTile,
   unlockWaypointAtTile,
-  stripToEndpointAnchors
+  stripToEndpointAnchors,
+  isPlanProjection
 } from 'src/utils';
 import { useScene } from 'src/hooks/useScene';
 import { useModelStore } from 'src/stores/modelStore';
@@ -45,6 +46,76 @@ export const ContextMenuManager = ({ anchorEl }: Props) => {
 
   const menuItems = useMemo(() => {
     if (!contextMenu) return [];
+
+    if (contextMenu.item.type === 'ITEM') {
+      let viewItem: (typeof scene.items)[number];
+      try {
+        viewItem = getItemByIdOrThrow(scene.items, contextMenu.item.id).value;
+      } catch {
+        return [];
+      }
+
+      const itemId = viewItem.id;
+      const linkedConnectors = scene.connectors.filter((con) => {
+        return con.anchors.some((anchor) => {
+          return anchor.ref.item === itemId;
+        });
+      });
+
+      if (viewItem.locked) {
+        return [
+          {
+            label:
+              linkedConnectors.length > 0
+                ? `Odblokuj węzeł (+ ${linkedConnectors.length} poł.)`
+                : 'Odblokuj węzeł',
+            onClick: () => {
+              try {
+                scene.beginHistoryTransaction();
+                scene.updateViewItem(itemId, { locked: false });
+                linkedConnectors.forEach((con) => {
+                  scene.updateConnector(
+                    con.id,
+                    { locked: false },
+                    { overlapResolve: 'off' }
+                  );
+                });
+                scene.endHistoryTransaction();
+              } catch {
+                // ignore
+              }
+              onClose();
+            }
+          }
+        ];
+      }
+
+      return [
+        {
+          label:
+            linkedConnectors.length > 0
+              ? `Blokuj węzeł (+ ${linkedConnectors.length} poł.)`
+              : 'Blokuj węzeł',
+          onClick: () => {
+            try {
+              scene.beginHistoryTransaction();
+              scene.updateViewItem(itemId, { locked: true });
+              linkedConnectors.forEach((con) => {
+                scene.updateConnector(
+                  con.id,
+                  { locked: true },
+                  { overlapResolve: 'off' }
+                );
+              });
+              scene.endHistoryTransaction();
+            } catch {
+              // ignore
+            }
+            onClose();
+          }
+        }
+      ];
+    }
 
     if (contextMenu.item.type === 'CONNECTOR') {
       type SceneConnector = (typeof scene.connectors)[number];
@@ -92,29 +163,16 @@ export const ContextMenuManager = ({ anchorEl }: Props) => {
 
       const items: { label: string; onClick: () => void }[] = [];
 
-      if (lockedHere) {
+      if (connector.locked) {
         items.push({
-          label:
-            stackedConnectors.length > 1
-              ? `Odblokuj waypoint (${stackedConnectors.length})`
-              : 'Odblokuj waypoint',
+          label: 'Odblokuj połączenie',
           onClick: () => {
             try {
-              scene.beginHistoryTransaction();
-              stackedConnectors.forEach((con) => {
-                const next = unlockWaypointAtTile({
-                  anchors: con.anchors,
-                  tile
-                });
-                if (next) {
-                  scene.updateConnector(
-                    con.id,
-                    { anchors: next },
-                    { overlapResolve: 'off' }
-                  );
-                }
-              });
-              scene.endHistoryTransaction();
+              scene.updateConnector(
+                connector.id,
+                { locked: false },
+                { overlapResolve: 'off' }
+              );
             } catch {
               // ignore
             }
@@ -123,28 +181,14 @@ export const ContextMenuManager = ({ anchorEl }: Props) => {
         });
       } else {
         items.push({
-          label:
-            stackedConnectors.length > 1
-              ? `Blokuj waypoint (${stackedConnectors.length})`
-              : 'Blokuj waypoint',
+          label: 'Blokuj połączenie',
           onClick: () => {
             try {
-              scene.beginHistoryTransaction();
-              stackedConnectors.forEach((con) => {
-                const next = lockWaypointAtTile({
-                  anchors: con.anchors,
-                  tile,
-                  path: con.path,
-                  view: scene.currentView,
-                  modelItems
-                });
-                scene.updateConnector(
-                  con.id,
-                  { anchors: next },
-                  { overlapResolve: 'off' }
-                );
-              });
-              scene.endHistoryTransaction();
+              scene.updateConnector(
+                connector.id,
+                { locked: true },
+                { overlapResolve: 'off' }
+              );
             } catch {
               // ignore
             }
@@ -153,35 +197,136 @@ export const ContextMenuManager = ({ anchorEl }: Props) => {
         });
       }
 
-      items.push({
-        label: 'Resetuj waypointy',
-        onClick: () => {
-          try {
-            if (connector.anchors.length <= 2) {
+      if (!connector.locked) {
+        if (lockedHere) {
+          items.push({
+            label:
+              stackedConnectors.length > 1
+                ? `Odblokuj waypoint (${stackedConnectors.length})`
+                : 'Odblokuj waypoint',
+            onClick: () => {
+              try {
+                scene.beginHistoryTransaction();
+                stackedConnectors.forEach((con) => {
+                  const next = unlockWaypointAtTile({
+                    anchors: con.anchors,
+                    tile
+                  });
+                  if (next) {
+                    scene.updateConnector(
+                      con.id,
+                      { anchors: next },
+                      { overlapResolve: 'off' }
+                    );
+                  }
+                });
+                scene.endHistoryTransaction();
+              } catch {
+                // ignore
+              }
               onClose();
-              return;
             }
-
-            // Keep locked waypoints — only drop free mid WPs.
-            const nextAnchors = stripToEndpointAnchors(connector.anchors);
-
-            scene.updateConnector(
-              connector.id,
-              { anchors: nextAnchors },
-              { overlapResolve: 'off' }
-            );
-          } catch {
-            // Connector may have been removed
-          }
-          onClose();
+          });
+        } else {
+          items.push({
+            label:
+              stackedConnectors.length > 1
+                ? `Blokuj waypoint (${stackedConnectors.length})`
+                : 'Blokuj waypoint',
+            onClick: () => {
+              try {
+                scene.beginHistoryTransaction();
+                stackedConnectors.forEach((con) => {
+                  const next = lockWaypointAtTile({
+                    anchors: con.anchors,
+                    tile,
+                    path: con.path,
+                    view: scene.currentView,
+                    modelItems
+                  });
+                  scene.updateConnector(
+                    con.id,
+                    { anchors: next },
+                    { overlapResolve: 'off' }
+                  );
+                });
+                scene.endHistoryTransaction();
+              } catch {
+                // ignore
+              }
+              onClose();
+            }
+          });
         }
-      });
+
+        items.push({
+          label: 'Resetuj waypointy',
+          onClick: () => {
+            try {
+              if (connector.anchors.length <= 2) {
+                onClose();
+                return;
+              }
+
+              // Keep locked waypoints — only drop free mid WPs.
+              const nextAnchors = stripToEndpointAnchors(connector.anchors);
+
+              scene.updateConnector(
+                connector.id,
+                { anchors: nextAnchors },
+                { overlapResolve: 'off' }
+              );
+            } catch {
+              // Connector may have been removed
+            }
+            onClose();
+          }
+        });
+      }
 
       return items;
     }
 
     if (contextMenu.item.type === 'RECTANGLE') {
-      return [
+      let rectangle: (typeof scene.rectangles)[number];
+      try {
+        rectangle = getItemByIdOrThrow(
+          scene.rectangles,
+          contextMenu.item.id
+        ).value;
+      } catch {
+        return [];
+      }
+
+      const items: { label: string; onClick: () => void }[] = [];
+
+      if (rectangle.locked) {
+        items.push({
+          label: 'Odblokuj kształt',
+          onClick: () => {
+            try {
+              scene.updateRectangle(rectangle.id, { locked: false });
+            } catch {
+              // ignore
+            }
+            onClose();
+          }
+        });
+      } else {
+        items.push({
+          label: 'Blokuj kształt',
+          onClick: () => {
+            try {
+              scene.updateRectangle(rectangle.id, { locked: true });
+            } catch {
+              // ignore
+            }
+            onClose();
+          }
+        });
+      }
+
+      items.push(
         {
           label: 'Send backward',
           onClick: () => {
@@ -210,7 +355,9 @@ export const ContextMenuManager = ({ anchorEl }: Props) => {
             onClose();
           }
         }
-      ];
+      );
+
+      return items;
     }
 
     return [];
@@ -220,10 +367,9 @@ export const ContextMenuManager = ({ anchorEl }: Props) => {
     return null;
   }
 
-  const tilePos =
-    projectionMode === 'TWO_D'
-      ? getTilePosition2d({ tile: contextMenu.tile })
-      : getTilePosition({ tile: contextMenu.tile });
+  const tilePos = isPlanProjection(projectionMode)
+    ? getTilePosition2d({ tile: contextMenu.tile })
+    : getTilePosition({ tile: contextMenu.tile });
 
   return (
     <ContextMenu

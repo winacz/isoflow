@@ -3,7 +3,9 @@ import {
   ModeActions,
   Coords,
   ItemReference,
-  Connector
+  Connector,
+  Scroll,
+  State
 } from 'src/types';
 import { useScene } from 'src/hooks/useScene';
 import {
@@ -29,16 +31,142 @@ import {
   collectTileWaypoints,
   snapTileToWaypointGuides,
   isRackFormFactorItem,
+  isFullWidthRackItem,
   isCabinetItem,
   findCabinetAtTile,
   resolveCabinetSnap,
   getMountedChildren,
   screenToTile2dContinuous,
-  snapTile2dToGrid
+  snapTile2dToGrid,
+  getGridSnapStep,
+  getPanScrollFromDelta,
+  getDragEdgeScrollVelocity,
+  isDragEdgeVelocityActive,
+  DRAG_EDGE_DELAY_MS
 } from 'src/utils';
 import { getShape2dSize, getModelItemSize } from 'src/config';
 import { useCabinetSnapStore } from 'src/stores/cabinetSnapStore';
 import { useNodeDragStore } from 'src/stores/nodeDragStore';
+
+/** Live scroll while edge-auto-panning (keeps drag under the cursor). */
+let liveScroll: Scroll | null = null;
+/** Fixed world tile under the mouse at drag start (2D free-drag). */
+let dragMousedownTile: Coords | null = null;
+let edgeRafId = 0;
+let edgeHoldSince = 0;
+let edgeLastScreen: Coords | null = null;
+let edgeDragState: State | null = null;
+/** Skip the “mouse must move” gate when edge-scroll re-applies the drag. */
+let edgeScrollApplying = false;
+
+const stopDragEdgeScroll = () => {
+  if (edgeRafId) {
+    cancelAnimationFrame(edgeRafId);
+    edgeRafId = 0;
+  }
+  edgeHoldSince = 0;
+  edgeLastScreen = null;
+  edgeDragState = null;
+};
+
+const clearDragSession = () => {
+  stopDragEdgeScroll();
+  liveScroll = null;
+  dragMousedownTile = null;
+  edgeScrollApplying = false;
+};
+
+const scheduleDragEdgeScroll = (state: State) => {
+  if (state.uiState.mode.type !== 'DRAG_ITEMS') return;
+  if (state.uiState.projectionMode !== 'TWO_D') return;
+
+  edgeLastScreen = { ...state.uiState.mouse.position.screen };
+  edgeDragState = state;
+
+  const velocity = getDragEdgeScrollVelocity(
+    edgeLastScreen,
+    state.rendererSize
+  );
+
+  if (!isDragEdgeVelocityActive(velocity)) {
+    edgeHoldSince = 0;
+    if (edgeRafId) {
+      cancelAnimationFrame(edgeRafId);
+      edgeRafId = 0;
+    }
+    // Manual / store scroll wins when not in the edge zone.
+    liveScroll = state.uiState.scroll;
+    return;
+  }
+
+  if (!edgeHoldSince) {
+    edgeHoldSince = performance.now();
+  }
+
+  if (edgeRafId) return;
+
+  const tick = () => {
+    edgeRafId = 0;
+    const active = edgeDragState;
+    const screen = edgeLastScreen;
+    if (
+      !active ||
+      !screen ||
+      active.uiState.mode.type !== 'DRAG_ITEMS' ||
+      !active.uiState.mouse.mousedown
+    ) {
+      stopDragEdgeScroll();
+      return;
+    }
+
+    const vel = getDragEdgeScrollVelocity(screen, active.rendererSize);
+    if (!isDragEdgeVelocityActive(vel)) {
+      edgeHoldSince = 0;
+      liveScroll = active.uiState.scroll;
+      return;
+    }
+
+    if (performance.now() - edgeHoldSince < DRAG_EDGE_DELAY_MS) {
+      edgeRafId = requestAnimationFrame(tick);
+      return;
+    }
+
+    if (!liveScroll) {
+      liveScroll = active.uiState.scroll;
+    }
+    liveScroll = getPanScrollFromDelta(liveScroll, vel);
+    active.uiState.actions.setScroll(liveScroll);
+
+    edgeScrollApplying = true;
+    try {
+      DragItems.mousemove?.({
+        ...active,
+        uiState: {
+          ...active.uiState,
+          scroll: liveScroll,
+          mouse: {
+            ...active.uiState.mouse,
+            position: {
+              screen,
+              tile: screenToTile2dContinuous({
+                mouse: screen,
+                zoom: active.uiState.zoom,
+                scroll: liveScroll,
+                rendererSize: active.rendererSize
+              })
+            }
+          }
+        }
+      });
+    } finally {
+      edgeScrollApplying = false;
+    }
+
+    edgeRafId = requestAnimationFrame(tick);
+  };
+
+  edgeRafId = requestAnimationFrame(tick);
+};
 
 const isConnectorPathDrag = (items: ItemReference[]) => {
   return items.some((item) => {
@@ -171,7 +299,8 @@ const dragItems = (
             cabinetViewItem: cabinet.viewItem,
             cabinetModelItem: cabinet.modelItem,
             viewItems: scene.items,
-            excludeItemIds: excludeIds
+            excludeItemIds: excludeIds,
+            fullWidth: isFullWidthRackItem(modelItem)
           });
           if (snap) {
             nextTiles[id] = snap.tile;
@@ -428,12 +557,14 @@ const dragItems = (
   items.forEach((item) => {
     if (item.type === 'ITEM') {
       const node = getItemByIdOrThrow(scene.items, item.id).value;
+      if (node.locked) return;
 
       scene.updateViewItem(item.id, {
         tile: CoordsUtils.add(node.tile, delta)
       });
     } else if (item.type === 'RECTANGLE') {
       const rectangle = getItemByIdOrThrow(scene.rectangles, item.id).value;
+      if (rectangle.locked) return;
       const newFrom = CoordsUtils.add(rectangle.from, delta);
       const newTo = CoordsUtils.add(rectangle.to, delta);
 
@@ -755,6 +886,7 @@ export const DragItems: ModeActions = {
   entry: ({ uiState, rendererRef, scene }) => {
     if (uiState.mode.type !== 'DRAG_ITEMS' || !uiState.mouse.mousedown) return;
 
+    clearDragSession();
     useNodeDragStore.getState().clear();
     scene.beginHistoryTransaction();
     const renderer = rendererRef;
@@ -826,14 +958,23 @@ export const DragItems: ModeActions = {
     }
   },
   exit: ({ rendererRef, scene }) => {
+    clearDragSession();
     useCabinetSnapStore.getState().clear();
     useNodeDragStore.getState().clear();
     scene.endHistoryTransaction();
     const renderer = rendererRef;
     renderer.style.userSelect = 'auto';
   },
-  mousemove: ({ uiState, scene, model, rendererSize }) => {
+  mousemove: (state) => {
+    const { uiState, scene, model, rendererSize } = state;
     if (uiState.mode.type !== 'DRAG_ITEMS' || !uiState.mouse.mousedown) return;
+
+    if (!liveScroll) {
+      liveScroll = uiState.scroll;
+    } else if (!edgeScrollApplying) {
+      // Keep in sync with trackpad pan unless edge-scroll owns liveScroll.
+      liveScroll = uiState.scroll;
+    }
 
     const mode = uiState.mode;
     const freshModel = model.actions.get();
@@ -888,20 +1029,34 @@ export const DragItems: ModeActions = {
           }
         : undefined;
 
+    const scroll = liveScroll ?? uiState.scroll;
     const continuousOpts = isNodeFreeDrag
       ? {
           mouse: uiState.mouse.position.screen,
           zoom: uiState.zoom,
-          scroll: uiState.scroll,
+          scroll,
           rendererSize
         }
       : null;
-    const continuousMousedown = continuousOpts
-      ? screenToTile2dContinuous({
-          ...continuousOpts,
-          mouse: uiState.mouse.mousedown.screen
-        })
-      : null;
+
+    if (isNodeFreeDrag && uiState.mouse.mousedown && !dragMousedownTile) {
+      dragMousedownTile = screenToTile2dContinuous({
+        mouse: uiState.mouse.mousedown.screen,
+        zoom: uiState.zoom,
+        scroll,
+        rendererSize
+      });
+    }
+
+    const continuousMousedown =
+      isNodeFreeDrag && dragMousedownTile
+        ? dragMousedownTile
+        : continuousOpts
+          ? screenToTile2dContinuous({
+              ...continuousOpts,
+              mouse: uiState.mouse.mousedown.screen
+            })
+          : null;
 
     const dragOpts = {
       isTwoD,
@@ -976,19 +1131,27 @@ export const DragItems: ModeActions = {
         })
       );
 
+      if (!edgeScrollApplying) {
+        scheduleDragEdgeScroll(state);
+      }
       return;
     }
 
     // Node free-drag tracks pixels; path drag still waits for tile steps.
-    if (isNodeFreeDrag) {
-      if (
-        !uiState.mouse.delta?.screen ||
-        CoordsUtils.isEqual(uiState.mouse.delta.screen, CoordsUtils.zero())
-      ) {
+    // Edge-scroll re-applies while the cursor is still — skip the move gate.
+    if (!edgeScrollApplying) {
+      if (isNodeFreeDrag) {
+        if (
+          !uiState.mouse.delta?.screen ||
+          CoordsUtils.isEqual(uiState.mouse.delta.screen, CoordsUtils.zero())
+        ) {
+          scheduleDragEdgeScroll(state);
+          return;
+        }
+      } else if (!hasMovedTile(uiState.mouse) || !uiState.mouse.delta?.tile) {
+        scheduleDragEdgeScroll(state);
         return;
       }
-    } else if (!hasMovedTile(uiState.mouse) || !uiState.mouse.delta?.tile) {
-      return;
     }
 
     const tile = orthogonal ? axisLockTile(rawTile, origin) : rawTile;
@@ -999,8 +1162,13 @@ export const DragItems: ModeActions = {
         : uiState.mouse.delta!.tile;
 
     runDrag(tile, delta);
+
+    if (!edgeScrollApplying) {
+      scheduleDragEdgeScroll(state);
+    }
   },
   mouseup: ({ uiState, scene, model }) => {
+    clearDragSession();
     useCabinetSnapStore.getState().clear();
     if (
       uiState.mode.type === 'DRAG_ITEMS' &&
@@ -1034,6 +1202,7 @@ export const DragItems: ModeActions = {
           });
         });
         const excludeIds = [...moveIds];
+        const gridStep = getGridSnapStep(uiState.gridStyle);
 
         const finalTiles: Record<string, Coords> = { ...live.tiles };
         const patches: Record<
@@ -1075,7 +1244,8 @@ export const DragItems: ModeActions = {
 
           let resolvedTile: Coords;
           if (willBeMounted) {
-            resolvedTile = snapTile2dToGrid(liveTile);
+            // Cabinet slots are exact 1U positions — never apply RACK floor grid.
+            resolvedTile = snapTile2dToGrid(liveTile, { x: 1, y: 1 });
           } else {
             const size = getModelItemSize(modelItem ?? {}) ??
               getShape2dSize(modelItem?.icon ?? '') ?? {
@@ -1085,7 +1255,7 @@ export const DragItems: ModeActions = {
             const childIds = isCabinet
               ? getMountedChildren(id, scene.items).map((child) => child.id)
               : [];
-            const desired = snapTile2dToGrid(liveTile);
+            const desired = snapTile2dToGrid(liveTile, gridStep);
             const itemsForCollision = scene.items.map((item) => {
               return {
                 ...item,

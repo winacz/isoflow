@@ -17,11 +17,11 @@ import { SceneLayer } from 'src/components/SceneLayer/SceneLayer';
 import { TransformControlsManager } from 'src/components/TransformControlsManager/TransformControlsManager';
 import { useScene } from 'src/hooks/useScene';
 import { RendererProps } from 'src/types/rendererProps';
-import { isShape2dIcon } from 'src/config';
+import { isShape2dIcon, DIAGRAM_BG_2D_LIGHT, DIAGRAM_BG_2D_DARK } from 'src/config';
 import { Connector as ConnectorModel } from 'src/types';
 import { MarqueeSelection } from 'src/components/MarqueeSelection/MarqueeSelection';
-
-const DIAGRAM_BG_2D = '#f6faff';
+import { isWheelZoomGesture } from 'src/utils/zoom';
+import { isPlanProjection, projectionPrefsKey } from 'src/utils';
 
 const getConnectorItemIds = (connector: ConnectorModel) => {
   return connector.anchors
@@ -46,7 +46,12 @@ export const Renderer = ({ showGrid, backgroundColor }: RendererProps) => {
     return state.projectionMode;
   });
   const diagramBackgroundColor = useUiStateStore((state) => {
-    return state.diagramBackgroundColor;
+    const key = projectionPrefsKey(state.projectionMode);
+    return state.canvasByMode[key].backgroundColor;
+  });
+  const canvasTheme = useUiStateStore((state) => {
+    const key = projectionPrefsKey(state.projectionMode);
+    return state.canvasByMode[key].theme;
   });
   const uiStateActions = useUiStateStore((state) => {
     return state.actions;
@@ -67,7 +72,8 @@ export const Renderer = ({ showGrid, backgroundColor }: RendererProps) => {
     uiStateActions.setRendererEl(containerRef.current);
   }, [setInteractionsElement, uiStateActions]);
 
-  // Native wheel on the diagram hit-layer (React onWheel can be passive / unreliable)
+  // Native wheel: plan trackpad two-finger = pan; pinch / mouse wheel = zoom.
+  // Isometric always zooms (classic map behavior).
   useEffect(() => {
     const el = interactionsRef.current;
     if (!el) return undefined;
@@ -75,18 +81,39 @@ export const Renderer = ({ showGrid, backgroundColor }: RendererProps) => {
     const onWheel = (e: WheelEvent) => {
       e.preventDefault();
       e.stopPropagation();
-      uiStateActions.adjustZoomByWheel(e.deltaY, e.deltaMode);
+
+      const rect = el.getBoundingClientRect();
+      const focalFromCenter = {
+        x: e.clientX - rect.left - rect.width / 2,
+        y: e.clientY - rect.top - rect.height / 2
+      };
+
+      const shouldZoom =
+        !isPlanProjection(projectionMode) || isWheelZoomGesture(e);
+
+      if (shouldZoom) {
+        uiStateActions.adjustZoomByWheel(
+          e.deltaY,
+          e.deltaMode,
+          focalFromCenter
+        );
+        return;
+      }
+
+      uiStateActions.panByWheel(e.deltaX, e.deltaY, e.deltaMode);
     };
 
     el.addEventListener('wheel', onWheel, { passive: false });
     return () => {
       el.removeEventListener('wheel', onWheel);
     };
-  }, [uiStateActions]);
+  }, [uiStateActions, projectionMode]);
 
   const isShowGrid = showGrid !== undefined ? showGrid : showGridUi;
 
-  const isTwoD = projectionMode === 'TWO_D';
+  const isTwoD = isPlanProjection(projectionMode);
+  const isTwoDV2 = projectionMode === 'TWO_D_V2';
+  const isClassic2d = projectionMode === 'TWO_D';
 
   const iconByItemId = useMemo(() => {
     return new Map(
@@ -109,24 +136,26 @@ export const Renderer = ({ showGrid, backgroundColor }: RendererProps) => {
   }, [isTwoD, items, iconByItemId]);
 
   const visibleConnectors = useMemo(() => {
+    // Schematic 2Dv2 never draws cables (PiP uses Plan connectors instead).
+    if (isTwoDV2) return [];
+
     return connectors.filter((connector) => {
       const itemIds = getConnectorItemIds(connector);
 
       if (itemIds.length === 0) {
-        // In-progress connector with only tile anchors — show in active view only
-        return isTwoD;
+        return isClassic2d;
       }
 
       const allPlan = itemIds.every(isPlanItem);
       const anyPlan = itemIds.some(isPlanItem);
 
-      if (isTwoD) {
+      if (isClassic2d) {
         return allPlan;
       }
 
       return !anyPlan;
     });
-  }, [connectors, isTwoD, iconByItemId]);
+  }, [connectors, isTwoDV2, isClassic2d, iconByItemId]);
 
   return (
     <Box
@@ -141,7 +170,11 @@ export const Renderer = ({ showGrid, backgroundColor }: RendererProps) => {
         bgcolor: (theme) => {
           const override = diagramBackgroundColor ?? backgroundColor;
           if (override) return override;
-          if (isTwoD) return DIAGRAM_BG_2D;
+          if (isTwoD && canvasTheme === 'dark') return DIAGRAM_BG_2D_DARK;
+          if (isTwoD) {
+            // Slightly cooler schematic wash for 2Dv2
+            return isTwoDV2 ? '#eef3f8' : DIAGRAM_BG_2D_LIGHT;
+          }
           return theme.customVars.customPalette.diagramBg;
         }
       }}
@@ -167,7 +200,7 @@ export const Renderer = ({ showGrid, backgroundColor }: RendererProps) => {
       >
         {isShowGrid && <Grid />}
       </Box>
-      {mode.showCursor && (
+      {mode.showCursor && mode.type !== 'CURSOR' && (
         <SceneLayer>
           <Cursor />
         </SceneLayer>
@@ -192,7 +225,16 @@ export const Renderer = ({ showGrid, backgroundColor }: RendererProps) => {
       )}
       <SceneLayer
         order={isTwoD ? 1 : 11}
-        sx={!isTwoD ? { pointerEvents: 'none' } : undefined}
+        sx={
+          !isTwoD
+            ? { pointerEvents: 'none' }
+            : isTwoDV2
+              ? {
+                  // Distinct schematic look: soft lift, no cable clutter.
+                  filter: 'saturate(0.92) contrast(1.04)'
+                }
+              : undefined
+        }
       >
         <Nodes nodes={visibleNodes} />
       </SceneLayer>
@@ -201,12 +243,12 @@ export const Renderer = ({ showGrid, backgroundColor }: RendererProps) => {
           <MarqueeSelection />
         </SceneLayer>
       )}
-      {isTwoD && (
+      {isClassic2d && (
         <SceneLayer order={2} sx={{ pointerEvents: 'none' }}>
           <Connectors connectors={visibleConnectors} />
         </SceneLayer>
       )}
-      {isTwoD && (
+      {isClassic2d && (
         <SceneLayer order={4} sx={{ pointerEvents: 'none' }}>
           <WaypointGuides />
         </SceneLayer>
@@ -229,9 +271,14 @@ export const Renderer = ({ showGrid, backgroundColor }: RendererProps) => {
         }}
       />
       {/* Above interaction overlay so badge / rectangle handles work */}
-      {isTwoD && (
+      {isClassic2d && (
         <SceneLayer order={11} sx={{ pointerEvents: 'none' }}>
           <ConnectorStackBadges />
+          <TransformControlsManager />
+        </SceneLayer>
+      )}
+      {isTwoDV2 && (
+        <SceneLayer order={11} sx={{ pointerEvents: 'none' }}>
           <TransformControlsManager />
         </SceneLayer>
       )}

@@ -68,7 +68,7 @@ const numberSection = (
   }
 
   if (numbering === 'COLS_TTB') {
-    // Column by column, top then bottom (MikroTik-ish)
+    // Column by column, top then bottom
     let n = startAt;
     for (let col = 0; col < cols; col += 1) {
       for (let row = 0; row < rows; row += 1) {

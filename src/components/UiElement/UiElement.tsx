@@ -5,9 +5,11 @@ interface Props {
   children: React.ReactNode;
   sx?: SxProps;
   style?: React.CSSProperties;
+  /** Marks the item-controls panel as the only scroll target for port focus. */
+  'data-item-controls-scroll'?: boolean | string;
 }
 
-export const UiElement = ({ children, sx, style }: Props) => {
+export const UiElement = ({ children, sx, style, ...rest }: Props) => {
   return (
     <Card
       sx={{
@@ -17,6 +19,7 @@ export const UiElement = ({ children, sx, style }: Props) => {
         ...sx
       }}
       style={style}
+      {...rest}
     >
       {children}
     </Card>

@@ -28,7 +28,9 @@ import {
   doShape2dFootprintsOverlap,
   isShape2dPortInUse,
   BLACK_CROSSHAIR_CURSOR,
-  setWindowCursor
+  setWindowCursor,
+  screenToTile2dContinuous,
+  isPlanProjection
 } from 'src/utils';
 import { useScene } from 'src/hooks/useScene';
 import { isShape2dIcon, getShape2dSize } from 'src/config';
@@ -130,7 +132,7 @@ const applyItemSelection = (
   },
   itemId: string
 ) => {
-  if (uiState.projectionMode !== 'TWO_D') {
+  if (!isPlanProjection(uiState.projectionMode)) {
     uiState.actions.setItemControls({ type: 'ITEM', id: itemId });
     return;
   }
@@ -261,19 +263,42 @@ const getAnchor = (
   return anchor;
 };
 
+const connectorTouchesTile = (
+  connector: { path: SceneConnector['path'] },
+  tile: Coords
+) => {
+  return connector.path.tiles.some((pathTile) => {
+    const globalPathTile = connectorPathTileToGlobal(
+      pathTile,
+      connector.path.rectangle.from
+    );
+    return CoordsUtils.isEqual(globalPathTile, tile);
+  });
+};
+
+/**
+ * Cable under the cursor. Prefers the already-selected connector, otherwise
+ * the topmost painted cable (Connectors render `[...].reverse()`, so later
+ * entries in `scene.connectors` sit on top).
+ */
 const findConnectorAtTile = (
   tile: Coords,
-  scene: ReturnType<typeof useScene>
+  scene: ReturnType<typeof useScene>,
+  preferredId?: string | null
 ) => {
-  return scene.connectors.find((con) => {
-    return con.path.tiles.some((pathTile) => {
-      const globalPathTile = connectorPathTileToGlobal(
-        pathTile,
-        con.path.rectangle.from
-      );
-      return CoordsUtils.isEqual(globalPathTile, tile);
+  if (preferredId) {
+    const preferred = scene.connectors.find((con) => {
+      return con.id === preferredId && connectorTouchesTile(con, tile);
     });
-  });
+    if (preferred) return preferred;
+  }
+
+  for (let i = scene.connectors.length - 1; i >= 0; i -= 1) {
+    const con = scene.connectors[i];
+    if (connectorTouchesTile(con, tile)) return con;
+  }
+
+  return undefined;
 };
 
 const findTileWaypointAt = (
@@ -339,14 +364,24 @@ const mousedown: ModeActionsAction = ({
   uiState,
   scene,
   model,
-  isRendererInteraction
+  isRendererInteraction,
+  rendererSize
 }) => {
   if (uiState.mode.type !== 'CURSOR' || !isRendererInteraction) return;
 
   const tile = uiState.mouse.position.tile;
+  const tilePoint =
+    isPlanProjection(uiState.projectionMode)
+      ? screenToTile2dContinuous({
+          mouse: uiState.mouse.position.screen,
+          zoom: uiState.zoom,
+          scroll: uiState.scroll,
+          rendererSize
+        })
+      : { x: tile.x + 0.5, y: tile.y + 0.5 };
 
   let itemAtTile =
-    uiState.projectionMode === 'TWO_D'
+    isPlanProjection(uiState.projectionMode)
       ? getShape2dItemAtTile({
           tile,
           scene,
@@ -359,31 +394,44 @@ const mousedown: ModeActionsAction = ({
 
   let clickedPortId: string | null = null;
 
-  if (uiState.projectionMode === 'TWO_D') {
-    const portHit = getShape2dPortAtTile({
-      tile,
-      scene,
-      modelItems: model.items
-    });
-
-    const onDeviceBody = isTileOnDeviceBody(tile, scene, model.items);
-    const connectorAtTile = findConnectorAtTile(tile, scene);
-    const waypoint = resolveWaypointAtTile(tile, scene);
+  if (isPlanProjection(uiState.projectionMode)) {
     const selectedConnectorId =
       uiState.itemControls?.type === 'CONNECTOR'
         ? uiState.itemControls.id
         : null;
 
-    if (portHit) {
+    const portHit = getShape2dPortAtTile({
+      tile,
+      point: tilePoint,
+      scene,
+      modelItems: model.items
+    });
+
+    const onDeviceBody = isTileOnDeviceBody(tile, scene, model.items);
+    const connectorAtTile = findConnectorAtTile(
+      tile,
+      scene,
+      selectedConnectorId
+    );
+    const waypoint = resolveWaypointAtTile(tile, scene);
+    const togglePort =
+      Boolean(portHit) &&
+      (uiState.mouse.ctrlKey || uiState.mouse.metaKey);
+    // Port settings win when there is no cable on this tile, or when Ctrl/Cmd
+    // multi-selects ports (including already-connected ones).
+    // Plain click on a cable+port tile still selects the cable.
+    const portBlocksCable = Boolean(
+      portHit && (!connectorAtTile || togglePort)
+    );
+
+    if (portBlocksCable && portHit) {
       // Clicking a port opens the device panel on that port's settings.
-      // Ctrl/Cmd toggles multi-port selection on the same device.
+      // Ctrl/Cmd toggles multi-port selection on the same device (free or used).
       clickedPortId = portHit.portId;
       itemAtTile = {
         type: 'ITEM',
         id: portHit.itemId
       };
-      const togglePort =
-        uiState.mouse.ctrlKey || uiState.mouse.metaKey;
       const sameDevice =
         uiState.itemControls?.type === 'ITEM' &&
         uiState.itemControls.id === portHit.itemId;
@@ -397,14 +445,14 @@ const mousedown: ModeActionsAction = ({
       uiState.actions.setFocusedPortId(null);
     }
 
-    if (waypoint && !portHit) {
+    if (waypoint && !portBlocksCable) {
       itemAtTile = {
         type: 'CONNECTOR_ANCHOR',
         id: waypoint.id
       };
-    } else if (selectedConnectorId && !portHit) {
+    } else if (selectedConnectorId && !portBlocksCable) {
       // Segment handle wins even when drawn over a device body
-      // (otherwise the node steals the drag). Ports still win via portHit.
+      // (otherwise the node steals the drag).
       const sceneConnector = scene.connectors.find((con) => {
         return con.id === selectedConnectorId;
       });
@@ -419,6 +467,8 @@ const mousedown: ModeActionsAction = ({
 
       const segment =
         sceneConnector &&
+        !sceneConnector.locked &&
+        !freshConnector?.locked &&
         findWaypointSegmentAtTile({
           connectorId: selectedConnectorId,
           anchors: freshConnector?.anchors ?? sceneConnector.anchors,
@@ -453,7 +503,7 @@ const mousedown: ModeActionsAction = ({
             prepared.endAnchorId
           )
         };
-      } else if (connectorAtTile && !portHit) {
+      } else if (connectorAtTile) {
         // Cable wins over device body so dblclick can create waypoints
         // on segments that cross a node.
         itemAtTile = {
@@ -465,8 +515,8 @@ const mousedown: ModeActionsAction = ({
         armedWaypoint = null;
       }
       // else: leave ITEM from getShape2dItemAtTile (device body, no cable)
-    } else if (connectorAtTile && !portHit) {
-      // Prefer cable over node body (same as when a connector is already selected)
+    } else if (connectorAtTile && !portBlocksCable) {
+      // Prefer cable over node body / connected port tile
       itemAtTile = {
         type: 'CONNECTOR',
         id: connectorAtTile.id
@@ -477,7 +527,7 @@ const mousedown: ModeActionsAction = ({
     }
   }
 
-  if (uiState.projectionMode !== 'TWO_D' && itemAtTile?.type === 'ITEM') {
+  if (!isPlanProjection(uiState.projectionMode) && itemAtTile?.type === 'ITEM') {
     const modelItem = model.items.find((item) => {
       return item.id === itemAtTile?.id;
     });
@@ -512,7 +562,7 @@ const mousedown: ModeActionsAction = ({
 
       // Keep waypoint multi-selection when pressing a selected waypoint.
       const keepWaypointMulti =
-        uiState.projectionMode === 'TWO_D' &&
+        isPlanProjection(uiState.projectionMode) &&
         uiState.selectedWaypointIds.length > 1 &&
         uiState.selectedWaypointIds.includes(selected.id);
 
@@ -536,7 +586,7 @@ const mousedown: ModeActionsAction = ({
     } else if (selected.type === 'ITEM') {
       // Keep multi-selection when pressing an already-selected node (group drag).
       const keepMulti =
-        uiState.projectionMode === 'TWO_D' &&
+        isPlanProjection(uiState.projectionMode) &&
         !uiState.mouse.shiftKey &&
         !uiState.mouse.ctrlKey &&
         !uiState.mouse.metaKey &&
@@ -558,7 +608,7 @@ const mousedown: ModeActionsAction = ({
       produce(uiState.mode, (draft) => {
         draft.mousedownItem = null;
         draft.marquee =
-          uiState.projectionMode === 'TWO_D'
+          isPlanProjection(uiState.projectionMode)
             ? {
                 start: { ...tile },
                 end: { ...tile }
@@ -569,7 +619,7 @@ const mousedown: ModeActionsAction = ({
 
     uiState.actions.setFocusedPortId(null);
     if (
-      uiState.projectionMode !== 'TWO_D' ||
+      !isPlanProjection(uiState.projectionMode) ||
       (!uiState.mouse.shiftKey &&
         !uiState.mouse.ctrlKey &&
         !uiState.mouse.metaKey)
@@ -595,7 +645,7 @@ export const Cursor: ModeActions = {
 
     // 2D: drag from an empty port → start connector tool from that port
     if (
-      uiState.projectionMode === 'TWO_D' &&
+      isPlanProjection(uiState.projectionMode) &&
       uiState.mode.mousedownItem?.type === 'ITEM' &&
       uiState.mouse.mousedown
     ) {
@@ -645,7 +695,7 @@ export const Cursor: ModeActions = {
 
     // 2D marquee on empty canvas
     if (
-      uiState.projectionMode === 'TWO_D' &&
+      isPlanProjection(uiState.projectionMode) &&
       !uiState.mode.mousedownItem &&
       uiState.mode.marquee &&
       uiState.mouse.mousedown
@@ -664,7 +714,7 @@ export const Cursor: ModeActions = {
     let item = uiState.mode.mousedownItem;
 
     if (item?.type === 'CONNECTOR' && uiState.mouse.mousedown) {
-      if (uiState.projectionMode === 'TWO_D') {
+      if (isPlanProjection(uiState.projectionMode)) {
         // Prefer armed / existing waypoint at the press tile — never native-drag the cable
         const waypoint = resolveWaypointAtTile(
           uiState.mouse.mousedown.tile,
@@ -695,15 +745,59 @@ export const Cursor: ModeActions = {
     }
 
     if (item) {
-      if (item.type === 'CONNECTOR_ANCHOR') {
+      const activeItem = item;
+
+      if (activeItem.type === 'CONNECTOR_ANCHOR') {
         armedWaypoint = null;
+      }
+
+      // Locked nodes / shapes / cables cannot be dragged.
+      if (activeItem.type === 'ITEM') {
+        const node = scene.items.find((candidate) => {
+          return candidate.id === activeItem.id;
+        });
+        if (node?.locked) return;
+      }
+      if (activeItem.type === 'RECTANGLE') {
+        const rectangle = scene.rectangles.find((candidate) => {
+          return candidate.id === activeItem.id;
+        });
+        if (rectangle?.locked) return;
+      }
+      if (activeItem.type === 'CONNECTOR') {
+        const connector = scene.connectors.find((candidate) => {
+          return candidate.id === activeItem.id;
+        });
+        if (connector?.locked) return;
+      }
+      if (activeItem.type === 'CONNECTOR_ANCHOR' || activeItem.type === 'CONNECTOR_SEGMENT') {
+        const connectorId =
+          activeItem.type === 'CONNECTOR_SEGMENT'
+            ? (() => {
+                try {
+                  return parseWaypointSegmentId(activeItem.id).connectorId;
+                } catch {
+                  return null;
+                }
+              })()
+            : scene.connectors.find((con) => {
+                return con.anchors.some((anchor) => {
+                  return anchor.id === activeItem.id;
+                });
+              })?.id;
+        if (connectorId) {
+          const connector = scene.connectors.find((candidate) => {
+            return candidate.id === connectorId;
+          });
+          if (connector?.locked) return;
+        }
       }
 
       const itemOrigins: Record<string, Coords> = {};
       const anchorOrigins: Record<string, Coords> = {};
       let dragItems =
         item.type === 'ITEM' &&
-        uiState.projectionMode === 'TWO_D' &&
+        isPlanProjection(uiState.projectionMode) &&
         uiState.selectedItemIds.length > 1 &&
         uiState.selectedItemIds.includes(item.id)
           ? uiState.selectedItemIds.map((id) => {
@@ -714,7 +808,7 @@ export const Cursor: ModeActions = {
       // Group-drag all marquee-selected waypoints together.
       if (
         item.type === 'CONNECTOR_ANCHOR' &&
-        uiState.projectionMode === 'TWO_D' &&
+        isPlanProjection(uiState.projectionMode) &&
         uiState.selectedWaypointIds.length > 1 &&
         uiState.selectedWaypointIds.includes(item.id)
       ) {
@@ -722,6 +816,50 @@ export const Cursor: ModeActions = {
           return { type: 'CONNECTOR_ANCHOR' as const, id };
         });
       }
+
+      dragItems = dragItems.filter((dragItem) => {
+        if (dragItem.type === 'ITEM') {
+          return !scene.items.find((candidate) => {
+            return candidate.id === dragItem.id;
+          })?.locked;
+        }
+        if (dragItem.type === 'RECTANGLE') {
+          return !scene.rectangles.find((candidate) => {
+            return candidate.id === dragItem.id;
+          })?.locked;
+        }
+        if (dragItem.type === 'CONNECTOR') {
+          return !scene.connectors.find((candidate) => {
+            return candidate.id === dragItem.id;
+          })?.locked;
+        }
+        if (
+          dragItem.type === 'CONNECTOR_ANCHOR' ||
+          dragItem.type === 'CONNECTOR_SEGMENT'
+        ) {
+          const connectorId =
+            dragItem.type === 'CONNECTOR_SEGMENT'
+              ? (() => {
+                  try {
+                    return parseWaypointSegmentId(dragItem.id).connectorId;
+                  } catch {
+                    return null;
+                  }
+                })()
+              : scene.connectors.find((con) => {
+                  return con.anchors.some((anchor) => {
+                    return anchor.id === dragItem.id;
+                  });
+                })?.id;
+          if (!connectorId) return true;
+          return !scene.connectors.find((candidate) => {
+            return candidate.id === connectorId;
+          })?.locked;
+        }
+        return true;
+      });
+
+      if (dragItems.length === 0) return;
 
       const recordAnchorTile = (anchorId: string) => {
         const parent = scene.connectors.find((con) => {
@@ -779,7 +917,7 @@ export const Cursor: ModeActions = {
     if (uiState.mode.type !== 'CURSOR' || !isRendererInteraction) return;
 
     if (
-      uiState.projectionMode === 'TWO_D' &&
+      isPlanProjection(uiState.projectionMode) &&
       uiState.mode.marquee &&
       uiState.mouse.mousedown
     ) {
@@ -846,7 +984,7 @@ export const Cursor: ModeActions = {
           id: uiState.mode.mousedownItem.id
         });
       }
-    } else if (uiState.projectionMode !== 'TWO_D') {
+    } else if (!isPlanProjection(uiState.projectionMode)) {
       uiState.actions.setItemControls(null);
     }
 
@@ -857,16 +995,22 @@ export const Cursor: ModeActions = {
       })
     );
   },
-  dblclick: ({ uiState, scene, model, isRendererInteraction }) => {
+  dblclick: ({ uiState, scene, model, isRendererInteraction, rendererSize }) => {
     if (
       uiState.mode.type !== 'CURSOR' ||
       !isRendererInteraction ||
-      uiState.projectionMode !== 'TWO_D'
+      !isPlanProjection(uiState.projectionMode)
     ) {
       return;
     }
 
     const tile = uiState.mouse.position.tile;
+    const tilePoint = screenToTile2dContinuous({
+      mouse: uiState.mouse.position.screen,
+      zoom: uiState.zoom,
+      scroll: uiState.scroll,
+      rendererSize
+    });
     const existingWaypoint = resolveWaypointAtTile(tile, scene);
 
     // Double-click on an existing tile waypoint → remove it
@@ -928,13 +1072,14 @@ export const Cursor: ModeActions = {
 
     const portHit = getShape2dPortAtTile({
       tile,
+      point: tilePoint,
       scene,
       modelItems: model.items
     });
     if (portHit) return;
 
     const connector = findConnectorAtTile(tile, scene);
-    if (!connector) return;
+    if (!connector || connector.locked) return;
 
     const anchor = getAnchor(connector.id, tile, scene, model.items);
 

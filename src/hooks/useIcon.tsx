@@ -1,6 +1,8 @@
 import React, { useMemo, useEffect } from 'react';
 import { useModelStore } from 'src/stores/modelStore';
+import { useUiStateStore } from 'src/stores/uiStateStore';
 import { useCabinetSnapStore } from 'src/stores/cabinetSnapStore';
+import { useNodeDragStore } from 'src/stores/nodeDragStore';
 import { useScene } from 'src/hooks/useScene';
 import { getItemByIdOrThrow } from 'src/utils';
 import { IsometricIcon } from 'src/components/SceneLayers/Nodes/Node/IconTypes/IsometricIcon';
@@ -27,7 +29,9 @@ export const useIcon = (
   svis?: ModelItem['svis'],
   rackUnits?: number,
   itemId?: string,
-  peerHighlightPortIds?: ReadonlySet<string> | string[]
+  peerHighlightPortIds?: ReadonlySet<string> | string[],
+  attentionPortId?: string | null,
+  attentionToken?: number | null
 ) => {
   const [hasLoaded, setHasLoaded] = React.useState(false);
   const icons = useModelStore((state) => {
@@ -36,12 +40,19 @@ export const useIcon = (
   const modelItems = useModelStore((state) => {
     return state.items;
   });
-  const { items: viewItems } = useScene();
+  const currentViewId = useUiStateStore((state) => state.view);
+  const viewItems = useModelStore((state) => {
+    const view = state.views.find(v => v.id === currentViewId);
+    return view?.items ?? [];
+  });
   const snapCabinetId = useCabinetSnapStore((state) => {
     return state.cabinetId;
   });
   const snapUnit = useCabinetSnapStore((state) => {
     return state.unit;
+  });
+  const liveMount = useNodeDragStore((state) => {
+    return itemId ? state.mounts[itemId] : undefined;
   });
 
   const occupiedUnits = useMemo(() => {
@@ -54,6 +65,16 @@ export const useIcon = (
     });
     return units;
   }, [itemId, viewItems]);
+
+  const isMountedInCabinet = useMemo(() => {
+    if (!itemId) return false;
+    if (liveMount === 'clear') return false;
+    if (liveMount && liveMount.parentId) return true;
+    const viewItem = viewItems.find((item) => {
+      return item.id === itemId;
+    });
+    return Boolean(viewItem?.parentId);
+  }, [itemId, viewItems, liveMount]);
 
   const icon = useMemo(() => {
     if (!id) return DEFAULT_ICON;
@@ -114,8 +135,11 @@ export const useIcon = (
           mismatchPortIds={mismatchPortIds}
           focusedPortIds={focusedPortIds}
           peerHighlightPortIds={peerHighlightPortIds}
+          attentionPortId={attentionPortId}
+          attentionToken={attentionToken}
           modelItems={modelItems}
           color={color}
+          showShadow={!isMountedInCabinet}
         />
       );
     }
@@ -142,13 +166,16 @@ export const useIcon = (
     mismatchPortIds,
     focusedPortIds,
     peerHighlightPortIds,
+    attentionPortId,
+    attentionToken,
     modelItems,
     color,
     rackUnits,
     itemId,
     snapCabinetId,
     snapUnit,
-    occupiedUnits
+    occupiedUnits,
+    isMountedInCabinet
   ]);
 
   return {

@@ -40,7 +40,7 @@ const connectorUsesPort = (
 const CABINET_Z_BASE = -100000;
 const DEVICE_Z_BASE = 1000;
 
-export const Nodes = ({ nodes }: Props) => {
+export const Nodes = React.memo(({ nodes }: Props) => {
   const itemControls = useUiStateStore((state) => {
     return state.itemControls;
   });
@@ -164,4 +164,5 @@ export const Nodes = ({ nodes }: Props) => {
       })}
     </>
   );
-};
+});
+Nodes.displayName = 'Nodes';

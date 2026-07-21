@@ -24,5 +24,7 @@ export const connectorSchema = z.object({
   color: id.optional(),
   width: z.number().optional(),
   style: z.enum(connectorStyleOptions).optional(),
+  /** Locked — path / waypoints cannot be edited until unlocked. */
+  locked: z.boolean().optional(),
   anchors: z.array(anchorSchema)
 });
