@@ -6,6 +6,7 @@ import { useInteractionManager } from 'src/interaction/useInteractionManager';
 import { Grid } from 'src/components/Grid/Grid';
 import { Cursor } from 'src/components/Cursor/Cursor';
 import { Nodes } from 'src/components/SceneLayers/Nodes/Nodes';
+import { NodeDescriptionLabels } from 'src/components/SceneLayers/Nodes/NodeDescriptionLabels';
 import { Rectangles } from 'src/components/SceneLayers/Rectangles/Rectangles';
 import { Connectors } from 'src/components/SceneLayers/Connectors/Connectors';
 import { ConnectorStackBadges } from 'src/components/SceneLayers/Connectors/ConnectorStackBadges';
@@ -260,6 +261,12 @@ export const Renderer = ({ showGrid, backgroundColor }: RendererProps) => {
           zIndex: 10
         }}
       />
+      {/* Above interaction overlay so description bubbles stay visible + draggable */}
+      {isTwoD && (
+        <SceneLayer order={12} sx={{ pointerEvents: 'none' }}>
+          <NodeDescriptionLabels nodes={visibleNodes} />
+        </SceneLayer>
+      )}
       {/* Above interaction overlay so badge / rectangle handles work */}
       {isClassic2d && (
         <SceneLayer order={11} sx={{ pointerEvents: 'none' }}>

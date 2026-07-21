@@ -777,6 +777,107 @@ export const useScene = () => {
     ]
   );
 
+  const runSmartLayout2ForItems = useCallback(
+    (ids: string[]) => {
+      if (ids.length === 0) return;
+
+      beginHistoryTransaction();
+
+      const state = getState();
+      const view = getItemByIdOrThrow(state.model.views, currentViewId).value;
+      const selectedItems = (view.items ?? []).filter((item) => {
+        return ids.includes(item.id);
+      });
+
+      if (selectedItems.length >= 2) {
+        // Faza A: Analiza grafu i układ siatkowy (Smart Layout)
+        const graph = analyzeGraph({
+          selectedItems,
+          allItems: view.items ?? [],
+          modelItems: state.model.items,
+          connectors: view.connectors ?? [],
+          rectangles: view.rectangles ?? []
+        });
+
+        const targets = smartPlaceNodes({
+          graph,
+          selectedItems,
+          allItems: view.items ?? [],
+          modelItems: state.model.items
+        });
+
+        // Aplikuj pozycje
+        Object.entries(targets).forEach(([id, tile]) => {
+          const newState = reducers.view({
+            action: 'UPDATE_VIEWITEM',
+            payload: { id, tile },
+            ctx: { viewId: currentViewId, state: getState() }
+          });
+          setState(newState, { skipHistory: true });
+        });
+      }
+
+      // Faza B: Diagonal Routing (algorytm Test)
+      const stateAfterPlace = getState();
+      const viewAfterPlace = getItemByIdOrThrow(
+        stateAfterPlace.model.views,
+        currentViewId
+      ).value;
+      const selectedAfterPlace = (viewAfterPlace.items ?? []).filter((item) => {
+        return ids.includes(item.id);
+      });
+
+      if (selectedAfterPlace.length > 0) {
+        const routes = diagonalFanShape2dRoutes({
+          selectedItems: selectedAfterPlace,
+          allItems: viewAfterPlace.items ?? [],
+          modelItems: stateAfterPlace.model.items,
+          connectors: viewAfterPlace.connectors ?? []
+        });
+
+        Object.entries(routes).forEach(([connectorId, routeTiles]) => {
+          const connector = (viewAfterPlace.connectors ?? []).find(
+            (candidate) => candidate.id === connectorId
+          );
+          if (!connector) return;
+
+          const endpointAnchors = connector.anchors.filter((anchor) => {
+            return Boolean(anchor.ref.item);
+          });
+          if (endpointAnchors.length < 2) return;
+
+          const anchors = [
+            endpointAnchors[0],
+            ...routeTiles.map((tile) => {
+              return { id: generateId(), ref: { tile } };
+            }),
+            endpointAnchors[endpointAnchors.length - 1]
+          ];
+
+          const newState = reducers.view({
+            action: 'UPDATE_CONNECTOR',
+            payload: {
+              id: connectorId,
+              anchors,
+              overlapResolve: 'off'
+            },
+            ctx: { viewId: currentViewId, state: getState() }
+          });
+          setState(newState, { skipHistory: true });
+        });
+      }
+
+      endHistoryTransaction();
+    },
+    [
+      beginHistoryTransaction,
+      endHistoryTransaction,
+      getState,
+      setState,
+      currentViewId
+    ]
+  );
+
   /**
    * Drop intermediate waypoints on cables touching the given nodes and
    * rebuild paths (fresh A* between port endpoints).
@@ -1076,6 +1177,7 @@ export const useScene = () => {
       routeDiagonalFanForItems,
       runTestLayoutForItems,
       runSmartLayoutForItems,
+      runSmartLayout2ForItems,
       regenerateRoutesForItems,
       setSimplePathsMode,
       deleteViewItem,
@@ -1113,6 +1215,7 @@ export const useScene = () => {
       routeDiagonalFanForItems,
       runTestLayoutForItems,
       runSmartLayoutForItems,
+      runSmartLayout2ForItems,
       regenerateRoutesForItems,
       setSimplePathsMode,
       deleteViewItem,

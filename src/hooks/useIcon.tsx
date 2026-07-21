@@ -8,6 +8,7 @@ import { getItemByIdOrThrow } from 'src/utils';
 import { IsometricIcon } from 'src/components/SceneLayers/Nodes/Node/IconTypes/IsometricIcon';
 import { NonIsometricIcon } from 'src/components/SceneLayers/Nodes/Node/IconTypes/NonIsometricIcon';
 import { DeviceShape2d } from 'src/components/Shapes2d/DeviceShape2d';
+import { VirtualServerShape2d } from 'src/components/Shapes2d/VirtualServerShape2d';
 import { CabinetShape2d } from 'src/components/Shapes2d/CabinetShape2d';
 import {
   DEFAULT_ICON,
@@ -31,7 +32,8 @@ export const useIcon = (
   itemId?: string,
   peerHighlightPortIds?: ReadonlySet<string> | string[],
   attentionPortId?: string | null,
-  attentionToken?: number | null
+  attentionToken?: number | null,
+  vlanBorderColor?: string | null
 ) => {
   const [hasLoaded, setHasLoaded] = React.useState(false);
   const icons = useModelStore((state) => {
@@ -45,6 +47,7 @@ export const useIcon = (
     const view = state.views.find(v => v.id === currentViewId);
     return view?.items ?? [];
   });
+  const deviceTemplates = useModelStore((state) => state.deviceTemplates);
   const snapCabinetId = useCabinetSnapStore((state) => {
     return state.cabinetId;
   });
@@ -125,6 +128,29 @@ export const useIcon = (
         );
       }
 
+      const template = deviceTemplates?.find(t => t.id === icon.id);
+      if (template?.kind === 'SERVER') {
+        return (
+          <VirtualServerShape2d
+            shapeId={icon.id}
+            name={name || icon.name}
+            ports={ports}
+            svis={svis}
+            connectedPortIds={connectedPortIds}
+            mismatchPortIds={mismatchPortIds}
+            focusedPortIds={focusedPortIds}
+            peerHighlightPortIds={peerHighlightPortIds}
+            attentionPortId={attentionPortId}
+            attentionToken={attentionToken}
+            modelItems={modelItems}
+            color={color}
+            showShadow={!isMountedInCabinet}
+            vlanBorderColor={vlanBorderColor}
+            virtualInstances={template.virtualInstances}
+          />
+        );
+      }
+
       return (
         <DeviceShape2d
           shapeId={icon.id}
@@ -140,6 +166,7 @@ export const useIcon = (
           modelItems={modelItems}
           color={color}
           showShadow={!isMountedInCabinet}
+          vlanBorderColor={vlanBorderColor}
         />
       );
     }
@@ -175,7 +202,9 @@ export const useIcon = (
     snapCabinetId,
     snapUnit,
     occupiedUnits,
-    isMountedInCabinet
+    isMountedInCabinet,
+    vlanBorderColor,
+    deviceTemplates
   ]);
 
   return {

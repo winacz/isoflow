@@ -81,6 +81,9 @@ export const ConnectorStackBadges = () => {
   const setHighlightedConnectorId = useStackFanStore((state) => {
     return state.setHighlightedConnectorId;
   });
+  const modeType = useUiStateStore((state) => {
+    return state.mode.type;
+  });
 
   const pendingBadgeDragRef = useRef<{
     key: string;
@@ -96,6 +99,13 @@ export const ConnectorStackBadges = () => {
       setHighlightedConnectorId(null);
     }
   }, [pinnedKey, setHighlightedConnectorId]);
+
+  // Fan-handle hover emphasize must not stick across / after a cable drag.
+  useEffect(() => {
+    if (modeType === 'DRAG_ITEMS') {
+      setHighlightedConnectorId(null);
+    }
+  }, [modeType, setHighlightedConnectorId]);
 
   const stackBadges = useMemo(() => {
     return findConnectorStackBadges(
@@ -123,7 +133,6 @@ export const ConnectorStackBadges = () => {
     (connectorIds: string[], badgeTile: { x: number; y: number }) => {
       const dragItems: ItemReference[] = [];
       const anchorOrigins: Record<string, { x: number; y: number }> = {};
-      let primaryConnectorId: string | null = null;
 
       connectorIds.forEach((connectorId) => {
         const sceneConnector = connectors.find((con) => {
@@ -173,20 +182,14 @@ export const ConnectorStackBadges = () => {
             prepared.endAnchorId
           )
         });
-
-        if (!primaryConnectorId) {
-          primaryConnectorId = connectorId;
-        }
       });
 
       if (dragItems.length === 0) return;
 
-      if (primaryConnectorId) {
-        uiActions.setItemControls({
-          type: 'CONNECTOR',
-          id: primaryConnectorId
-        });
-      }
+      // Untangling stacks should not leave a cable permanently selected
+      // (that dims the rest of the diagram until another click).
+      setHighlightedConnectorId(null);
+      uiActions.setItemControls(null);
 
       // Keep mousedown from badge press when present (stable drag origin).
       const mouse = uiActions.getMouse();
@@ -216,6 +219,7 @@ export const ConnectorStackBadges = () => {
       modelItems,
       scene,
       setPinnedKey,
+      setHighlightedConnectorId,
       uiActions
     ]
   );
@@ -385,6 +389,7 @@ export const ConnectorStackBadges = () => {
                     onMouseDown={(e) => {
                       e.preventDefault();
                       e.stopPropagation();
+                      setHighlightedConnectorId(null);
                       grabStackedConnector(connectorId, badge.tile);
                     }}
                     title="Przeciągnij kabel"

@@ -10,7 +10,8 @@ import {
   TimelineOutlined,
   ScienceOutlined,
   StraightOutlined,
-  AutoAwesomeOutlined
+  AutoAwesomeOutlined,
+  AccountTreeOutlined
 } from '@mui/icons-material';
 import { useScene } from 'src/hooks/useScene';
 import { useUiStateStore } from 'src/stores/uiStateStore';
@@ -60,6 +61,7 @@ export const MultiNodeControls = () => {
     routeDiagonalFanForItems,
     runTestLayoutForItems,
     runSmartLayoutForItems,
+    runSmartLayout2ForItems,
     regenerateRoutesForItems,
     setSimplePathsMode
   } = useScene();
@@ -171,6 +173,19 @@ export const MultiNodeControls = () => {
             color="secondary"
           >
             Smart Layout
+          </Button>
+          <Button
+            size="small"
+            variant="outlined"
+            startIcon={<AccountTreeOutlined />}
+            onClick={() => {
+              runSmartLayout2ForItems(selectedItemIds);
+            }}
+            disabled={simplePaths}
+            sx={actionBtnSx}
+            color="secondary"
+          >
+            Smart Layout 2
           </Button>
           <Button
             size="small"

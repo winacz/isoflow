@@ -9,7 +9,7 @@ import {
   getShape2dPorts
 } from 'src/config';
 import { getPortStatusColor, getDeviceTemplateLayout, parseDeviceColor, SHAPE_2D_PORT_VISUAL_SIZE_TILES } from 'src/utils';
-import type { ModelItem } from 'src/types';
+import type { ModelItem, VirtualInstance } from 'src/types';
 import type { DeviceTemplateLayout } from 'src/utils/deviceTemplateLayout';
 import { Rj45Port } from 'src/components/Shapes2d/Rj45Port';
 import { DeviceTypeIcon } from 'src/components/Icons/DeviceTypeIcon';
@@ -55,13 +55,14 @@ interface Props {
   showShadow?: boolean;
   /** VLAN-tinted chassis border (single-port hosts when cabled). */
   vlanBorderColor?: string | null;
+  /** Server instances configured for this node. */
+  virtualInstances?: VirtualInstance[];
 }
 
 /**
- * Topology-card device (Switch / PC): thin frame, header, RJ45/SFP port grid.
- * Each port cell is a connection handle (exact tile center).
+ * Server device with virtualization blocks.
  */
-export const DeviceShape2d = ({
+export const VirtualServerShape2d = ({
   shapeId,
   width,
   height,
@@ -80,7 +81,8 @@ export const DeviceShape2d = ({
   layoutOverride,
   color = '#ffffff',
   showShadow = true,
-  vlanBorderColor = null
+  vlanBorderColor = null,
+  virtualInstances = []
 }: Props) => {
   const templateLayout = layoutOverride ?? getDeviceTemplateLayout(shapeId);
   const footprint =
@@ -93,8 +95,7 @@ export const DeviceShape2d = ({
   const tileH = TILE_SIZE_2D * scaleY;
   const cellSize = Math.min(tileW, tileH);
   const isRack = templateLayout?.formFactor === 'RACK';
-  const isCamera = shapeId === SHAPE_2D_CAMERA_ID;
-  const isPc = shapeId === SHAPE_2D_PC_ID || isCamera;
+  const isPc = false;
   const portTileSize = cellSize * SHAPE_2D_PORT_VISUAL_SIZE_TILES;
   /** Overlay cabinet rails; join flush to chassis sides. */
   const earW = isRack
@@ -168,155 +169,6 @@ export const DeviceShape2d = ({
     : Math.max(1, Math.round(cellSize * 0.05));
   const chassisBorderColor = vlanBorderColor ?? '#7a8ba3';
 
-  if (isCamera) {
-    return (
-      <Box
-        sx={{
-          position: centered ? 'absolute' : 'relative',
-          width: pxWidth,
-          height: pxHeight,
-          left: centered ? -pxWidth / 2 : 0,
-          top: centered ? -pxHeight / 2 : 0,
-          pointerEvents: 'none',
-          boxSizing: 'border-box',
-          overflow: 'visible',
-          borderRadius: Math.round(cellSize * 0.2),
-          outline: vlanBorderColor
-            ? `${chassisBorderWidth}px solid ${vlanBorderColor}`
-            : undefined,
-          outlineOffset: vlanBorderColor ? 2 : undefined
-        }}
-      >
-        <svg
-          width="100%"
-          height="100%"
-          viewBox="0 0 240 240"
-          style={{ overflow: 'visible', display: 'block' }}
-        >
-          <defs>
-            <linearGradient id="metal-dark" x1="0" y1="0" x2="0" y2="1">
-              <stop offset="0%" stopColor="#475569" />
-              <stop offset="100%" stopColor="#1e293b" />
-            </linearGradient>
-            <linearGradient id="metal-light" x1="0" y1="0" x2="1" y2="1">
-              <stop offset="0%" stopColor="#cbd5e1" />
-              <stop offset="50%" stopColor="#94a3b8" />
-              <stop offset="100%" stopColor="#64748b" />
-            </linearGradient>
-            <linearGradient id="body-grad" x1="0" y1="0" x2="0" y2="1">
-              <stop offset="0%" stopColor="#ffffff" />
-              <stop offset="70%" stopColor="#f1f5f9" />
-              <stop offset="100%" stopColor="#cbd5e1" />
-            </linearGradient>
-            <radialGradient id="lens-grad" cx="50%" cy="50%" r="50%">
-              <stop offset="0%" stopColor="#0284c7" />
-              <stop offset="60%" stopColor="#0f172a" />
-              <stop offset="100%" stopColor="#020617" />
-            </radialGradient>
-          </defs>
-          <style>{`
-            @keyframes camBlink {
-              0%, 100% { opacity: 0.3; }
-              50% { opacity: 1; filter: drop-shadow(0 0 4px #ef4444); }
-            }
-          `}</style>
-          
-          {/* Mount Wall Plate */}
-          <rect x="0" y="60" width="12" height="120" rx="4" fill="url(#metal-dark)" stroke="#0f172a" strokeWidth="2" />
-          
-          {/* Mount Arm */}
-          <path d="M 12,120 C 60,120 70,80 100,80" stroke="url(#metal-light)" strokeWidth="18" fill="none" strokeLinecap="round" />
-          <path d="M 12,120 C 60,120 70,80 100,80" stroke="#0f172a" strokeWidth="2" fill="none" strokeLinecap="round" opacity="0.15" />
-          
-          {/* Joint Lock */}
-          <circle cx="100" cy="80" r="14" fill="#334155" stroke="#0f172a" strokeWidth="2" />
-          
-          {/* Camera Head Group (angled slightly down by 15 deg) */}
-          <g transform="translate(100, 80) rotate(15)">
-            {/* Body */}
-            <rect x="0" y="-35" width="105" height="70" rx="8" fill="url(#body-grad)" stroke="#64748b" strokeWidth="2" />
-            
-            {/* Dark Sunshield / Visor */}
-            <path d="M -10,-42 L 115,-42 L 105,-35 L -8,-35 Z" fill="#1e293b" stroke="#0f172a" strokeWidth="1.5" />
-            
-            {/* Visor highlight/shadow on body */}
-            <rect x="0" y="-35" width="103" height="8" fill="#cbd5e1" opacity="0.4" />
-            
-            {/* Bezel / Front Face */}
-            <ellipse cx="105" cy="0" rx="8" ry="34" fill="#0f172a" stroke="#020617" strokeWidth="2" />
-            
-            {/* Inner Lens */}
-            <ellipse cx="103" cy="0" rx="4" ry="26" fill="url(#lens-grad)" />
-            
-            {/* Lens Reflection */}
-            <path d="M 102,-15 Q 104,0 102,15 Q 101,0 102,-15 Z" fill="#ffffff" opacity="0.35" />
-            
-            {/* Recording LED */}
-            <circle cx="98" cy="-12" r="3" fill="#ef4444" style={{ animation: 'camBlink 1.5s infinite' }} />
-          </g>
-        </svg>
-
-        {/* Render ports absolute on top */}
-        {ports.map((port, index) => {
-          const iface = String(index + 1);
-          const config = portConfigs?.[port.id];
-          const isTrunk = false;
-          const statusColor = getPortStatusColor(config?.vlan, index, {
-            isPc,
-            customColor: config?.vlanColor,
-            modelItems,
-            portType: 'access'
-          });
-
-          return (
-            <Box
-              key={
-                attentionPortId === port.id && attentionToken
-                  ? `${port.id}-attn-${attentionToken}`
-                  : port.id
-              }
-              data-port-id={port.id}
-              data-port-handle-root
-              sx={{
-                position: 'absolute',
-                left: port.tile.x * tileW,
-                top: port.tile.y * tileH,
-                width: tileW,
-                height: tileH,
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                overflow: 'visible',
-                zIndex:
-                  attentionPortId === port.id
-                    ? 6
-                    : peerHighlightSet?.has(port.id)
-                      ? 4
-                      : 2
-              }}
-            >
-              <Rj45Port
-                side={port.side}
-                tileSize={portTileSize}
-                portNumber={index + 1}
-                portLabel={iface}
-                statusColor={statusColor}
-                isTrunk={isTrunk}
-                hasMismatch={Boolean(mismatchSet?.has(port.id))}
-                isFocused={Boolean(focusedSet?.has(port.id))}
-                isPeerHighlight={Boolean(peerHighlightSet?.has(port.id))}
-                isAttentionPulse={attentionPortId === port.id}
-                isConnected={Boolean(connectedSet?.has(port.id))}
-                media={port.media ?? 'RJ45'}
-                compactLabel={isRack}
-              />
-            </Box>
-          );
-        })}
-      </Box>
-    );
-  }
-
   return (
     <Box
       sx={{
@@ -361,6 +213,90 @@ export const DeviceShape2d = ({
               zIndex: 0
             }}
           />
+        )}
+        
+        {/* Virtual Instances Container */}
+        {virtualInstances.length > 0 && (
+          <Box
+            sx={{
+              position: 'absolute',
+              top: headerBandH + 12,
+              left: 12,
+              right: 12,
+              bottom: tileH * 3, // Leave room for ports at the bottom
+              display: 'flex',
+              flexWrap: 'wrap',
+              gap: 1.5,
+              padding: 1,
+              bgcolor: 'rgba(0, 0, 0, 0.04)',
+              borderRadius: 2,
+              border: '1px solid rgba(0, 0, 0, 0.08)',
+              overflowY: 'auto',
+              zIndex: 2,
+              alignContent: 'flex-start'
+            }}
+          >
+            {virtualInstances.map(inst => {
+               // VM (sharp, rx=2), LXC (rounded, rx=8), DOCKER (pill, rx=16)
+               const borderRadius = inst.type === 'VM' ? 2 : inst.type === 'LXC' ? 8 : 16;
+               const bgColor = inst.status === 'running' ? '#dcfce7' : '#f1f5f9';
+               const borderColor = inst.status === 'running' ? '#22c55e' : '#cbd5e1';
+               
+               return (
+                 <Box 
+                   key={inst.id}
+                   title={`${inst.type}: ${inst.name}`}
+                   sx={{
+                     minWidth: '100px',
+                     flex: '1 1 calc(50% - 12px)',
+                     height: '42px',
+                     bgcolor: bgColor,
+                     border: `2px solid ${borderColor}`,
+                     borderRadius: `${borderRadius}px`,
+                     display: 'flex',
+                     alignItems: 'center',
+                     justifyContent: 'center',
+                     boxShadow: '0 1px 2px rgba(0,0,0,0.05)',
+                     position: 'relative',
+                     pointerEvents: 'auto',
+                     cursor: 'pointer',
+                     '&:hover': {
+                       filter: 'brightness(0.95)'
+                     }
+                   }}
+                 >
+                   <Typography variant="caption" fontWeight="bold" sx={{ color: '#334155' }}>
+                     {inst.name}
+                   </Typography>
+                   {/* Draw bridge lines to target RJ45 ports if configured */}
+                   {inst.interfaces.map(iface => {
+                     if (iface.type !== 'BRIDGE' || !iface.targetPortId) return null;
+                     const targetPort = ports.find(p => p.id === iface.targetPortId);
+                     if (!targetPort) return null;
+                     
+                     // We can't easily draw true SVG paths from a Flexbox child to absolute container, 
+                     // but we could use an absolute SVG overlay. For now we just show a badge.
+                     return (
+                       <Box 
+                         key={iface.id}
+                         sx={{
+                           position: 'absolute',
+                           bottom: -10,
+                           bgcolor: '#3b82f6',
+                           color: 'white',
+                           fontSize: '8px',
+                           px: 0.5,
+                           borderRadius: 1
+                         }}
+                       >
+                         {targetPort.label}
+                       </Box>
+                     );
+                   })}
+                 </Box>
+               );
+            })}
+          </Box>
         )}
       </Box>
 
@@ -712,9 +648,3 @@ export const DeviceShape2d = ({
   );
 };
 
-/** @deprecated use DeviceShape2d — kept as alias for Switch */
-export const SwitchShape = (
-  props: Omit<Props, 'shapeId'> & { shapeId?: string }
-) => {
-  return <DeviceShape2d shapeId={props.shapeId ?? 'SWITCH'} {...props} />;
-};

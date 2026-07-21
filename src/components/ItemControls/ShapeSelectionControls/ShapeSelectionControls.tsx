@@ -16,6 +16,7 @@ import {
 import { ControlsContainer } from 'src/components/ItemControls/components/ControlsContainer';
 import { Section } from 'src/components/ItemControls/components/Section';
 import { DeviceCreatorPanel } from 'src/components/ItemControls/DeviceCreator/DeviceCreatorPanel';
+import { VirtualServerCreatorPanel } from 'src/components/ItemControls/VirtualServerCreator/VirtualServerCreatorPanel';
 import { useUiStateStore } from 'src/stores/uiStateStore';
 import { useModelStore } from 'src/stores/modelStore';
 import { DeviceTemplate, Icon } from 'src/types';
@@ -43,7 +44,7 @@ import {
   isDeviceTemplateId
 } from 'src/utils';
 
-const CATEGORY_ORDER = ['Switches', 'Stacje'] as const;
+const CATEGORY_ORDER = ['Serwery', 'Switches', 'Stacje'] as const;
 
 const shapeCaption = (shape: Icon) => {
   if (shape.id === SHAPE_2D_SWITCH_ID) return '16× RJ45';
@@ -302,6 +303,7 @@ const templateToIcon = deviceTemplateToIcon;
 
 export const ShapeSelectionControls = () => {
   const [isCreating, setIsCreating] = useState(false);
+  const [isCreatingServer, setIsCreatingServer] = useState(false);
   const uiStateActions = useUiStateStore((state) => {
     return state.actions;
   });
@@ -353,17 +355,23 @@ export const ShapeSelectionControls = () => {
 
     deviceTemplates.forEach((template) => {
       const icon = templateToIcon(template);
-      const list = byCollection.get('Switches') ?? [];
-      list.push(icon);
-      byCollection.set('Switches', list);
+      if (template.kind === 'SERVER') {
+        const list = byCollection.get('Serwery') ?? [];
+        list.push(icon);
+        byCollection.set('Serwery', list);
+      } else {
+        const list = byCollection.get('Switches') ?? [];
+        list.push(icon);
+        byCollection.set('Switches', list);
+      }
     });
 
     const ordered: { title: string; shapes: Icon[] }[] = [];
 
     CATEGORY_ORDER.forEach((name) => {
       const shapes = byCollection.get(name);
-      if (!shapes) return;
-      ordered.push({ title: name, shapes });
+      if (!shapes && name !== 'Serwery' && name !== 'Switches') return;
+      ordered.push({ title: name, shapes: shapes ?? [] });
       byCollection.delete(name);
     });
 
@@ -451,6 +459,7 @@ export const ShapeSelectionControls = () => {
       });
 
       setIsCreating(false);
+      setIsCreatingServer(false);
 
       uiStateActions.setMode({
         type: 'PLACE_ICON',
@@ -469,6 +478,17 @@ export const ShapeSelectionControls = () => {
       <DeviceCreatorPanel
         onCancel={() => {
           setIsCreating(false);
+        }}
+        onSave={onSaveTemplate}
+      />
+    );
+  }
+
+  if (isCreatingServer) {
+    return (
+      <VirtualServerCreatorPanel
+        onCancel={() => {
+          setIsCreatingServer(false);
         }}
         onSave={onSaveTemplate}
       />
@@ -495,6 +515,7 @@ export const ShapeSelectionControls = () => {
         <Stack spacing={1.5}>
           {categories.map((category) => {
             const isSwitches = category.title === 'Switches';
+            const isServers = category.title === 'Serwery';
 
             return (
               <ShapeCategory
@@ -503,14 +524,15 @@ export const ShapeSelectionControls = () => {
                 shapes={category.shapes}
                 activeId={activeId}
                 onSelect={onSelectShape}
-                onEdit={isSwitches ? onEditTemplate : undefined}
+                onEdit={(isSwitches || isServers) ? onEditTemplate : undefined}
                 footer={
-                  isSwitches ? (
+                  (isSwitches || isServers) ? (
                     <Button
                       variant="outlined"
                       startIcon={<AddIcon />}
                       onClick={() => {
-                        setIsCreating(true);
+                        if (isServers) setIsCreatingServer(true);
+                        else setIsCreating(true);
                       }}
                       sx={{
                         justifyContent: 'flex-start',

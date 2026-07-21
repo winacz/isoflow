@@ -969,7 +969,10 @@ export const NodeControls2d = ({ id }: Props) => {
                     value={viewItem.labelHeight ?? 140}
                     onChange={(_, value) => {
                       const labelHeight = Array.isArray(value) ? value[0] : value;
-                      updateViewItem(viewItem.id, { labelHeight });
+                      updateViewItem(viewItem.id, {
+                        labelHeight,
+                        labelOffset: undefined
+                      });
                     }}
                     valueLabelDisplay="auto"
                   />

@@ -15,7 +15,9 @@ import {
   rectangleSchema,
   connectorStyleOptions,
   deviceTemplateSchema,
-  deviceTemplatesSchema
+  deviceTemplatesSchema,
+  virtualInstanceSchema,
+  virtualInterfaceSchema
 } from 'src/schemas';
 import { StoreApi } from 'zustand';
 
@@ -36,6 +38,8 @@ export type TextBox = z.infer<typeof textBoxSchema>;
 export type Rectangle = z.infer<typeof rectangleSchema>;
 export type DeviceTemplate = z.infer<typeof deviceTemplateSchema>;
 export type DeviceTemplates = z.infer<typeof deviceTemplatesSchema>;
+export type VirtualInstance = z.infer<typeof virtualInstanceSchema>;
+export type VirtualInterface = z.infer<typeof virtualInterfaceSchema>;
 
 export type ModelStore = Model & {
   actions: {

@@ -8,6 +8,7 @@ import {
   State
 } from 'src/types';
 import { useScene } from 'src/hooks/useScene';
+import { useStackFanStore } from 'src/stores/stackFanStore';
 import {
   getItemByIdOrThrow,
   CoordsUtils,
@@ -1423,6 +1424,7 @@ export const DragItems: ModeActions = {
     }
 
     scene.endHistoryTransaction();
+    useStackFanStore.getState().setHighlightedConnectorId(null);
     uiState.actions.setMode({
       type: 'CURSOR',
       showCursor: true,

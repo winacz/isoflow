@@ -262,8 +262,8 @@ export const Connector2d = memo(({
     }
   }, [connector.style, connectorWidthPx]);
 
-  // Sparse dashes when the cable tunnels under a foreign node body.
-  const throughNodeDashArray = `${Math.max(4, connectorWidthPx * 1.35)}, ${Math.max(10, connectorWidthPx * 3.4)}`;
+  // Through-node: lighter + a bit sparser than solid, but still readable.
+  const throughNodeDashArray = `${Math.max(3, connectorWidthPx * 1.0)}, ${Math.max(6, connectorWidthPx * 2.15)}`;
 
   const originPx = useMemo(() => {
     return {
@@ -302,9 +302,9 @@ export const Connector2d = memo(({
         ? 0.65
         : 0.45;
   const widthBoost = isHighlighted || connector.locked ? 1.55 : emphasize ? 1.25 : 1;
-  /** Extra fade for segments under nodes that are not cable endpoints. */
-  const throughNodeLineOpacity = lineOpacity * 0.28;
-  const throughNodeOutlineOpacity = outlineOpacity * 0.22;
+  /** Fade for segments under foreign node bodies — still visible, not solid. */
+  const throughNodeLineOpacity = lineOpacity * 0.45;
+  const throughNodeOutlineOpacity = outlineOpacity * 0.36;
 
   return (
     <Box

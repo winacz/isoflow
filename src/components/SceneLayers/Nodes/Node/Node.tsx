@@ -17,6 +17,7 @@ import {
   findPlanView,
   getPortalDisplayLabel,
   planPortalJump,
+  getSinglePortNodeVlanBorderColor,
   CoordsUtils
 } from 'src/utils';
 import { useIcon } from 'src/hooks/useIcon';
@@ -120,6 +121,15 @@ export const Node = React.memo(({
     });
   }, [node.id, selectedItemId, focusedPortIds, connectors]);
 
+  const vlanBorderColor = useMemo(() => {
+    return getSinglePortNodeVlanBorderColor({
+      itemId: node.id,
+      icon: modelItem.icon,
+      connectors,
+      modelItems
+    });
+  }, [node.id, modelItem.icon, connectors, modelItems]);
+
   const portAttention = useUiStateStore((state) => {
     return state.portAttention;
   });
@@ -141,7 +151,8 @@ export const Node = React.memo(({
     node.id,
     peerHighlightPortIds,
     attentionPortId,
-    attentionToken
+    attentionToken,
+    vlanBorderColor
   );
   const liveTile = useNodeDragStore((state) => {
     return state.tiles[node.id];
@@ -177,11 +188,10 @@ export const Node = React.memo(({
     return modelItem.description;
   }, [modelItem.description]);
 
-  // Iso icons: name/description float above the sprite.
-  // 2D plan shapes already show the name on the chassis — only float a
-  // description card (same ExpandableLabel UX as isometric).
+  // Iso icons: name/description/portal float above the sprite.
+  // 2D plan descriptions render in NodeDescriptionLabels (above overlay).
   const showFloatingLabel = isPlanShape
-    ? Boolean(description)
+    ? false
     : Boolean(modelItem.name || description || modelItem.portal);
 
   const portalLabel = useMemo(() => {

@@ -8,6 +8,8 @@ type Props = Omit<LabelProps, 'maxHeight'> & {
   onToggleExpand?: (isExpanded: boolean) => void;
   /** Collapsed content height before the expand control appears. */
   collapsedMaxHeight?: number;
+  /** Allow the card itself to receive pointer events (2D drag). */
+  interactive?: boolean;
 };
 
 const STANDARD_LABEL_HEIGHT = 80;
@@ -16,6 +18,7 @@ export const ExpandableLabel = ({
   children,
   onToggleExpand,
   collapsedMaxHeight = STANDARD_LABEL_HEIGHT,
+  interactive = false,
   ...rest
 }: Props) => {
   const [isExpanded, setIsExpanded] = useState(false);
@@ -67,7 +70,14 @@ export const ExpandableLabel = ({
       {...rest}
       maxHeight={containerMaxHeight}
       maxWidth={isExpanded ? rest.maxWidth * 1.5 : rest.maxWidth}
-      sx={{ pointerEvents: 'none', ...((rest.sx as object) ?? {}) }}
+      sx={{
+        pointerEvents: interactive ? 'auto' : 'none',
+        cursor: interactive ? 'grab' : undefined,
+        boxShadow: interactive
+          ? '0 4px 14px rgba(15, 23, 42, 0.18)'
+          : undefined,
+        ...((rest.sx as object) ?? {})
+      }}
     >
       <Box
         ref={contentRef}

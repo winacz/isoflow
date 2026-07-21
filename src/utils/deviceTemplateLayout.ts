@@ -125,9 +125,14 @@ export const layoutDeviceTemplate = (
     ? Math.max(0, Math.floor((bay - portSpan) / 2))
     : SIDE_MARGIN;
 
+  const instancesCount = template.virtualInstances?.length || 0;
+  // If SERVER, add extra height for instances (about 8 tiles per row of instances)
+  const instancesRows = Math.ceil(instancesCount / 2); // 2 instances per row
+  const extraHeight = template.kind === 'SERVER' ? Math.max(12, instancesRows * 9 + 4) : 0;
+  
   const size: Size = {
     width: bay,
-    height: RACK_1U_HEIGHT_TILES
+    height: RACK_1U_HEIGHT_TILES + extraHeight
   };
 
   let cursorX = isRack ? margin : SIDE_MARGIN;
@@ -154,8 +159,13 @@ export const layoutDeviceTemplate = (
     for (let i = 0; i < section.ports; i += 1) {
       const row = Math.floor(i / cols);
       const col = i % cols;
-      const y = row === 0 ? TOP_PORT_Y : BOTTOM_PORT_Y;
-      const side = row === 0 ? ('TOP' as const) : ('BOTTOM' as const);
+      
+      // For SERVER, place all ports at the bottom edge. Otherwise standard switch layout.
+      const isServer = template.kind === 'SERVER';
+      const y = isServer
+        ? size.height - 3 // Near the bottom edge
+        : (row === 0 ? TOP_PORT_Y : BOTTOM_PORT_Y);
+      const side = isServer ? 'BOTTOM' : (row === 0 ? 'TOP' : 'BOTTOM');
 
       ports.push({
         id: `${section.id}-p${i + 1}`,

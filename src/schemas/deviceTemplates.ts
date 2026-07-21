@@ -19,13 +19,28 @@ export const deviceTemplateSectionSchema = z.object({
   cols: z.number().int().min(1).max(24).optional()
 });
 
+export const virtualInterfaceSchema = z.object({
+  id,
+  type: z.enum(['BRIDGE', 'NAT']),
+  targetPortId: id.optional() // reference to RJ45 physical port id
+});
+
+export const virtualInstanceSchema = z.object({
+  id,
+  name: constrainedStrings.name,
+  type: z.enum(['VM', 'LXC', 'DOCKER']),
+  status: z.enum(['running', 'stopped']),
+  interfaces: z.array(virtualInterfaceSchema)
+});
+
 export const deviceTemplateSchema = z.object({
   id,
   name: constrainedStrings.name,
-  kind: z.literal('SWITCH'),
+  kind: z.enum(['SWITCH', 'SERVER']),
   formFactor: z.enum(deviceFormFactorOptions),
   numbering: z.enum(deviceNumberingOptions),
-  sections: z.array(deviceTemplateSectionSchema).min(1).max(12)
+  sections: z.array(deviceTemplateSectionSchema).min(1).max(12),
+  virtualInstances: z.array(virtualInstanceSchema).optional()
 });
 
 export const deviceTemplatesSchema = z.array(deviceTemplateSchema);

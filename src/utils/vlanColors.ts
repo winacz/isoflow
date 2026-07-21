@@ -1,4 +1,4 @@
-import { SHAPE_2D_PC_ID } from 'src/config';
+import { SHAPE_2D_PC_ID, getShape2dPorts } from 'src/config';
 
 /**
  * Visual for VLAN 1 / non-VLAN devices (PC) on ports only.
@@ -272,6 +272,44 @@ export const getConnectorVlanColor = ({
   modelItems: ModelItemVlanFields[];
 }): string | null => {
   return getConnectorRelationSummary({ anchors, modelItems }).vlanColor;
+};
+
+/**
+ * Border tint for single-port hosts (PC / camera / 1-port templates).
+ * Uses the cable’s access VLAN (peer switch), same as link coloring.
+ * Returns null when not single-port or not connected.
+ */
+export const getSinglePortNodeVlanBorderColor = ({
+  itemId,
+  icon,
+  connectors,
+  modelItems
+}: {
+  itemId: string;
+  icon?: string | null;
+  connectors: { anchors: { ref: { item?: string; port?: string } }[] }[];
+  modelItems: ModelItemVlanFields[];
+}): string | null => {
+  const layoutPorts = getShape2dPorts(icon ?? '');
+  if (layoutPorts.length !== 1) return null;
+
+  const portId = layoutPorts[0].id;
+  const connector = connectors.find((candidate) => {
+    return candidate.anchors.some((anchor) => {
+      return anchor.ref.item === itemId && anchor.ref.port === portId;
+    });
+  });
+  if (!connector) return null;
+
+  const summary = getConnectorRelationSummary({
+    anchors: connector.anchors,
+    modelItems
+  });
+
+  if (summary.linkMode === 'mismatch') return TRUNK_MISMATCH_COLOR;
+  if (summary.linkMode === 'trunk') return null;
+  if (summary.vlanColor) return summary.vlanColor;
+  return VLAN_1_COLOR;
 };
 
 export type ConnectorEndpointSummary = {

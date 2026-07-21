@@ -16,8 +16,11 @@ import type { ModelItem, Rectangle, ViewItem } from 'src/types';
 /** Screen size of the PiP viewport (px). */
 const VIEWPORT_W = 420;
 const VIEWPORT_H = 320;
-/** World→screen scale — lower = more pulled back (neighbors visible). */
-const WORLD_ZOOM = 0.38;
+/** Extra margin around the focus so it is not edge-to-edge. */
+const FIT_PADDING = 1.28;
+/** Cap so tiny devices do not fill the whole card. */
+const MAX_WORLD_ZOOM = 0.5;
+const MIN_WORLD_ZOOM = 0.04;
 /** How far (tiles) around the focus to include neighbors. */
 const NEIGHBOR_PAD_TILES = 14;
 /** Offset from cursor. */
@@ -37,6 +40,13 @@ type FocusRect = {
   y: number;
   w: number;
   h: number;
+};
+
+const fitWorldZoom = (focus: FocusRect) => {
+  const focusW = Math.max(1, focus.w) * TILE_SIZE_2D * FIT_PADDING;
+  const focusH = Math.max(1, focus.h) * TILE_SIZE_2D * FIT_PADDING;
+  const zoom = Math.min(VIEWPORT_W / focusW, VIEWPORT_H / focusH);
+  return Math.min(MAX_WORLD_ZOOM, Math.max(MIN_WORLD_ZOOM, zoom));
 };
 
 const footprintOf = (
@@ -205,10 +215,26 @@ export const PortPipOverlay = () => {
   }, [hover, planRectangles]);
 
   const focusRect = useMemo((): FocusRect | null => {
-    if (peer && peerViewItem) return footprintOf(peerViewItem, peer);
+    if (peer && peerViewItem) {
+      // Frame the parent cabinet when the target is rack-mounted.
+      if (peerViewItem.parentId) {
+        const parentView = planItems.find((item) => {
+          return item.id === peerViewItem.parentId;
+        });
+        const parentModel = parentView
+          ? modelItems.find((item) => {
+              return item.id === parentView.id;
+            })
+          : undefined;
+        if (parentView && parentModel) {
+          return footprintOf(parentView, parentModel);
+        }
+      }
+      return footprintOf(peerViewItem, peer);
+    }
     if (peerRectangle) return rectangleBounds(peerRectangle);
     return null;
-  }, [peer, peerViewItem, peerRectangle]);
+  }, [peer, peerViewItem, peerRectangle, planItems, modelItems]);
 
   const sceneNodes = useMemo((): Footprint[] => {
     if (!focusRect) return [];
@@ -252,6 +278,7 @@ export const PortPipOverlay = () => {
     x: (focusRect.x + focusRect.w / 2) * TILE_SIZE_2D,
     y: (focusRect.y + focusRect.h / 2) * TILE_SIZE_2D
   };
+  const worldZoom = fitWorldZoom(focusRect);
 
   const peerPortHighlight = hover.peerPortId ? [hover.peerPortId] : null;
   const titleName =
@@ -328,7 +355,7 @@ export const PortPipOverlay = () => {
             width: VIEWPORT_W,
             height: VIEWPORT_H,
             transformOrigin: '0 0',
-            transform: `translate(${VIEWPORT_W / 2}px, ${VIEWPORT_H / 2}px) scale(${WORLD_ZOOM}) translate(${-focusCenterPx.x}px, ${-focusCenterPx.y}px)`
+            transform: `translate(${VIEWPORT_W / 2}px, ${VIEWPORT_H / 2}px) scale(${worldZoom}) translate(${-focusCenterPx.x}px, ${-focusCenterPx.y}px)`
           }}
         >
           {nearbyRectangles.map((rect) => {

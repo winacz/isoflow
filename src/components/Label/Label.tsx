@@ -10,8 +10,14 @@ export interface Props {
   expandDirection?: 'CENTER' | 'BOTTOM';
   /** Vertical stem (iso) or diagonal callout from the node (2D). */
   stemDirection?: 'vertical' | 'diagonal';
+  /**
+   * Free callout tip (world px relative to anchor). When set, overrides the
+   * default diagonal derived from `labelHeight`.
+   */
+  stemOffset?: { x: number; y: number } | null;
   children: React.ReactNode;
   sx?: SxProps;
+  onMouseDown?: React.MouseEventHandler<HTMLDivElement>;
 }
 
 export const Label = ({
@@ -21,12 +27,29 @@ export const Label = ({
   expandDirection = 'CENTER',
   stemDirection = 'vertical',
   labelHeight = 0,
-  sx
+  stemOffset = null,
+  sx,
+  onMouseDown
 }: Props) => {
   const contentRef = useRef<HTMLDivElement>();
-  const isDiagonal = stemDirection === 'diagonal' && labelHeight > 0;
-  const stemDx = isDiagonal ? Math.round(labelHeight * 0.85) : 0;
-  const stemDy = labelHeight;
+  const useFreeStem =
+    Boolean(stemOffset) || (stemDirection === 'diagonal' && labelHeight > 0);
+
+  const tipX = stemOffset
+    ? stemOffset.x
+    : stemDirection === 'diagonal'
+      ? Math.round(labelHeight * 0.85)
+      : 0;
+  const tipY = stemOffset
+    ? stemOffset.y
+    : labelHeight > 0
+      ? -labelHeight
+      : 0;
+
+  const stemMinX = Math.min(0, tipX);
+  const stemMinY = Math.min(0, tipY);
+  const stemW = Math.max(Math.abs(tipX), CONNECTOR_DOT_SIZE) + CONNECTOR_DOT_SIZE;
+  const stemH = Math.max(Math.abs(tipY), CONNECTOR_DOT_SIZE) + CONNECTOR_DOT_SIZE;
 
   return (
     <Box
@@ -36,7 +59,7 @@ export const Label = ({
         overflow: 'visible'
       }}
     >
-      {labelHeight > 0 && !isDiagonal && (
+      {labelHeight > 0 && !useFreeStem && (
         <Box
           component="svg"
           viewBox={`0 0 ${CONNECTOR_DOT_SIZE} ${labelHeight}`}
@@ -61,32 +84,32 @@ export const Label = ({
         </Box>
       )}
 
-      {isDiagonal && (
+      {useFreeStem && (tipX !== 0 || tipY !== 0) && (
         <Box
           component="svg"
-          width={stemDx + CONNECTOR_DOT_SIZE}
-          height={stemDy + CONNECTOR_DOT_SIZE}
+          width={stemW}
+          height={stemH}
           sx={{
             position: 'absolute',
-            top: -stemDy,
-            left: 0,
+            top: stemMinY,
+            left: stemMinX,
             overflow: 'visible',
             pointerEvents: 'none'
           }}
         >
           <line
-            x1={CONNECTOR_DOT_SIZE / 2}
-            y1={stemDy}
-            x2={stemDx}
-            y2={CONNECTOR_DOT_SIZE / 2}
+            x1={-stemMinX}
+            y1={-stemMinY}
+            x2={tipX - stemMinX}
+            y2={tipY - stemMinY}
             strokeDasharray={`0, ${CONNECTOR_DOT_SIZE * 2}`}
             stroke="black"
             strokeWidth={CONNECTOR_DOT_SIZE}
             strokeLinecap="round"
           />
           <circle
-            cx={CONNECTOR_DOT_SIZE / 2}
-            cy={stemDy}
+            cx={-stemMinX}
+            cy={-stemMinY}
             r={CONNECTOR_DOT_SIZE}
             fill="black"
           />
@@ -95,6 +118,7 @@ export const Label = ({
 
       <Box
         ref={contentRef}
+        onMouseDown={onMouseDown}
         sx={{
           position: 'absolute',
           display: 'inline-block',
@@ -114,8 +138,8 @@ export const Label = ({
         style={{
           maxHeight,
           maxWidth,
-          top: -stemDy,
-          left: isDiagonal ? stemDx : 0
+          top: useFreeStem ? tipY : -labelHeight,
+          left: useFreeStem ? tipX : 0
         }}
       >
         {children}

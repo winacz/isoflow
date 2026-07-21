@@ -13,6 +13,11 @@ export const viewItemSchema = z.object({
   labelHeight: z.number().optional(),
   /** Relative size of the floating description card (1 = default). */
   labelScale: z.number().positive().optional(),
+  /**
+   * 2D description callout tip offset from the node anchor (world px).
+   * x right, y down (negative = above the device).
+   */
+  labelOffset: coords.optional(),
   /** Cabinet this item is mounted in (RACK switches). */
   parentId: id.optional(),
   /** 0-based rack unit from the top of the cabinet. */

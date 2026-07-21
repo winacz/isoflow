@@ -34,6 +34,7 @@ import {
 } from 'src/utils';
 import { useScene } from 'src/hooks/useScene';
 import { isShape2dIcon, getShape2dSize } from 'src/config';
+import { useStackFanStore } from 'src/stores/stackFanStore';
 
 /** Waypoint just created by dblclick — survives stale scene until first drag/click-away. */
 let armedWaypoint: {
@@ -626,6 +627,12 @@ const mousedown: ModeActionsAction = ({
     ) {
       uiState.actions.clearSelectedItemIds();
       uiState.actions.setSelectedWaypointIds([]);
+      // Plan: also drop connector/item sidebar focus so dimming does not stick
+      // after untangling stacked cables.
+      if (isPlanProjection(uiState.projectionMode)) {
+        uiState.actions.setItemControls(null);
+        useStackFanStore.getState().clearPinned();
+      }
     }
   }
 };

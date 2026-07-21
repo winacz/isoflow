@@ -957,10 +957,38 @@ export const bundleShape2dRoutes = ({
 
     const firstIsSwitch = isSwitch(first.ref.item);
     const lastIsSwitch = isSwitch(last.ref.item);
-    if (firstIsSwitch === lastIsSwitch) return;
 
-    const switchAnchor = firstIsSwitch ? first : last;
-    const leafAnchor = firstIsSwitch ? last : first;
+    let switchAnchor = first;
+    let leafAnchor = last;
+    let leafFirst = false;
+
+    if (firstIsSwitch !== lastIsSwitch) {
+      switchAnchor = firstIsSwitch ? first : last;
+      leafAnchor = firstIsSwitch ? last : first;
+      leafFirst = !firstIsSwitch;
+    } else {
+      // Switch↔switch trunk (or host↔host): include when either/both ends selected.
+      const aSel = selectedIds.has(first.ref.item);
+      const bSel = selectedIds.has(last.ref.item);
+      if (aSel && bSel) {
+        switchAnchor = first;
+        leafAnchor = last;
+        leafFirst = false;
+      } else if (aSel !== bSel) {
+        if (aSel) {
+          leafAnchor = first;
+          switchAnchor = last;
+          leafFirst = true;
+        } else {
+          leafAnchor = last;
+          switchAnchor = first;
+          leafFirst = false;
+        }
+      } else {
+        return;
+      }
+    }
+
     const leafId = leafAnchor.ref.item!;
     const switchId = switchAnchor.ref.item!;
 
@@ -984,7 +1012,7 @@ export const bundleShape2dRoutes = ({
 
     cables.push({
       connectorId: connector.id,
-      leafFirst: !firstIsSwitch,
+      leafFirst,
       leafId,
       leafPortWorld: {
         x: leafItem.tile.x + leafPort.tile.x,
@@ -1231,10 +1259,37 @@ export const gatherBundleShape2dRoutes = ({
 
     const firstIsSwitch = isSwitch(first.ref.item);
     const lastIsSwitch = isSwitch(last.ref.item);
-    if (firstIsSwitch === lastIsSwitch) return;
 
-    const switchAnchor = firstIsSwitch ? first : last;
-    const leafAnchor = firstIsSwitch ? last : first;
+    let switchAnchor = first;
+    let leafAnchor = last;
+    let leafFirst = false;
+
+    if (firstIsSwitch !== lastIsSwitch) {
+      switchAnchor = firstIsSwitch ? first : last;
+      leafAnchor = firstIsSwitch ? last : first;
+      leafFirst = !firstIsSwitch;
+    } else {
+      const aSel = selectedIds.has(first.ref.item);
+      const bSel = selectedIds.has(last.ref.item);
+      if (aSel && bSel) {
+        switchAnchor = first;
+        leafAnchor = last;
+        leafFirst = false;
+      } else if (aSel !== bSel) {
+        if (aSel) {
+          leafAnchor = first;
+          switchAnchor = last;
+          leafFirst = true;
+        } else {
+          leafAnchor = last;
+          switchAnchor = first;
+          leafFirst = false;
+        }
+      } else {
+        return;
+      }
+    }
+
     const leafId = leafAnchor.ref.item!;
     const switchId = switchAnchor.ref.item!;
 
@@ -1258,7 +1313,7 @@ export const gatherBundleShape2dRoutes = ({
 
     cables.push({
       connectorId: connector.id,
-      leafFirst: !firstIsSwitch,
+      leafFirst,
       leafId,
       leafPortWorld: {
         x: leafItem.tile.x + leafPort.tile.x,
@@ -1705,8 +1760,9 @@ export const diagonalFanShape2dRoutes = ({
     const b = last.ref.item;
     const aSel = selectedIds.has(a);
     const bSel = selectedIds.has(b);
+    if (!aSel && !bSel) return;
 
-    // Need exactly one selected leaf (or prefer switch as hub).
+    // Need a hub (fan origin) and a leaf (target). Prefer real switch as hub.
     let hubId: string;
     let leafId: string;
     let hubAnchor = first;
@@ -1727,9 +1783,18 @@ export const diagonalFanShape2dRoutes = ({
         leafAnchor = first;
         leafFirst = true;
       }
+      // Access links: leaf must be in the selection (hub may be outside).
       if (!selectedIds.has(leafId)) return;
+    } else if (aSel && bSel) {
+      // Switch↔switch trunk (or host↔host): both selected — include the cable.
+      // Stable hub = first endpoint so multi-select Test/Smart routes it.
+      hubId = a;
+      leafId = b;
+      hubAnchor = first;
+      leafAnchor = last;
+      leafFirst = false;
     } else if (aSel !== bSel) {
-      // Non-switch hub: the non-selected side.
+      // Exactly one end selected — selected side is the leaf.
       if (aSel) {
         leafId = a;
         hubId = b;
