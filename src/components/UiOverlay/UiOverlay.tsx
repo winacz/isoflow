@@ -1,6 +1,5 @@
 import React, { useCallback, useMemo, useRef } from 'react';
-import { Box, useTheme, Typography, Stack } from '@mui/material';
-import { ChevronRight } from '@mui/icons-material';
+import { Box, useTheme } from '@mui/material';
 import { EditorModeEnum } from 'src/types';
 import { UiElement } from 'src/components/UiElement/UiElement';
 import { SceneLayer } from 'src/components/SceneLayer/SceneLayer';
@@ -10,17 +9,14 @@ import { ToolMenu } from 'src/components/ToolMenu/ToolMenu';
 import { useUiStateStore } from 'src/stores/uiStateStore';
 import { MainMenu } from 'src/components/MainMenu/MainMenu';
 import { ZoomControls } from 'src/components/ZoomControls/ZoomControls';
-import { BackgroundColorLab } from 'src/components/BackgroundColorLab/BackgroundColorLab';
-import { CanvasThemeToggle } from 'src/components/CanvasThemeToggle/CanvasThemeToggle';
 import { ConnectorRelationPanel } from 'src/components/ConnectorRelationPanel/ConnectorRelationPanel';
-import { DebugUtils } from 'src/components/DebugUtils/DebugUtils';
 import { useResizeObserver } from 'src/hooks/useResizeObserver';
 import { ContextMenuManager } from 'src/components/ContextMenu/ContextMenuManager';
 import { ViewModeTabs } from 'src/components/ViewModeTabs/ViewModeTabs';
 import { PortPipOverlay } from 'src/components/PortPipOverlay/PortPipOverlay';
 import { PortPipHoverController } from 'src/components/PortPipOverlay/PortPipHoverController';
-import { useScene } from 'src/hooks/useScene';
-import { useModelStore } from 'src/stores/modelStore';
+import { SviHoverController } from 'src/components/UiOverlay/SviHoverController';
+import { WorkshopView } from 'src/components/Workshop/WorkshopView';
 import { ExportImageDialog } from '../ExportImageDialog/ExportImageDialog';
 import { isPlanProjection } from 'src/utils';
 
@@ -29,7 +25,6 @@ const ToolsEnum = {
   ZOOM_CONTROLS: 'ZOOM_CONTROLS',
   TOOL_MENU: 'TOOL_MENU',
   ITEM_CONTROLS: 'ITEM_CONTROLS',
-  VIEW_TITLE: 'VIEW_TITLE',
   VIEW_MODE_TABS: 'VIEW_MODE_TABS'
 } as const;
 
@@ -43,12 +38,10 @@ const EDITOR_MODE_MAPPING: EditorModeMapping = {
     'ZOOM_CONTROLS',
     'TOOL_MENU',
     'MAIN_MENU',
-    'VIEW_TITLE',
     'VIEW_MODE_TABS'
   ],
   [EditorModeEnum.EXPLORABLE_READONLY]: [
     'ZOOM_CONTROLS',
-    'VIEW_TITLE',
     'VIEW_MODE_TABS'
   ],
   [EditorModeEnum.NON_INTERACTIVE]: []
@@ -73,9 +66,6 @@ export const UiOverlay = () => {
   const uiStateActions = useUiStateStore((state) => {
     return state.actions;
   });
-  const enableDebugTools = useUiStateStore((state) => {
-    return state.enableDebugTools;
-  });
   const mode = useUiStateStore((state) => {
     return state.mode;
   });
@@ -94,7 +84,6 @@ export const UiOverlay = () => {
   const projectionMode = useUiStateStore((state) => {
     return state.projectionMode;
   });
-  const { currentView } = useScene();
   const editorMode = useUiStateStore((state) => {
     return state.editorMode;
   });
@@ -104,8 +93,8 @@ export const UiOverlay = () => {
   const rendererEl = useUiStateStore((state) => {
     return state.rendererEl;
   });
-  const title = useModelStore((state) => {
-    return state.title;
+  const isWorkshopOpen = useUiStateStore((state) => {
+    return state.isWorkshopOpen;
   });
   const { size: rendererSize } = useResizeObserver(rendererEl);
   const isTwoD = isPlanProjection(projectionMode);
@@ -123,6 +112,8 @@ export const UiOverlay = () => {
     <>
       <PortPipHoverController />
       <PortPipOverlay />
+      <SviHoverController />
+      {isWorkshopOpen && <WorkshopView />}
       <Box
         sx={{
           position: 'absolute',
@@ -133,7 +124,7 @@ export const UiOverlay = () => {
           zIndex: 20
         }}
       >
-        {availableTools.includes('ITEM_CONTROLS') && showItemControls && (
+        {availableTools.includes('ITEM_CONTROLS') && showItemControls && !isWorkshopOpen && (
           <UiElement
             data-item-controls-scroll
             sx={{
@@ -157,7 +148,7 @@ export const UiOverlay = () => {
           </UiElement>
         )}
 
-        {availableTools.includes('TOOL_MENU') && (
+        {availableTools.includes('TOOL_MENU') && !isWorkshopOpen && (
           <Box
             sx={{
               position: 'absolute',
@@ -177,7 +168,7 @@ export const UiOverlay = () => {
           </Box>
         )}
 
-        {availableTools.includes('ZOOM_CONTROLS') && (
+        {availableTools.includes('ZOOM_CONTROLS') && !isWorkshopOpen && (
           <Box
             sx={{
               position: 'absolute',
@@ -194,6 +185,7 @@ export const UiOverlay = () => {
 
         {/* Bottom-left: cable relation while a connector is selected */}
         {availableTools.includes('ZOOM_CONTROLS') &&
+          !isWorkshopOpen &&
           isClassic2d &&
           selectedConnectorId && (
             <Box
@@ -209,7 +201,7 @@ export const UiOverlay = () => {
             </Box>
           )}
 
-        {availableTools.includes('MAIN_MENU') && (
+        {availableTools.includes('MAIN_MENU') && !isWorkshopOpen && (
           <Box
             sx={{
               position: 'absolute',
@@ -224,8 +216,6 @@ export const UiOverlay = () => {
             }}
           >
             <MainMenu />
-            <CanvasThemeToggle />
-            <BackgroundColorLab />
           </Box>
         )}
 
@@ -242,60 +232,6 @@ export const UiOverlay = () => {
           >
             <ViewModeTabs />
           </Box>
-        )}
-
-        {availableTools.includes('VIEW_TITLE') && (
-          <Box
-            sx={{
-              position: 'absolute',
-              display: 'flex',
-              justifyContent: 'center',
-              transform: 'translateX(-50%)',
-              pointerEvents: 'none'
-            }}
-            style={{
-              left: rendererSize.width / 2,
-              top: rendererSize.height - appPadding.y * 2,
-              width: rendererSize.width - 500,
-              height: appPadding.y
-            }}
-          >
-            <UiElement
-              sx={{
-                display: 'inline-flex',
-                px: 2,
-                alignItems: 'center',
-                height: '100%'
-              }}
-            >
-              <Stack direction="row" alignItems="center">
-                <Typography fontWeight={600} color="text.secondary">
-                  {title}
-                </Typography>
-                <ChevronRight />
-                <Typography fontWeight={600} color="text.secondary">
-                  {currentView.name}
-                </Typography>
-              </Stack>
-            </UiElement>
-          </Box>
-        )}
-
-        {enableDebugTools && (
-          <UiElement
-            sx={{
-              position: 'absolute',
-              width: 350,
-              transform: 'translateY(-100%)'
-            }}
-            style={{
-              maxWidth: `calc(${rendererSize.width} - ${appPadding.x * 2}px)`,
-              left: appPadding.x,
-              top: rendererSize.height - appPadding.y * 2 - spacing(1)
-            }}
-          >
-            <DebugUtils />
-          </UiElement>
         )}
       </Box>
 

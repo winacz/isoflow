@@ -46,6 +46,7 @@ import {
   TEXTBOX_DEFAULTS,
   INITIAL_SCENE_STATE
 } from 'src/config';
+import { getGridSnapStep } from 'src/utils/renderer';
 
 export const useScene = () => {
   const modelActions = useModelStore((state) => state.actions);
@@ -58,6 +59,9 @@ export const useScene = () => {
 
   const currentViewId = useUiStateStore((state) => {
     return state.view;
+  });
+  const gridStyle = useUiStateStore((state) => {
+    return state.gridStyle;
   });
   const uiActions = useUiStateStore((state) => {
     return state.actions;
@@ -697,12 +701,13 @@ export const useScene = () => {
           rectangles: view.rectangles ?? []
         });
 
-        // Faza B: Rozmieszczenie
+        // Faza B: Rozmieszczenie (snap do aktywnej siatki)
         const targets = smartPlaceNodes({
           graph,
           selectedItems,
           allItems: view.items ?? [],
-          modelItems: state.model.items
+          modelItems: state.model.items,
+          gridStep: getGridSnapStep(gridStyle)
         });
 
         // Aplikuj pozycje
@@ -773,7 +778,8 @@ export const useScene = () => {
       endHistoryTransaction,
       getState,
       setState,
-      currentViewId
+      currentViewId,
+      gridStyle
     ]
   );
 
@@ -803,7 +809,8 @@ export const useScene = () => {
           graph,
           selectedItems,
           allItems: view.items ?? [],
-          modelItems: state.model.items
+          modelItems: state.model.items,
+          gridStep: getGridSnapStep(gridStyle)
         });
 
         // Aplikuj pozycje
@@ -874,7 +881,8 @@ export const useScene = () => {
       endHistoryTransaction,
       getState,
       setState,
-      currentViewId
+      currentViewId,
+      gridStyle
     ]
   );
 

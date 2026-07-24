@@ -25,15 +25,30 @@ import {
   TILE_SIZE_2D,
   getShape2dSize,
   getShape2dPorts,
+  getBlankingSize,
   SHAPE_2D_SWITCH_ID,
   SHAPE_2D_PC_ID,
   SHAPE_2D_CAMERA_ID,
+  SHAPE_2D_CAMERA_V2_ID,
+  SHAPE_2D_PRINTER_ID,
+  SHAPE_2D_VOIP_ID,
+  SHAPE_2D_SMARTPHONE_ID,
+  SHAPE_2D_IOT_ID,
+  SHAPE_2D_AP_ID,
+  SHAPE_2D_NAS_ID,
+  SHAPE_2D_TABLET_ID,
   SHAPE_2D_CABINET_ID,
+  SHAPE_2D_BLANKING_ID,
+  SHAPE_2D_PATCH_PANEL_ID,
   CABINET_DEFAULT_UNITS,
-  getCabinetSize
+  getCabinetSize,
+  getPatchPanelSize,
+  PATCH_PANEL_DEFAULT_PORTS
 } from 'src/config';
 import { DeviceShape2d } from 'src/components/Shapes2d/DeviceShape2d';
 import { CabinetShape2d } from 'src/components/Shapes2d/CabinetShape2d';
+import { BlankingPlateShape2d } from 'src/components/Shapes2d/BlankingPlateShape2d';
+import { PatchPanelShape2d } from 'src/components/Shapes2d/PatchPanelShape2d';
 import { DeviceTypeIcon } from 'src/components/Icons/DeviceTypeIcon';
 import {
   deviceTemplateToIcon,
@@ -44,12 +59,22 @@ import {
   isDeviceTemplateId
 } from 'src/utils';
 
-const CATEGORY_ORDER = ['Serwery', 'Switches', 'Stacje'] as const;
+const CATEGORY_ORDER = [
+  'Serwery',
+  'Switches',
+  'Stacje',
+  'RACK Utilities'
+] as const;
 
 const shapeCaption = (shape: Icon) => {
   if (shape.id === SHAPE_2D_SWITCH_ID) return '16× RJ45';
   if (shape.id === SHAPE_2D_PC_ID) return '1× RJ45';
   if (shape.id === SHAPE_2D_CAMERA_ID) return '1× PoE RJ45';
+  if (shape.id === SHAPE_2D_CAMERA_V2_ID) return '1× RJ45';
+  if (shape.id === SHAPE_2D_BLANKING_ID) return '1U domyślnie · bez portów';
+  if (shape.id === SHAPE_2D_PATCH_PANEL_ID) {
+    return `${PATCH_PANEL_DEFAULT_PORTS}× RJ45 · bridge · tylko w szafie`;
+  }
 
   const ports = getShape2dPorts(shape.id);
   if (!ports.length) {
@@ -107,11 +132,98 @@ const ShapePreview = ({ shape }: { shape: Icon }) => {
     );
   }
 
+  if (shape.id === SHAPE_2D_BLANKING_ID) {
+    const size = getBlankingSize(2);
+    const naturalW = size.width * TILE_SIZE_2D;
+    const naturalH = size.height * TILE_SIZE_2D;
+    const previewWidth = 100;
+    const scale = previewWidth / naturalW;
+    const previewHeight = Math.round(naturalH * scale);
+
+    return (
+      <Box
+        sx={{
+          width: previewWidth,
+          height: previewHeight,
+          flexShrink: 0,
+          overflow: 'hidden',
+          borderRadius: 1,
+          border: '1px solid',
+          borderColor: 'divider',
+          bgcolor: '#f8fafc'
+        }}
+      >
+        <Box
+          sx={{
+            width: naturalW,
+            height: naturalH,
+            transform: `scale(${scale})`,
+            transformOrigin: 'top left'
+          }}
+        >
+          <BlankingPlateShape2d
+            centered={false}
+            name="ZAŚLEPKA"
+            rackUnits={2}
+          />
+        </Box>
+      </Box>
+    );
+  }
+
+  if (shape.id === SHAPE_2D_PATCH_PANEL_ID) {
+    const size = getPatchPanelSize();
+    const naturalW = size.width * TILE_SIZE_2D;
+    const naturalH = size.height * TILE_SIZE_2D;
+    const previewWidth = 100;
+    const scale = previewWidth / naturalW;
+    const previewHeight = Math.round(naturalH * scale);
+
+    return (
+      <Box
+        sx={{
+          width: previewWidth,
+          height: previewHeight,
+          flexShrink: 0,
+          overflow: 'hidden',
+          borderRadius: 1,
+          border: '1px solid',
+          borderColor: 'divider',
+          bgcolor: '#f8fafc'
+        }}
+      >
+        <Box
+          sx={{
+            width: naturalW,
+            height: naturalH,
+            transform: `scale(${scale})`,
+            transformOrigin: 'top left'
+          }}
+        >
+          <PatchPanelShape2d
+            centered={false}
+            name="PATCH"
+            portCount={12}
+          />
+        </Box>
+      </Box>
+    );
+  }
+
   const size = getShape2dSize(shape.id) ?? { width: 8, height: 7 };
   const naturalW = size.width * TILE_SIZE_2D;
   const naturalH = size.height * TILE_SIZE_2D;
   const previewWidth =
-    shape.id === SHAPE_2D_PC_ID || shape.id === SHAPE_2D_CAMERA_ID
+    shape.id === SHAPE_2D_PC_ID ||
+    shape.id === SHAPE_2D_CAMERA_ID ||
+    shape.id === SHAPE_2D_CAMERA_V2_ID ||
+    shape.id === SHAPE_2D_PRINTER_ID ||
+    shape.id === SHAPE_2D_VOIP_ID ||
+    shape.id === SHAPE_2D_SMARTPHONE_ID ||
+    shape.id === SHAPE_2D_IOT_ID ||
+    shape.id === SHAPE_2D_AP_ID ||
+    shape.id === SHAPE_2D_NAS_ID ||
+    shape.id === SHAPE_2D_TABLET_ID
       ? 72
       : Math.min(168, naturalW * 0.28);
   const scale = previewWidth / naturalW;
@@ -148,7 +260,23 @@ const ShapePreview = ({ shape }: { shape: Icon }) => {
                 ? 'PC-01'
                 : shape.id === SHAPE_2D_CAMERA_ID
                   ? 'CAM-01'
-                  : shape.name
+                  : shape.id === SHAPE_2D_CAMERA_V2_ID
+                    ? 'CAM-V2-01'
+                    : shape.id === SHAPE_2D_PRINTER_ID
+                      ? 'PRN-01'
+                      : shape.id === SHAPE_2D_VOIP_ID
+                        ? 'TEL-01'
+                        : shape.id === SHAPE_2D_SMARTPHONE_ID
+                          ? 'MOB-01'
+                          : shape.id === SHAPE_2D_IOT_ID
+                            ? 'IOT-01'
+                            : shape.id === SHAPE_2D_AP_ID
+                              ? 'AP-01'
+                              : shape.id === SHAPE_2D_NAS_ID
+                                ? 'NAS-01'
+                                : shape.id === SHAPE_2D_TABLET_ID
+                                  ? 'TERM-01'
+                                  : shape.name
           }
         />
       </Box>

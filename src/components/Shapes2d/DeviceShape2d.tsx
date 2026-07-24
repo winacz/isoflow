@@ -4,6 +4,14 @@ import {
   TILE_SIZE_2D,
   SHAPE_2D_PC_ID,
   SHAPE_2D_CAMERA_ID,
+  SHAPE_2D_CAMERA_V2_ID,
+  SHAPE_2D_PRINTER_ID,
+  SHAPE_2D_VOIP_ID,
+  SHAPE_2D_SMARTPHONE_ID,
+  SHAPE_2D_IOT_ID,
+  SHAPE_2D_AP_ID,
+  SHAPE_2D_NAS_ID,
+  SHAPE_2D_TABLET_ID,
   CABINET_EAR_TILES,
   getShape2dSize,
   getShape2dPorts
@@ -15,6 +23,7 @@ import { Rj45Port } from 'src/components/Shapes2d/Rj45Port';
 import { DeviceTypeIcon } from 'src/components/Icons/DeviceTypeIcon';
 
 interface Props {
+  itemId?: string;
   shapeId: string;
   /** Override pixel size (e.g. menu preview). */
   width?: number;
@@ -55,6 +64,10 @@ interface Props {
   showShadow?: boolean;
   /** VLAN-tinted chassis border (single-port hosts when cabled). */
   vlanBorderColor?: string | null;
+  /** Endpoint marked as PoE-powered — green bolt on jacks. */
+  poweredByPoe?: boolean;
+  /** poweredByPoe but not linked to a PoE OUT port — yellow warning. */
+  poePowerWarning?: boolean;
 }
 
 /**
@@ -62,6 +75,7 @@ interface Props {
  * Each port cell is a connection handle (exact tile center).
  */
 export const DeviceShape2d = ({
+  itemId,
   shapeId,
   width,
   height,
@@ -80,7 +94,9 @@ export const DeviceShape2d = ({
   layoutOverride,
   color = '#ffffff',
   showShadow = true,
-  vlanBorderColor = null
+  vlanBorderColor = null,
+  poweredByPoe = false,
+  poePowerWarning = false
 }: Props) => {
   const templateLayout = layoutOverride ?? getDeviceTemplateLayout(shapeId);
   const footprint =
@@ -93,8 +109,35 @@ export const DeviceShape2d = ({
   const tileH = TILE_SIZE_2D * scaleY;
   const cellSize = Math.min(tileW, tileH);
   const isRack = templateLayout?.formFactor === 'RACK';
+  const switchRole = templateLayout?.switchRole;
+  const roleIconKind =
+    switchRole === 'ROUTER'
+      ? 'router'
+      : switchRole === 'OTHER'
+        ? 'other'
+        : switchRole === 'SW'
+          ? 'switch'
+          : undefined;
+  const roleLabel =
+    switchRole === 'SW'
+      ? 'SW'
+      : switchRole === 'ROUTER'
+        ? 'Router'
+        : switchRole === 'OTHER'
+          ? 'Other'
+          : null;
   const isCamera = shapeId === SHAPE_2D_CAMERA_ID;
-  const isPc = shapeId === SHAPE_2D_PC_ID || isCamera;
+  const isCameraV2 = shapeId === SHAPE_2D_CAMERA_V2_ID;
+  const isPrinter = shapeId === SHAPE_2D_PRINTER_ID;
+  const isVoip = shapeId === SHAPE_2D_VOIP_ID;
+  const isSmartphone = shapeId === SHAPE_2D_SMARTPHONE_ID;
+  const isIot = shapeId === SHAPE_2D_IOT_ID;
+  const isAp = shapeId === SHAPE_2D_AP_ID;
+  const isNas = shapeId === SHAPE_2D_NAS_ID;
+  const isTablet = shapeId === SHAPE_2D_TABLET_ID;
+  const isPc = shapeId === SHAPE_2D_PC_ID || isCamera || isCameraV2 || isPrinter || isVoip || isSmartphone || isIot || isAp || isNas || isTablet;
+  /** Compact numbers on switch faces; PC/stations also compact so labels fit above the bottom jack. */
+  const compactPortLabels = true;
   const portTileSize = cellSize * SHAPE_2D_PORT_VISUAL_SIZE_TILES;
   /** Overlay cabinet rails; join flush to chassis sides. */
   const earW = isRack
@@ -107,8 +150,13 @@ export const DeviceShape2d = ({
   const chassisTint = parseDeviceColor(color);
   /** Header band ≈ top third of the chassis (name + icon + divider). */
   const headerBandH = pxHeight / 3;
-  const headerIconSize = Math.max(36, Math.round(headerBandH * 0.45));
-  const headerNameSize = Math.max(18, Math.round(headerBandH * 0.28));
+  // Rack 1U: keep labels inside the band. Free devices keep larger chrome.
+  const headerIconSize = isRack
+    ? Math.max(16, Math.min(26, Math.round(headerBandH * 0.4)))
+    : Math.max(36, Math.round(headerBandH * 0.45));
+  const headerNameSize = isRack
+    ? Math.max(11, Math.min(15, Math.round(headerBandH * 0.26)))
+    : Math.max(18, Math.round(headerBandH * 0.28));
   const chassisRadius = Math.max(2, Math.round(cellSize * 0.12));
 
   const ports = useMemo(() => {
@@ -187,6 +235,42 @@ export const DeviceShape2d = ({
           outlineOffset: vlanBorderColor ? 2 : undefined
         }}
       >
+        {poePowerWarning && (
+          <Box
+            title="Urządzenie zasilane PoE nie jest podłączone do portu PoE Out"
+            sx={{
+              position: 'absolute',
+              top: 4,
+              right: 4,
+              width: Math.max(16, Math.round(cellSize * 0.55)),
+              height: Math.max(16, Math.round(cellSize * 0.55)),
+              zIndex: 8,
+              pointerEvents: 'auto',
+              cursor: 'help'
+            }}
+          >
+            <Box
+              component="svg"
+              viewBox="0 0 16 14"
+              sx={{ width: '100%', height: '100%', display: 'block' }}
+            >
+              <path
+                d="M8 1.2L14.8 13H1.2L8 1.2z"
+                fill="#facc15"
+                stroke="#ca8a04"
+                strokeWidth={0.9}
+                strokeLinejoin="round"
+              />
+              <path
+                d="M8 5v4.2"
+                stroke="#78350f"
+                strokeWidth={1.3}
+                strokeLinecap="round"
+              />
+              <circle cx={8} cy={11} r={0.7} fill="#78350f" />
+            </Box>
+          </Box>
+        )}
         <svg
           width="100%"
           height="100%"
@@ -296,6 +380,8 @@ export const DeviceShape2d = ({
               }}
             >
               <Rj45Port
+                itemId={itemId}
+                portId={port.id}
                 side={port.side}
                 tileSize={portTileSize}
                 portNumber={index + 1}
@@ -308,7 +394,10 @@ export const DeviceShape2d = ({
                 isAttentionPulse={attentionPortId === port.id}
                 isConnected={Boolean(connectedSet?.has(port.id))}
                 media={port.media ?? 'RJ45'}
-                compactLabel={isRack}
+                compactLabel={compactPortLabels}
+                poe={port.poe ?? null}
+                poweredByPoe={poweredByPoe}
+                labelPosition="above"
               />
             </Box>
           );
@@ -327,7 +416,7 @@ export const DeviceShape2d = ({
         top: centered ? -pxHeight / 2 : 0,
         pointerEvents: 'none',
         boxSizing: 'border-box',
-        overflow: isRack ? 'visible' : 'hidden',
+        overflow: 'visible',
         filter: showShadow
           ? 'drop-shadow(0 3px 5px rgba(15,23,42,0.22)) drop-shadow(0 1px 2px rgba(15,23,42,0.12))'
           : undefined
@@ -361,6 +450,465 @@ export const DeviceShape2d = ({
               zIndex: 0
             }}
           />
+        )}
+
+        {/* Camera V2 Lens Graphic */}
+        {isCameraV2 && (
+          <Box
+            sx={{
+              position: 'absolute',
+              left: `${Math.max(4, Math.round(tileW * 0.15))}px`,
+              right: `${Math.max(4, Math.round(tileW * 0.15))}px`,
+              top: `${headerBandH + 4}px`,
+              bottom: `${Math.round(tileH * 2.15) + 6}px`,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              pointerEvents: 'none',
+              zIndex: 1,
+              overflow: 'hidden'
+            }}
+          >
+            <svg
+              width="100%"
+              height="100%"
+              viewBox="0 0 100 100"
+              preserveAspectRatio="xMidYMid meet"
+              style={{ display: 'block', overflow: 'hidden' }}
+            >
+              <defs>
+                <radialGradient id="camv2-lens-grad" cx="45%" cy="40%" r="55%">
+                  <stop offset="0%" stopColor="#38bdf8" />
+                  <stop offset="25%" stopColor="#0284c7" />
+                  <stop offset="65%" stopColor="#0f172a" />
+                  <stop offset="100%" stopColor="#020617" />
+                </radialGradient>
+                <linearGradient id="camv2-ring-grad" x1="0" y1="0" x2="1" y2="1">
+                  <stop offset="0%" stopColor="#475569" />
+                  <stop offset="50%" stopColor="#1e293b" />
+                  <stop offset="100%" stopColor="#0f172a" />
+                </linearGradient>
+                <linearGradient id="camv2-outer-ring" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="0%" stopColor="#cbd5e1" />
+                  <stop offset="100%" stopColor="#64748b" />
+                </linearGradient>
+              </defs>
+
+              {/* Outer Metallic Bezel / Ring */}
+              <circle cx="50" cy="50" r="44" fill="url(#camv2-outer-ring)" stroke="#334155" strokeWidth="1.5" />
+              <circle cx="50" cy="50" r="40" fill="url(#camv2-ring-grad)" stroke="#0f172a" strokeWidth="1" />
+              
+              {/* Grooves / Ticks on Lens Ring */}
+              {Array.from({ length: 12 }).map((_, i) => {
+                const angle = (i * 30 * Math.PI) / 180;
+                const x1 = 50 + 37 * Math.cos(angle);
+                const y1 = 50 + 37 * Math.sin(angle);
+                const x2 = 50 + 39.5 * Math.cos(angle);
+                const y2 = 50 + 39.5 * Math.sin(angle);
+                return (
+                  <line
+                    key={i}
+                    x1={x1}
+                    y1={y1}
+                    x2={x2}
+                    y2={y2}
+                    stroke="#94a3b8"
+                    strokeWidth="1.2"
+                    strokeLinecap="round"
+                  />
+                );
+              })}
+
+              {/* Inner Lens Barrel Step */}
+              <circle cx="50" cy="50" r="33" fill="#1e293b" stroke="#0f172a" strokeWidth="1.5" />
+              <circle cx="50" cy="50" r="28" fill="#090d16" stroke="#020617" strokeWidth="1" />
+
+              {/* Aperture Blades / Iris lines */}
+              {Array.from({ length: 6 }).map((_, i) => {
+                const angle = (i * 60 * Math.PI) / 180;
+                const x1 = 50 + 14 * Math.cos(angle);
+                const y1 = 50 + 14 * Math.sin(angle);
+                const x2 = 50 + 27 * Math.cos(angle + 0.5);
+                const y2 = 50 + 27 * Math.sin(angle + 0.5);
+                return (
+                  <line
+                    key={i}
+                    x1={x1}
+                    y1={y1}
+                    x2={x2}
+                    y2={y2}
+                    stroke="#334155"
+                    strokeWidth="0.8"
+                    opacity="0.6"
+                  />
+                );
+              })}
+
+              {/* Main Glass Lens */}
+              <circle cx="50" cy="50" r="25" fill="url(#camv2-lens-grad)" stroke="#0f172a" strokeWidth="1" />
+
+              {/* Lens Reflection Curved Glare */}
+              <path
+                d="M 30 38 A 20 20 0 0 1 70 38 A 18 18 0 0 0 34 43 Z"
+                fill="#ffffff"
+                opacity="0.38"
+              />
+              <circle cx="38" cy="36" r="2.5" fill="#ffffff" opacity="0.45" />
+
+              {/* Sensor Core / Red AR Coating Dot */}
+              <circle cx="50" cy="50" r="7" fill="#020617" />
+              <circle cx="50" cy="50" r="3.5" fill="#0284c7" opacity="0.8" />
+              <circle cx="51" cy="49" r="1.2" fill="#f43f5e" opacity="0.85" />
+            </svg>
+          </Box>
+        )}
+
+        {/* Drukarka (Printer) Graphic */}
+        {isPrinter && (
+          <Box
+            sx={{
+              position: 'absolute',
+              left: `${Math.max(4, Math.round(tileW * 0.15))}px`,
+              right: `${Math.max(4, Math.round(tileW * 0.15))}px`,
+              top: `${headerBandH + 4}px`,
+              bottom: `${Math.round(tileH * 2.15) + 6}px`,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              pointerEvents: 'none',
+              zIndex: 1,
+              overflow: 'hidden'
+            }}
+          >
+            <svg
+              width="100%"
+              height="100%"
+              viewBox="0 0 100 100"
+              preserveAspectRatio="xMidYMid meet"
+              style={{ display: 'block', overflow: 'hidden' }}
+            >
+              {/* Paper Tray Top */}
+              <rect x="25" y="10" width="50" height="22" rx="3" fill="#e2e8f0" stroke="#64748b" strokeWidth="1.5" />
+              <line x1="32" y1="17" x2="68" y2="17" stroke="#cbd5e1" strokeWidth="1.5" />
+              <line x1="32" y1="22" x2="68" y2="22" stroke="#cbd5e1" strokeWidth="1.5" />
+
+              {/* Printer Body */}
+              <rect x="15" y="28" width="70" height="40" rx="6" fill="#1e293b" stroke="#0f172a" strokeWidth="2" />
+              <rect x="18" y="31" width="64" height="11" rx="3" fill="#334155" />
+              
+              {/* Control Panel Screen */}
+              <rect x="22" y="34" width="20" height="5" rx="1.5" fill="#0284c7" opacity="0.9" />
+              <circle cx="48" cy="36.5" r="1.8" fill="#22c55e" />
+              <circle cx="54" cy="36.5" r="1.8" fill="#38bdf8" />
+              <circle cx="60" cy="36.5" r="1.8" fill="#f59e0b" />
+
+              {/* Exit Slot */}
+              <rect x="24" y="49" width="52" height="4" rx="2" fill="#090d16" />
+
+              {/* Printed Paper Coming Out */}
+              <rect x="28" y="51" width="44" height="34" rx="2" fill="#ffffff" stroke="#cbd5e1" strokeWidth="1" />
+              <line x1="34" y1="59" x2="62" y2="59" stroke="#0284c7" strokeWidth="1.8" strokeLinecap="round" />
+              <line x1="34" y1="65" x2="58" y2="65" stroke="#64748b" strokeWidth="1.5" strokeLinecap="round" />
+              <line x1="34" y1="71" x2="62" y2="71" stroke="#64748b" strokeWidth="1.5" strokeLinecap="round" />
+              <line x1="34" y1="77" x2="52" y2="77" stroke="#94a3b8" strokeWidth="1.5" strokeLinecap="round" />
+            </svg>
+          </Box>
+        )}
+
+        {/* Telefon VoIP Graphic */}
+        {isVoip && (
+          <Box
+            sx={{
+              position: 'absolute',
+              left: `${Math.max(4, Math.round(tileW * 0.15))}px`,
+              right: `${Math.max(4, Math.round(tileW * 0.15))}px`,
+              top: `${headerBandH + 4}px`,
+              bottom: `${Math.round(tileH * 2.15) + 6}px`,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              pointerEvents: 'none',
+              zIndex: 1,
+              overflow: 'hidden'
+            }}
+          >
+            <svg
+              width="100%"
+              height="100%"
+              viewBox="0 0 100 100"
+              preserveAspectRatio="xMidYMid meet"
+              style={{ display: 'block', overflow: 'hidden' }}
+            >
+              {/* Desk Base */}
+              <rect x="18" y="15" width="64" height="70" rx="8" fill="#1e293b" stroke="#0f172a" strokeWidth="2" />
+              <rect x="21" y="18" width="58" height="24" rx="4" fill="#0f172a" />
+              
+              {/* LCD Display */}
+              <rect x="25" y="21" width="50" height="18" rx="2" fill="#0369a1" stroke="#38bdf8" strokeWidth="1" />
+              <text x="29" y="32" fill="#f0f9ff" fontSize="7" fontWeight="bold" fontFamily="monospace">EXT: 104 [ONLINE]</text>
+              <circle cx="69" cy="30" r="2" fill="#22c55e" />
+
+              {/* Handset Rest */}
+              <rect x="23" y="48" width="16" height="32" rx="4" fill="#090d16" />
+              
+              {/* Handset */}
+              <path d="M 25 43 C 25 39 37 39 37 43 L 37 85 C 37 89 25 89 25 85 Z" fill="#334155" stroke="#0f172a" strokeWidth="1.5" />
+              <rect x="27" y="45" width="8" height="9" rx="2" fill="#1e293b" />
+              <rect x="27" y="73" width="8" height="9" rx="2" fill="#1e293b" />
+
+              {/* Keypad Buttons */}
+              {[0, 1, 2].map(col =>
+                [0, 1, 2, 3].map(row => (
+                  <rect
+                    key={`${col}-${row}`}
+                    x={45 + col * 10}
+                    y={48 + row * 8}
+                    width="8"
+                    height="6"
+                    rx="1.5"
+                    fill="#475569"
+                    stroke="#1e293b"
+                    strokeWidth="0.8"
+                  />
+                ))
+              )}
+            </svg>
+          </Box>
+        )}
+
+        {/* Smartfon Graphic */}
+        {isSmartphone && (
+          <Box
+            sx={{
+              position: 'absolute',
+              left: `${Math.max(4, Math.round(tileW * 0.15))}px`,
+              right: `${Math.max(4, Math.round(tileW * 0.15))}px`,
+              top: `${headerBandH + 4}px`,
+              bottom: `${Math.round(tileH * 2.15) + 6}px`,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              pointerEvents: 'none',
+              zIndex: 1,
+              overflow: 'hidden'
+            }}
+          >
+            <svg
+              width="100%"
+              height="100%"
+              viewBox="0 0 100 100"
+              preserveAspectRatio="xMidYMid meet"
+              style={{ display: 'block', overflow: 'hidden' }}
+            >
+              <defs>
+                <linearGradient id="phone-screen" x1="0" y1="0" x2="1" y2="1">
+                  <stop offset="0%" stopColor="#0f172a" />
+                  <stop offset="50%" stopColor="#1e1b4b" />
+                  <stop offset="100%" stopColor="#311b92" />
+                </linearGradient>
+              </defs>
+
+              {/* Phone Body */}
+              <rect x="30" y="10" width="40" height="80" rx="9" fill="#1e293b" stroke="#0f172a" strokeWidth="2.5" />
+              <rect x="33" y="13" width="34" height="74" rx="7" fill="url(#phone-screen)" />
+              
+              {/* Screen Notch / Speaker */}
+              <rect x="45" y="15" width="10" height="3" rx="1.5" fill="#020617" />
+              <circle cx="42" cy="16.5" r="1" fill="#0284c7" />
+
+              {/* App UI Widgets on Screen */}
+              <rect x="37" y="24" width="26" height="12" rx="3" fill="#38bdf8" opacity="0.85" />
+              <rect x="37" y="40" width="11" height="11" rx="3" fill="#818cf8" opacity="0.9" />
+              <rect x="52" y="40" width="11" height="11" rx="3" fill="#34d399" opacity="0.9" />
+              <rect x="37" y="56" width="11" height="11" rx="3" fill="#fbbf24" opacity="0.9" />
+              <rect x="52" y="56" width="11" height="11" rx="3" fill="#f43f5e" opacity="0.9" />
+
+              {/* Glass Glare */}
+              <path d="M 33 13 L 67 13 L 33 65 Z" fill="#ffffff" opacity="0.12" />
+              <line x1="43" y1="83" x2="57" y2="83" stroke="#cbd5e1" strokeWidth="2" strokeLinecap="round" />
+            </svg>
+          </Box>
+        )}
+
+        {/* Urządzenie IoT Graphic */}
+        {isIot && (
+          <Box
+            sx={{
+              position: 'absolute',
+              left: `${Math.max(4, Math.round(tileW * 0.15))}px`,
+              right: `${Math.max(4, Math.round(tileW * 0.15))}px`,
+              top: `${headerBandH + 4}px`,
+              bottom: `${Math.round(tileH * 2.15) + 6}px`,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              pointerEvents: 'none',
+              zIndex: 1,
+              overflow: 'hidden'
+            }}
+          >
+            <svg
+              width="100%"
+              height="100%"
+              viewBox="0 0 100 100"
+              preserveAspectRatio="xMidYMid meet"
+              style={{ display: 'block', overflow: 'hidden' }}
+            >
+              {/* Antenna Waves */}
+              <path d="M 36 18 A 20 20 0 0 1 64 18" fill="none" stroke="#38bdf8" strokeWidth="2" strokeLinecap="round" opacity="0.6" />
+              <path d="M 42 23 A 12 12 0 0 1 58 23" fill="none" stroke="#38bdf8" strokeWidth="2" strokeLinecap="round" opacity="0.85" />
+              <circle cx="50" cy="28" r="2.5" fill="#38bdf8" />
+
+              {/* Antenna Pole */}
+              <line x1="50" y1="28" x2="50" y2="40" stroke="#475569" strokeWidth="3" />
+
+              {/* Sensor Box */}
+              <rect x="22" y="40" width="56" height="48" rx="6" fill="#1e293b" stroke="#0f172a" strokeWidth="2" />
+              <circle cx="50" cy="64" r="14" fill="#0f172a" stroke="#334155" strokeWidth="1.5" />
+              
+              {/* Sensor LED Indicator Arc */}
+              <path d="M 41 64 A 9 9 0 0 1 59 64" fill="none" stroke="#10b981" strokeWidth="3" strokeLinecap="round" />
+              <circle cx="50" cy="64" r="4" fill="#38bdf8" />
+
+              {/* Pins on sides */}
+              <rect x="17" y="50" width="5" height="4" fill="#94a3b8" />
+              <rect x="17" y="60" width="5" height="4" fill="#94a3b8" />
+              <rect x="17" y="70" width="5" height="4" fill="#94a3b8" />
+              <rect x="78" y="50" width="5" height="4" fill="#94a3b8" />
+              <rect x="78" y="60" width="5" height="4" fill="#94a3b8" />
+              <rect x="78" y="70" width="5" height="4" fill="#94a3b8" />
+            </svg>
+          </Box>
+        )}
+
+        {/* Access Point Graphic */}
+        {isAp && (
+          <Box
+            sx={{
+              position: 'absolute',
+              left: `${Math.max(4, Math.round(tileW * 0.15))}px`,
+              right: `${Math.max(4, Math.round(tileW * 0.15))}px`,
+              top: `${headerBandH + 4}px`,
+              bottom: `${Math.round(tileH * 2.15) + 6}px`,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              pointerEvents: 'none',
+              zIndex: 1,
+              overflow: 'hidden'
+            }}
+          >
+            <svg
+              width="100%"
+              height="100%"
+              viewBox="0 0 100 100"
+              preserveAspectRatio="xMidYMid meet"
+              style={{ display: 'block', overflow: 'hidden' }}
+            >
+              {/* Ceiling AP Dome */}
+              <circle cx="50" cy="50" r="42" fill="#f8fafc" stroke="#cbd5e1" strokeWidth="2" />
+              <circle cx="50" cy="50" r="34" fill="#ffffff" stroke="#e2e8f0" strokeWidth="1" />
+              
+              {/* Concentric Wi-Fi Signal Rings */}
+              <circle cx="50" cy="50" r="25" fill="none" stroke="#e0f2fe" strokeWidth="3" />
+              <circle cx="50" cy="50" r="16" fill="none" stroke="#bae6fd" strokeWidth="2.5" />
+              
+              {/* Central Glowing LED Halo Ring */}
+              <circle cx="50" cy="50" r="7" fill="#0284c7" />
+              <circle cx="50" cy="50" r="4.5" fill="#38bdf8" />
+              <circle cx="50" cy="50" r="2" fill="#ffffff" />
+            </svg>
+          </Box>
+        )}
+
+        {/* Magazyn NAS Graphic */}
+        {isNas && (
+          <Box
+            sx={{
+              position: 'absolute',
+              left: `${Math.max(4, Math.round(tileW * 0.15))}px`,
+              right: `${Math.max(4, Math.round(tileW * 0.15))}px`,
+              top: `${headerBandH + 4}px`,
+              bottom: `${Math.round(tileH * 2.15) + 6}px`,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              pointerEvents: 'none',
+              zIndex: 1,
+              overflow: 'hidden'
+            }}
+          >
+            <svg
+              width="100%"
+              height="100%"
+              viewBox="0 0 100 100"
+              preserveAspectRatio="xMidYMid meet"
+              style={{ display: 'block', overflow: 'hidden' }}
+            >
+              {/* NAS Tower Enclosure */}
+              <rect x="22" y="12" width="56" height="76" rx="6" fill="#1e293b" stroke="#0f172a" strokeWidth="2" />
+              
+              {/* 4 Drive Bay Drawers */}
+              {[0, 1, 2, 3].map(i => (
+                <g key={i}>
+                  <rect x="27" y={18 + i * 15} width="46" height="12" rx="2" fill="#334155" stroke="#0f172a" strokeWidth="1" />
+                  <rect x="31" y={21 + i * 15} width="10" height="6" rx="1" fill="#1e293b" />
+                  <circle cx="67" cy={24 + i * 15} r="1.8" fill="#22c55e" />
+                </g>
+              ))}
+
+              {/* Power Button & Master Status */}
+              <circle cx="32" cy="80" r="3" fill="#0284c7" />
+              <circle cx="40" cy="80" r="2" fill="#38bdf8" />
+            </svg>
+          </Box>
+        )}
+
+        {/* Terminal / Tablet Graphic */}
+        {isTablet && (
+          <Box
+            sx={{
+              position: 'absolute',
+              left: `${Math.max(4, Math.round(tileW * 0.15))}px`,
+              right: `${Math.max(4, Math.round(tileW * 0.15))}px`,
+              top: `${headerBandH + 4}px`,
+              bottom: `${Math.round(tileH * 2.15) + 6}px`,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              pointerEvents: 'none',
+              zIndex: 1,
+              overflow: 'hidden'
+            }}
+          >
+            <svg
+              width="100%"
+              height="100%"
+              viewBox="0 0 100 100"
+              preserveAspectRatio="xMidYMid meet"
+              style={{ display: 'block', overflow: 'hidden' }}
+            >
+              {/* Stand */}
+              <path d="M 42 66 L 58 66 L 62 84 L 38 84 Z" fill="#475569" stroke="#1e293b" strokeWidth="1.5" />
+              <rect x="32" y="82" width="36" height="4" rx="2" fill="#334155" />
+
+              {/* Tablet Screen Body */}
+              <rect x="16" y="16" width="68" height="50" rx="5" fill="#1e293b" stroke="#0f172a" strokeWidth="2" />
+              <rect x="19" y="19" width="62" height="44" rx="3" fill="#0f172a" />
+              
+              {/* Dashboard Chart UI */}
+              <rect x="23" y="24" width="24" height="18" rx="2" fill="#0284c7" opacity="0.85" />
+              <rect x="51" y="24" width="25" height="33" rx="2" fill="#1e293b" stroke="#334155" strokeWidth="1" />
+              
+              {/* Bar Chart Lines */}
+              <line x1="56" y1="50" x2="56" y2="35" stroke="#38bdf8" strokeWidth="3" strokeLinecap="round" />
+              <line x1="63.5" y1="50" x2="63.5" y2="29" stroke="#34d399" strokeWidth="3" strokeLinecap="round" />
+              <line x1="71" y1="50" x2="71" y2="40" stroke="#fbbf24" strokeWidth="3" strokeLinecap="round" />
+
+              {/* Lower UI Card */}
+              <rect x="23" y="46" width="24" height="11" rx="2" fill="#334155" />
+            </svg>
+          </Box>
         )}
       </Box>
 
@@ -494,11 +1042,13 @@ export const DeviceShape2d = ({
               alignItems: 'center',
               gap: `${Math.max(8, Math.round(headerIconSize * 0.28))}px`,
               minWidth: 0,
-              flexShrink: 0
+              flexShrink: 1,
+              maxWidth: '100%'
             }}
           >
             <DeviceTypeIcon
               iconId={shapeId}
+              kind={roleIconKind}
               sx={{
                 fontSize: headerIconSize,
                 width: headerIconSize,
@@ -507,6 +1057,62 @@ export const DeviceShape2d = ({
                 flexShrink: 0
               }}
             />
+            {roleLabel && (
+              <Box
+                sx={{
+                  flexShrink: 0,
+                  px: 0.6,
+                  py: 0.2,
+                  borderRadius: 0.5,
+                  bgcolor: '#e2e8f0',
+                  border: '1px solid #cbd5e1',
+                  color: '#334155',
+                  fontSize: Math.max(9, Math.round(headerNameSize * 0.72)),
+                  fontWeight: 800,
+                  letterSpacing: 0.4,
+                  lineHeight: 1.1,
+                  userSelect: 'none'
+                }}
+              >
+                {roleLabel}
+              </Box>
+            )}
+            {poePowerWarning && (
+              <Box
+                title="Urządzenie zasilane PoE nie jest podłączone do portu PoE Out"
+                sx={{
+                  flexShrink: 0,
+                  width: Math.max(14, Math.round(headerIconSize * 0.7)),
+                  height: Math.max(14, Math.round(headerIconSize * 0.7)),
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  pointerEvents: 'auto',
+                  cursor: 'help'
+                }}
+              >
+                <Box
+                  component="svg"
+                  viewBox="0 0 16 14"
+                  sx={{ width: '100%', height: '100%', display: 'block' }}
+                >
+                  <path
+                    d="M8 1.2L14.8 13H1.2L8 1.2z"
+                    fill="#facc15"
+                    stroke="#ca8a04"
+                    strokeWidth={0.9}
+                    strokeLinejoin="round"
+                  />
+                  <path
+                    d="M8 5v4.2"
+                    stroke="#78350f"
+                    strokeWidth={1.3}
+                    strokeLinecap="round"
+                  />
+                  <circle cx={8} cy={11} r={0.7} fill="#78350f" />
+                </Box>
+              </Box>
+            )}
             <Typography
               sx={{
                 color: '#1f2937',
@@ -518,7 +1124,8 @@ export const DeviceShape2d = ({
                 whiteSpace: 'nowrap',
                 overflow: 'hidden',
                 textOverflow: 'ellipsis',
-                minWidth: 0
+                minWidth: 0,
+                flex: '1 1 auto'
               }}
             >
               {name}
@@ -531,97 +1138,20 @@ export const DeviceShape2d = ({
                 fontSize: Math.max(11, Math.round(headerBandH * 0.12)),
                 fontWeight: 500,
                 lineHeight: 1.2,
-                userSelect: 'none'
+                userSelect: 'none',
+                whiteSpace: 'nowrap',
+                overflow: 'hidden',
+                textOverflow: 'ellipsis',
+                maxWidth: '100%'
               }}
             >
               {subtitle}
             </Typography>
           )}
         </Box>
-
-        {/* SVIs: 2 rows, fill column-by-column to the right */}
-        {sviRows.length > 0 && (
-          <Box
-            sx={{
-              display: 'grid',
-              gridTemplateRows: 'auto auto',
-              gridAutoFlow: 'column',
-              gridAutoColumns: 'max-content',
-              columnGap: `${Math.max(6, Math.round(tileW * 0.14))}px`,
-              rowGap: `${Math.max(4, Math.round(tileH * 0.12))}px`,
-              alignItems: 'center',
-              justifyItems: 'stretch',
-              flexShrink: 0,
-              maxWidth: '72%',
-              overflow: 'hidden',
-              py: `${Math.max(2, Math.round(tileH * 0.06))}px`
-            }}
-          >
-            {sviRows.map((svi) => {
-              return (
-                <Box
-                  key={svi.id}
-                  title={`SVI VLAN ${svi.vlan}${svi.ip ? ` · ${svi.ip}` : ''}`}
-                  sx={{
-                    display: 'flex',
-                    flexDirection: svi.ip ? 'column' : 'row',
-                    alignItems: svi.ip ? 'flex-start' : 'center',
-                    gap: svi.ip
-                      ? `${Math.max(1, Math.round(tileH * 0.04))}px`
-                      : `${Math.max(4, Math.round(tileW * 0.1))}px`,
-                    px: `${Math.max(8, Math.round(tileW * 0.2))}px`,
-                    py: `${Math.max(4, Math.round(tileH * 0.12))}px`,
-                    borderRadius: 9999,
-                    bgcolor: svi.color,
-                    border: '1.5px solid rgba(255,255,255,0.35)',
-                    boxShadow:
-                      '0 2px 6px rgba(15,23,42,0.28), inset 0 1px 0 rgba(255,255,255,0.25)',
-                    minWidth: 0,
-                    maxWidth: Math.max(110, Math.round(tileW * 4.2))
-                  }}
-                >
-                  <Typography
-                    sx={{
-                      color: '#fff',
-                      fontSize: Math.max(11, tileH * 0.48),
-                      fontWeight: 800,
-                      lineHeight: 1.15,
-                      letterSpacing: 0.3,
-                      textShadow: '0 1px 1px rgba(0,0,0,0.25)',
-                      userSelect: 'none',
-                      whiteSpace: 'nowrap'
-                    }}
-                  >
-                    VLAN {svi.vlan}
-                  </Typography>
-                  {svi.ip && (
-                    <Typography
-                      sx={{
-                        color: '#fff',
-                        fontSize: Math.max(9, tileH * 0.36),
-                        fontWeight: 700,
-                        fontFamily:
-                          'ui-monospace, SFMono-Regular, Menlo, monospace',
-                        lineHeight: 1.15,
-                        opacity: 0.95,
-                        textShadow: '0 1px 1px rgba(0,0,0,0.2)',
-                        userSelect: 'none',
-                        whiteSpace: 'nowrap',
-                        overflow: 'hidden',
-                        textOverflow: 'ellipsis',
-                        maxWidth: '100%'
-                      }}
-                    >
-                      {svi.ip}
-                    </Typography>
-                  )}
-                </Box>
-              );
-            })}
-          </Box>
-        )}
       </Box>
 
+      {/* Horizontal divider under header */}
       <Box
         sx={{
           position: 'absolute',
@@ -633,6 +1163,122 @@ export const DeviceShape2d = ({
           zIndex: 1
         }}
       />
+
+      {/* Horizontal divider above bottom ports (for stations/PCs) */}
+      {isPc && (
+        <Box
+          sx={{
+            position: 'absolute',
+            left: tileW * 0.5,
+            // Sit just above the port number (port near bottom, label above jack).
+            bottom: Math.round(tileH * 2.05),
+            width: pxWidth - tileW,
+            height: Math.max(1, Math.round(tileH * 0.06)),
+            bgcolor: '#c5cdd8',
+            zIndex: 1
+          }}
+        />
+      )}
+
+      {/* SVI section — sits in top-right of header, own pointer-events layer */}
+      {sviRows.length > 0 && (
+        <Box
+          sx={{
+            position: 'absolute',
+            top: 0,
+            right: tileW * 0.5,
+            height: headerBandH,
+            display: 'flex',
+            flexDirection: 'row',
+            alignItems: 'center',
+            gap: 0,
+            zIndex: 3,
+            pointerEvents: 'auto',
+            overflow: 'visible',
+            maxWidth: '60%'
+          }}
+        >
+          {/* Vertical separator */}
+          <Box
+            sx={{
+              width: '1.5px',
+              height: '55%',
+              bgcolor: '#cbd5e1',
+              flexShrink: 0,
+              mr: 1.5,
+              borderRadius: 1
+            }}
+          />
+
+          {/* SVI label */}
+          <Typography
+            sx={{
+              color: '#94a3b8',
+              fontSize: Math.max(14, Math.round(headerBandH * 0.24)),
+              fontWeight: 800,
+              userSelect: 'none',
+              letterSpacing: 1.5,
+              textTransform: 'uppercase',
+              flexShrink: 0,
+              mr: 1.5
+            }}
+          >
+            SVI
+          </Typography>
+
+          {/* VLAN chips */}
+          <Box
+            sx={{
+              display: 'flex',
+              flexWrap: 'wrap',
+              gap: `${Math.max(5, Math.round(tileW * 0.1))}px`,
+              alignItems: 'center',
+              overflow: 'visible'
+            }}
+          >
+            {sviRows.map((svi) => (
+              <Box
+                key={svi.id}
+                className="svi-hoverable"
+                data-svi-tooltip={JSON.stringify({ vlan: svi.vlan, ip: svi.ip, color: svi.color })}
+                sx={{
+                  position: 'relative',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  px: `${Math.max(7, Math.round(tileW * 0.18))}px`,
+                  height: `${Math.max(20, Math.round(headerBandH * 0.4))}px`,
+                  borderRadius: '10px',
+                  bgcolor: svi.color,
+                  border: '1.5px solid rgba(255,255,255,0.5)',
+                  boxShadow: `0 0 8px ${svi.color}55, 0 1px 3px rgba(0,0,0,0.22), inset 0 1px 0 rgba(255,255,255,0.18)`,
+                  cursor: 'default',
+                  transition: 'box-shadow 0.15s ease, transform 0.1s ease',
+                  '&:hover': {
+                    boxShadow: `0 0 16px ${svi.color}88, 0 2px 8px rgba(0,0,0,0.3), inset 0 1px 0 rgba(255,255,255,0.22)`,
+                    transform: 'translateY(-1px)'
+                  }
+                }}
+              >
+                <Typography
+                  sx={{
+                    color: '#fff',
+                    fontSize: Math.max(10, Math.round(headerBandH * 0.19)),
+                    fontWeight: 800,
+                    lineHeight: 1,
+                    letterSpacing: 0.3,
+                    textShadow: '0 1px 2px rgba(0,0,0,0.5)',
+                    userSelect: 'none',
+                    whiteSpace: 'nowrap'
+                  }}
+                >
+                  {svi.vlan}
+                </Typography>
+              </Box>
+            ))}
+          </Box>
+        </Box>
+      )}
 
       {sectionDividers.map((x) => {
         return (
@@ -651,6 +1297,29 @@ export const DeviceShape2d = ({
           />
         );
       })}
+
+      {/* Recessed groove between upper / lower RJ45 rows */}
+      {!isPc &&
+        ports.some((p) => p.side === 'TOP') &&
+        ports.some((p) => p.side === 'BOTTOM') && (
+          <Box
+            aria-hidden
+            sx={{
+              position: 'absolute',
+              left: tileW * 0.55,
+              width: pxWidth - tileW * 1.1,
+              top: tileH * 6 - Math.max(1, Math.round(tileH * 0.04)),
+              height: Math.max(2, Math.round(tileH * 0.08)),
+              borderRadius: 1,
+              pointerEvents: 'none',
+              zIndex: 1,
+              background:
+                'linear-gradient(to bottom, rgba(15,23,42,0.16) 0%, rgba(15,23,42,0.06) 45%, rgba(255,255,255,0.55) 100%)',
+              boxShadow:
+                'inset 0 1px 1px rgba(15,23,42,0.22), inset 0 -1px 0 rgba(255,255,255,0.65), 0 1px 0 rgba(255,255,255,0.35)'
+            }}
+          />
+        )}
 
       {ports.map((port, index) => {
         const iface = String(index + 1);
@@ -691,6 +1360,8 @@ export const DeviceShape2d = ({
             }}
           >
             <Rj45Port
+              itemId={itemId}
+              portId={port.id}
               side={port.side}
               tileSize={portTileSize}
               portNumber={index + 1}
@@ -703,7 +1374,11 @@ export const DeviceShape2d = ({
               isAttentionPulse={attentionPortId === port.id}
               isConnected={Boolean(connectedSet?.has(port.id))}
               media={port.media ?? 'RJ45'}
-              compactLabel={isRack}
+              compactLabel={compactPortLabels}
+              hideStatusBar={isPc}
+              poe={isPc ? null : port.poe ?? null}
+              poweredByPoe={isPc ? poweredByPoe : false}
+              labelPosition="above"
             />
           </Box>
         );

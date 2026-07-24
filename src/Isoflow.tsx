@@ -19,7 +19,6 @@ const App = ({
   width = '100%',
   height = '100%',
   onModelUpdated,
-  enableDebugTools = false,
   editorMode = 'EDITABLE',
   renderer
 }: IsoflowProps) => {
@@ -53,10 +52,6 @@ const App = ({
 
     onModelUpdated(model);
   }, [model, initialDataManager.isReady, onModelUpdated]);
-
-  useEffect(() => {
-    uiStateActions.setEnableDebugTools(enableDebugTools);
-  }, [enableDebugTools, uiStateActions]);
 
   if (!initialDataManager.isReady) return null;
 

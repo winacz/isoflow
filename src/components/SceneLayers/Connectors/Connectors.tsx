@@ -1,12 +1,14 @@
 import React, { useMemo } from 'react';
 import type { useScene } from 'src/hooks/useScene';
 import { useUiStateStore } from 'src/stores/uiStateStore';
+import { useModelStore } from 'src/stores/modelStore';
 import { getActiveStackKey, useStackFanStore } from 'src/stores/stackFanStore';
 import {
   findConnectorJumpsById,
   findConnectorStackBadges,
   getConnectorGlobalTiles,
-  getStackFanOffsetsPx
+  getStackFanOffsetsPx,
+  expandConnectorIdsThroughPatchPanels
 } from 'src/utils';
 import { TILE_SIZE_2D } from 'src/config';
 import { Connector } from './Connector';
@@ -63,6 +65,9 @@ export const Connectors = ({ connectors }: Props) => {
   const hasMouseDown = useUiStateStore((state) => {
     return Boolean(state.mouse.mousedown);
   });
+  const modelItems = useModelStore((state) => {
+    return state.items;
+  });
 
   const activeStackKey = useStackFanStore(getActiveStackKey);
   const highlightedConnectorId = useStackFanStore((state) => {
@@ -87,6 +92,47 @@ export const Connectors = ({ connectors }: Props) => {
     selectedConnectorId || (projectionMode === 'TWO_D' && selectedItemId)
   );
   const softDim = mode.type === 'DRAG_ITEMS';
+
+  /** Directly related cables + their patch-panel bridge siblings (both segments). */
+  const focusedConnectorIds = useMemo(() => {
+    if (projectionMode !== 'TWO_D') return null;
+
+    const direct = new Set<string>();
+    if (selectedConnectorId) {
+      direct.add(selectedConnectorId);
+    }
+
+    if (selectedItemId) {
+      connectors.forEach((connector) => {
+        const related =
+          focusedPortIds.length > 0
+            ? focusedPortIds.some((portId) => {
+                return connectorUsesPort(
+                  connector,
+                  selectedItemId,
+                  portId
+                );
+              })
+            : connectorTouchesItem(connector, selectedItemId);
+        if (related) direct.add(connector.id);
+      });
+    }
+
+    if (direct.size === 0) return null;
+
+    return expandConnectorIdsThroughPatchPanels({
+      connectorIds: direct,
+      connectors,
+      modelItems
+    });
+  }, [
+    projectionMode,
+    selectedConnectorId,
+    selectedItemId,
+    focusedPortIds,
+    connectors,
+    modelItems
+  ]);
 
   const pathInputs = useMemo(() => {
     if (projectionMode !== 'TWO_D') return [];
@@ -169,16 +215,7 @@ export const Connectors = ({ connectors }: Props) => {
         const isSelected = selectedConnectorId === connector.id;
         const isHovered = hoveredConnectorId === connector.id;
         const isRelatedToItem = Boolean(
-          selectedItemId &&
-            (focusedPortIds.length > 0
-              ? focusedPortIds.some((portId) => {
-                  return connectorUsesPort(
-                    connector,
-                    selectedItemId,
-                    portId
-                  );
-                })
-              : connectorTouchesItem(connector, selectedItemId))
+          focusedConnectorIds?.has(connector.id)
         );
         const offset = fanOffsets[connector.id];
         const isHandleTarget = highlightedConnectorId === connector.id;

@@ -2,10 +2,54 @@ import { Coords, Size, ViewItem } from 'src/types';
 import {
   SHAPE_2D_LAYOUT_GAP,
   SHAPE_2D_SWITCH_ID,
+  SHAPE_2D_PC_ID,
+  SHAPE_2D_CAMERA_ID,
+  SHAPE_2D_CAMERA_V2_ID,
+  SHAPE_2D_PRINTER_ID,
+  SHAPE_2D_VOIP_ID,
+  SHAPE_2D_SMARTPHONE_ID,
+  SHAPE_2D_IOT_ID,
+  SHAPE_2D_AP_ID,
+  SHAPE_2D_NAS_ID,
+  SHAPE_2D_TABLET_ID,
+  SHAPE_2D_CABINET_ID,
+  SHAPE_2D_BLANKING_ID,
+  SHAPE_2D_PATCH_PANEL_ID,
   getShape2dSize,
   getShape2dPorts
 } from 'src/config';
-import { isShape2dPlacementFree } from './renderer';
+import { isShape2dPlacementFree, snapTile2dToGrid } from './renderer';
+import { isDeviceTemplateId } from './deviceTemplateRegistry';
+
+/** Next grid-aligned coordinate at or above `value`. */
+const ceilToStep = (value: number, step: number): number => {
+  const s = Math.max(1, step);
+  return Math.ceil(value / s) * s;
+};
+
+/** Builtin switch or device template chassis (not hosts / cabinets / fillers). */
+export const isSwitchLikeIcon = (icon: string | undefined | null): boolean => {
+  if (!icon) return false;
+  if (icon === SHAPE_2D_SWITCH_ID) return true;
+  if (
+    icon === SHAPE_2D_PC_ID ||
+    icon === SHAPE_2D_CAMERA_ID ||
+    icon === SHAPE_2D_CAMERA_V2_ID ||
+    icon === SHAPE_2D_PRINTER_ID ||
+    icon === SHAPE_2D_VOIP_ID ||
+    icon === SHAPE_2D_SMARTPHONE_ID ||
+    icon === SHAPE_2D_IOT_ID ||
+    icon === SHAPE_2D_AP_ID ||
+    icon === SHAPE_2D_NAS_ID ||
+    icon === SHAPE_2D_TABLET_ID ||
+    icon === SHAPE_2D_CABINET_ID ||
+    icon === SHAPE_2D_BLANKING_ID ||
+    icon === SHAPE_2D_PATCH_PANEL_ID
+  ) {
+    return false;
+  }
+  return isDeviceTemplateId(icon);
+};
 
 export type Shape2dLayoutMode = 'vertical' | 'horizontal' | 'grid';
 
@@ -396,7 +440,7 @@ export const tidyShape2dItems = ({
   };
 
   const isSwitch = (id: string) => {
-    return iconById.get(id) === SHAPE_2D_SWITCH_ID;
+    return isSwitchLikeIcon(iconById.get(id));
   };
 
   const edges = collectTidyEdges({ connectors, selectedIds, iconById });
@@ -805,7 +849,7 @@ export const tidyInPlaceShape2dItems = ({
           edge.a.itemId === id ? edge.a : edge.b.itemId === id ? edge.b : null;
         if (!self) continue;
         const other = edge.a.itemId === id ? edge.b : edge.a;
-        if (iconById.get(other.itemId) !== SHAPE_2D_SWITCH_ID) continue;
+        if (!isSwitchLikeIcon(iconById.get(other.itemId))) continue;
         if (!other.portLocal) continue;
         const otherTile =
           tiles.get(other.itemId) ?? itemById.get(other.itemId)?.tile;
@@ -928,7 +972,7 @@ export const bundleShape2dRoutes = ({
   const modelItemMap = new Map(modelItems.map(i => [i.id, i]));
 
   const isSwitch = (id: string) => {
-    return iconById.get(id) === SHAPE_2D_SWITCH_ID;
+    return isSwitchLikeIcon(iconById.get(id));
   };
 
   type BundleCable = {
@@ -992,7 +1036,7 @@ export const bundleShape2dRoutes = ({
     const leafId = leafAnchor.ref.item!;
     const switchId = switchAnchor.ref.item!;
 
-    if (!selectedIds.has(leafId)) return;
+    if (!selectedIds.has(leafId) && !selectedIds.has(switchId)) return;
 
     const leafItem = itemById.get(leafId);
     const switchItem = itemById.get(switchId);
@@ -1232,7 +1276,7 @@ export const gatherBundleShape2dRoutes = ({
   );
 
   const isSwitch = (id: string) => {
-    return iconById.get(id) === SHAPE_2D_SWITCH_ID;
+    return isSwitchLikeIcon(iconById.get(id));
   };
 
   type GatherCable = {
@@ -1293,7 +1337,7 @@ export const gatherBundleShape2dRoutes = ({
     const leafId = leafAnchor.ref.item!;
     const switchId = switchAnchor.ref.item!;
 
-    if (!selectedIds.has(leafId)) return;
+    if (!selectedIds.has(leafId) && !selectedIds.has(switchId)) return;
 
     const leafItem = itemById.get(leafId);
     const switchItem = itemById.get(switchId);
@@ -1533,13 +1577,13 @@ export const pickGatherDirection = ({
 
     const a = endpoints[0].ref.item!;
     const b = endpoints[endpoints.length - 1].ref.item!;
-    const aSwitch = iconById.get(a) === SHAPE_2D_SWITCH_ID;
-    const bSwitch = iconById.get(b) === SHAPE_2D_SWITCH_ID;
+    const aSwitch = isSwitchLikeIcon(iconById.get(a));
+    const bSwitch = isSwitchLikeIcon(iconById.get(b));
     if (aSwitch === bSwitch) return;
 
     const leafId = aSwitch ? b : a;
     const switchId = aSwitch ? a : b;
-    if (!selectedIds.has(leafId)) return;
+    if (!selectedIds.has(leafId) && !selectedIds.has(switchId)) return;
 
     const leaf = itemById.get(leafId);
     const sw = itemById.get(switchId);
@@ -1730,7 +1774,7 @@ export const diagonalFanShape2dRoutes = ({
   );
 
   const isSwitch = (id: string) => {
-    return iconById.get(id) === SHAPE_2D_SWITCH_ID;
+    return isSwitchLikeIcon(iconById.get(id));
   };
 
   type FanCable = {
@@ -1783,8 +1827,8 @@ export const diagonalFanShape2dRoutes = ({
         leafAnchor = first;
         leafFirst = true;
       }
-      // Access links: leaf must be in the selection (hub may be outside).
-      if (!selectedIds.has(leafId)) return;
+      // Access / trunk to host: either end selected is enough (allows
+      // re-routing when dragging the switch alone).
     } else if (aSel && bSel) {
       // Switch↔switch trunk (or host↔host): both selected — include the cable.
       // Stable hub = first endpoint so multi-select Test/Smart routes it.
@@ -2069,7 +2113,9 @@ export const analyzeGraph = ({ selectedItems, allItems, modelItems, connectors, 
 
   selectedItems.forEach((item) => {
     const model = modelItems.find((m) => m.id === item.id);
-    const isHub = model?.icon === SHAPE_2D_SWITCH_ID || (degree.get(item.id) || 0) > median + 1;
+    const isHub =
+      isSwitchLikeIcon(model?.icon) ||
+      (degree.get(item.id) || 0) > median + 1;
     if (isHub) hubs.add(item.id);
   });
 
@@ -2107,16 +2153,27 @@ export const analyzeGraph = ({ selectedItems, allItems, modelItems, connectors, 
 
 /**
  * Places nodes smartly, breaking them into layers and ordering them to minimize crossings.
+ * Positions snap to `gridStep` (same module as drop/place snap, e.g. RACK 1U).
  */
-export const smartPlaceNodes = ({ graph, selectedItems, allItems, modelItems }: {
+export const smartPlaceNodes = ({
+  graph,
+  selectedItems,
+  allItems,
+  modelItems,
+  gridStep = { x: 1, y: 1 }
+}: {
   graph: GraphAnalysis;
   selectedItems: ViewItem[];
   allItems: ViewItem[];
   modelItems: { id: string; icon?: string }[];
+  /** Active floor snap step (RACK → 9×9). Defaults to 1×1. */
+  gridStep?: { x: number; y: number };
 }): Record<string, Coords> => {
   const result: Record<string, Coords> = {};
   const selectedMap = new Map(selectedItems.map((i) => [i.id, i]));
-  
+  const sx = Math.max(1, gridStep.x);
+  const sy = Math.max(1, gridStep.y);
+
   const allGroups: { rectId: string | null; nodes: string[] }[] = Array.from(graph.rectGroups.keys()).map(id => ({ rectId: id, nodes: graph.rectGroups.get(id)! }));
   if (graph.freeNodes.length > 0) {
     allGroups.push({ rectId: null, nodes: graph.freeNodes });
@@ -2190,14 +2247,22 @@ export const smartPlaceNodes = ({ graph, selectedItems, allItems, modelItems }: 
       }
     });
     
-    // Anchor to the root hub to prevent vertical drifting on multiple clicks
+    // Anchor to the root hub (grid-aligned) to prevent drifting on re-runs
     const rootId = layers[0][0];
     const rootItem = selectedMap.get(rootId);
-    let cx = rootItem ? rootItem.tile.x : 0;
-    let cy = rootItem ? rootItem.tile.y : 0;
-    if (!rootItem && group.nodes.length > 0) {
-      cx = Math.round((minX + maxX) / 2);
-      cy = Math.round((minY + maxY) / 2);
+    let cx = 0;
+    let cy = 0;
+    if (rootItem) {
+      const snappedRoot = snapTile2dToGrid(rootItem.tile, { x: sx, y: sy });
+      cx = snappedRoot.x;
+      cy = snappedRoot.y;
+    } else if (group.nodes.length > 0) {
+      const mid = snapTile2dToGrid(
+        { x: (minX + maxX) / 2, y: (minY + maxY) / 2 },
+        { x: sx, y: sy }
+      );
+      cx = mid.x;
+      cy = mid.y;
     }
 
     let gap = SHAPE_2D_LAYOUT_GAP;
@@ -2216,25 +2281,37 @@ export const smartPlaceNodes = ({ graph, selectedItems, allItems, modelItems }: 
     let currentY = cy;
 
     for (const layer of layers) {
-      let rowWidth = 0;
-      layer.forEach(nodeId => {
-        const fp = footprintCache.get(nodeId);
-        rowWidth += (fp ? fp.width : 2) + gap;
-      });
-      rowWidth -= gap;
-      
-      let currentX = cx - Math.floor(rowWidth / 2);
+      // Place relative to x=0 with grid-quantized strides, then center on cx.
+      const relX: number[] = [];
+      let x = 0;
       let maxH = 0;
-      
-      for (const nodeId of layer) {
-        groupResult[nodeId] = { x: currentX, y: currentY };
+      layer.forEach((nodeId, index) => {
+        relX.push(x);
         const fp = footprintCache.get(nodeId);
         const w = fp ? fp.width : 2;
         const h = fp ? fp.height : 2;
-        currentX += w + gap;
         if (h > maxH) maxH = h;
-      }
-      currentY += maxH + gap;
+        if (index < layer.length - 1) {
+          x = ceilToStep(x + w + gap, sx);
+        }
+      });
+
+      const lastId = layer[layer.length - 1];
+      const lastW = footprintCache.get(lastId)?.width ?? 2;
+      const contentW =
+        layer.length === 0 ? 0 : (relX[relX.length - 1] ?? 0) + lastW;
+      const startX = snapTile2dToGrid(
+        { x: cx - contentW / 2, y: currentY },
+        { x: sx, y: sy }
+      ).x;
+
+      layer.forEach((nodeId, index) => {
+        groupResult[nodeId] = {
+          x: startX + (relX[index] ?? 0),
+          y: currentY
+        };
+      });
+      currentY = ceilToStep(currentY + maxH + gap, sy);
     }
 
     const rootPos = groupResult[rootId];
@@ -2242,8 +2319,11 @@ export const smartPlaceNodes = ({ graph, selectedItems, allItems, modelItems }: 
       const dx = cx - rootPos.x;
       const dy = cy - rootPos.y;
       for (const id in groupResult) {
-        groupResult[id].x += dx;
-        groupResult[id].y += dy;
+        const snapped = snapTile2dToGrid(
+          { x: groupResult[id].x + dx, y: groupResult[id].y + dy },
+          { x: sx, y: sy }
+        );
+        groupResult[id] = snapped;
       }
     }
 
@@ -2258,8 +2338,8 @@ export const smartPlaceNodes = ({ graph, selectedItems, allItems, modelItems }: 
     for (let step = 0; step < 40; step++) {
       if (step > 0) {
         const n = Math.ceil(Math.sqrt(step));
-        offsetX = (step % 2 === 0 ? n : -n) * 2;
-        offsetY = (step % 3 === 0 ? n : -n) * 2;
+        offsetX = (step % 2 === 0 ? n : -n) * 2 * sx;
+        offsetY = (step % 3 === 0 ? n : -n) * 2 * sy;
       }
       
       const testFootprints = footprints.map(f => ({ ...f, tile: { x: f.tile.x + offsetX, y: f.tile.y + offsetY } }));
@@ -2273,11 +2353,16 @@ export const smartPlaceNodes = ({ graph, selectedItems, allItems, modelItems }: 
     }
 
     for (const [id, pos] of Object.entries(groupResult)) {
-      const finalX = pos.x + offsetX;
-      const finalY = pos.y + offsetY;
+      const final = snapTile2dToGrid(
+        { x: pos.x + offsetX, y: pos.y + offsetY },
+        { x: sx, y: sy }
+      );
       const origItem = selectedMap.get(id);
-      if (origItem && (origItem.tile.x !== finalX || origItem.tile.y !== finalY)) {
-        result[id] = { x: finalX, y: finalY };
+      if (
+        origItem &&
+        (origItem.tile.x !== final.x || origItem.tile.y !== final.y)
+      ) {
+        result[id] = final;
       }
     }
   }
@@ -2336,9 +2421,11 @@ export const channelRoute = ({ selectedItems, allItems, modelItems, connectors }
 
   const selectedIds = new Set(selectedItems.map(i => i.id));
   const validConns = connectors.filter(c => {
-    const refs = c.anchors.map(a => a.ref.item).filter(Boolean) as string[];
-    if (refs.length < 2) return false;
-    return selectedIds.has(refs[0]) || selectedIds.has(refs[1]);
+    const ends = c.anchors.filter(a => Boolean(a.ref.item));
+    if (ends.length < 2) return false;
+    const a = ends[0].ref.item!;
+    const b = ends[ends.length - 1].ref.item!;
+    return selectedIds.has(a) || selectedIds.has(b);
   });
 
   const getPortCoords = (itemId: string, portId?: string): Coords | null => {
@@ -2361,11 +2448,12 @@ export const channelRoute = ({ selectedItems, allItems, modelItems, connectors }
 
   type CableTask = { c: TidyConnector; p0: Coords; p1: Coords; hubId: string };
   const iconById = new Map(modelItems.map(m => [m.id, m.icon]));
-  const isSwitch = (id: string) => iconById.get(id) === SHAPE_2D_SWITCH_ID;
+  const isSwitch = (id: string) => isSwitchLikeIcon(iconById.get(id));
 
   const connData: CableTask[] = validConns.map(c => {
-    const a0 = c.anchors[0].ref;
-    const a1 = c.anchors[1].ref;
+    const ends = c.anchors.filter(a => Boolean(a.ref.item));
+    const a0 = ends[0].ref;
+    const a1 = ends[ends.length - 1].ref;
     const p0 = getPortCoords(a0.item!, a0.port);
     const p1 = getPortCoords(a1.item!, a1.port);
     if (!p0 || !p1) return null;

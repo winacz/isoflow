@@ -89,7 +89,15 @@ export const Connector = ({ connector: _connector, isSelected }: Props) => {
   }, [connector.style, connectorWidthPx]);
 
   return (
-    <Box style={css}>
+    <Box
+      className={`isoflow-cable ${connector.anchors
+        .map((anchor) => anchor.ref.item)
+        .filter(Boolean)
+        .map((id) => `cable-target-${id}`)
+        .join(' ')}`}
+      data-cable-id={connector.id}
+      style={css}
+    >
       <Svg
         style={{
           // TODO: The original x coordinates of each tile seems to be calculated wrongly.

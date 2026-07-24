@@ -8,16 +8,25 @@ import { getItemByIdOrThrow } from 'src/utils';
 import { IsometricIcon } from 'src/components/SceneLayers/Nodes/Node/IconTypes/IsometricIcon';
 import { NonIsometricIcon } from 'src/components/SceneLayers/Nodes/Node/IconTypes/NonIsometricIcon';
 import { DeviceShape2d } from 'src/components/Shapes2d/DeviceShape2d';
-import { VirtualServerShape2d } from 'src/components/Shapes2d/VirtualServerShape2d';
+import { ProxmoxNode, buildProxmoxConfig } from 'src/components/Shapes2d/ProxmoxNode';
+import { ServerV2Node } from 'src/components/Shapes2d/ServerV2Node/ServerV2Node';
 import { CabinetShape2d } from 'src/components/Shapes2d/CabinetShape2d';
+import { BlankingPlateShape2d } from 'src/components/Shapes2d/BlankingPlateShape2d';
+import { PatchPanelShape2d } from 'src/components/Shapes2d/PatchPanelShape2d';
+
 import {
   DEFAULT_ICON,
   SHAPES_2D,
   SHAPE_2D_CABINET_ID,
+  SHAPE_2D_BLANKING_ID,
+  SHAPE_2D_PATCH_PANEL_ID,
   CABINET_DEFAULT_UNITS,
+  BLANKING_DEFAULT_UNITS,
+  PATCH_PANEL_DEFAULT_PORTS,
   isShape2dIcon
 } from 'src/config';
 import type { ModelItem } from 'src/types';
+import { collectOccupiedRackUnits, layoutDeviceTemplate } from 'src/utils';
 
 export const useIcon = (
   id: string | undefined,
@@ -33,7 +42,9 @@ export const useIcon = (
   peerHighlightPortIds?: ReadonlySet<string> | string[],
   attentionPortId?: string | null,
   attentionToken?: number | null,
-  vlanBorderColor?: string | null
+  vlanBorderColor?: string | null,
+  poweredByPoe?: boolean,
+  poePowerWarning?: boolean
 ) => {
   const [hasLoaded, setHasLoaded] = React.useState(false);
   const icons = useModelStore((state) => {
@@ -60,14 +71,14 @@ export const useIcon = (
 
   const occupiedUnits = useMemo(() => {
     if (!itemId) return undefined;
-    const units: number[] = [];
-    viewItems.forEach((item) => {
-      if (item.parentId === itemId && item.rackUnit !== undefined) {
-        units.push(item.rackUnit);
-      }
-    });
-    return units;
-  }, [itemId, viewItems]);
+    return Array.from(
+      collectOccupiedRackUnits({
+        cabinetId: itemId,
+        viewItems,
+        modelItems
+      })
+    );
+  }, [itemId, viewItems, modelItems]);
 
   const isMountedInCabinet = useMemo(() => {
     if (!itemId) return false;
@@ -128,11 +139,43 @@ export const useIcon = (
         );
       }
 
-      const template = deviceTemplates?.find(t => t.id === icon.id);
-      if (template?.kind === 'SERVER') {
+      if (icon.id === SHAPE_2D_BLANKING_ID) {
         return (
-          <VirtualServerShape2d
+          <BlankingPlateShape2d
+            name={name || icon.name}
+            rackUnits={rackUnits ?? BLANKING_DEFAULT_UNITS}
+            color={color}
+            showShadow={!isMountedInCabinet}
+          />
+        );
+      }
+
+      if (icon.id === SHAPE_2D_PATCH_PANEL_ID) {
+        const panelItem = itemId
+          ? modelItems.find((candidate) => candidate.id === itemId)
+          : undefined;
+        return (
+          <PatchPanelShape2d
+            name={name || icon.name}
+            portCount={panelItem?.portCount ?? PATCH_PANEL_DEFAULT_PORTS}
+            connectedPortIds={connectedPortIds}
+            focusedPortIds={focusedPortIds}
+            showShadow={!isMountedInCabinet}
+            inactive={Boolean(itemId) && !isMountedInCabinet}
+          />
+        );
+      }
+
+      const template = deviceTemplates?.find(t => t.id === icon.id);
+
+      if (template?.kind === 'SERVER_V2') {
+        const layout = layoutDeviceTemplate(template);
+        return (
+          <ServerV2Node
+            jsonText={template.serverV2Json || ''}
+            layout={layout}
             shapeId={icon.id}
+            itemId={itemId}
             name={name || icon.name}
             ports={ports}
             svis={svis}
@@ -146,13 +189,34 @@ export const useIcon = (
             color={color}
             showShadow={!isMountedInCabinet}
             vlanBorderColor={vlanBorderColor}
-            virtualInstances={template.virtualInstances}
           />
         );
       }
 
+      if (template?.kind === 'SERVER') {
+        const layout = layoutDeviceTemplate(template);
+        return (
+          <ProxmoxNode
+            itemId={itemId}
+            config={buildProxmoxConfig(template, layout.ports)}
+            size={layout.size}
+            layoutPorts={layout.ports}
+            name={name || icon.name}
+            connectedPortIds={connectedPortIds}
+            focusedPortIds={focusedPortIds}
+            peerHighlightPortIds={peerHighlightPortIds}
+            attentionPortId={attentionPortId}
+            attentionToken={attentionToken}
+            showShadow={!isMountedInCabinet}
+          />
+        );
+      }
+
+
+
       return (
         <DeviceShape2d
+          itemId={itemId}
           shapeId={icon.id}
           name={name || icon.name}
           ports={ports}
@@ -167,6 +231,8 @@ export const useIcon = (
           color={color}
           showShadow={!isMountedInCabinet}
           vlanBorderColor={vlanBorderColor}
+          poweredByPoe={poweredByPoe}
+          poePowerWarning={poePowerWarning}
         />
       );
     }
@@ -204,6 +270,8 @@ export const useIcon = (
     occupiedUnits,
     isMountedInCabinet,
     vlanBorderColor,
+    poweredByPoe,
+    poePowerWarning,
     deviceTemplates
   ]);
 

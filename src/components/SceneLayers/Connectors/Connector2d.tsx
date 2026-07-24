@@ -11,6 +11,7 @@ import {
   getConnectorRelationSummary,
   getConnectorPathPreview,
   stripToEndpointAnchors,
+  getPatchPanelCabinetFadeRect,
   TRUNK_RAINBOW_COLORS,
   TRUNK_MISMATCH_COLOR,
   CONNECTOR_JUMP_RADIUS_TILES,
@@ -51,7 +52,7 @@ export const Connector2d = memo(({
   visualOffset
 }: Props) => {
   const theme = useTheme();
-  const { currentView, items } = useScene();
+  const { currentView, items, connectors: sceneConnectors } = useScene();
   const connector = useConnector(_connector.id);
   const modelItems = useModelStore((state) => {
     return state.items;
@@ -75,6 +76,8 @@ export const Connector2d = memo(({
     return getConnectorRelationSummary({
       anchors: connector.anchors,
       modelItems,
+      connectors: sceneConnectors,
+      connectorId: connector.id,
       resolvePortLabel: (itemId, portId) => {
         const modelItem = modelItems.find((item) => {
           return item.id === itemId;
@@ -82,7 +85,7 @@ export const Connector2d = memo(({
         return getShape2dPortIfaceName(modelItem?.icon ?? '', portId);
       }
     });
-  }, [connector.anchors, modelItems]);
+  }, [connector.anchors, connector.id, modelItems, sceneConnectors]);
 
   const vlanStroke = linkSummary.linkMode === 'access' ? linkSummary.vlanColor : null;
   const isTrunkLink = linkSummary.linkMode === 'trunk';
@@ -184,11 +187,18 @@ export const Connector2d = memo(({
       ];
     }
 
+    const fadeCabinetRect = getPatchPanelCabinetFadeRect({
+      endpointItemIds,
+      viewItems: items,
+      modelItems
+    });
+
     return splitConnectorPathByNodeBodies({
       tiles: globalTiles,
       items,
       modelItems,
-      endpointItemIds
+      endpointItemIds,
+      fadeCabinetRect
     });
   }, [globalTiles, items, modelItems, endpointItemIds, softDim]);
 
@@ -264,6 +274,8 @@ export const Connector2d = memo(({
 
   // Through-node: lighter + a bit sparser than solid, but still readable.
   const throughNodeDashArray = `${Math.max(3, connectorWidthPx * 1.0)}, ${Math.max(6, connectorWidthPx * 2.15)}`;
+  // Patch→external inside cabinet: more transparent dashed run.
+  const throughCabinetDashArray = `${Math.max(2, connectorWidthPx * 0.85)}, ${Math.max(7, connectorWidthPx * 2.6)}`;
 
   const originPx = useMemo(() => {
     return {
@@ -305,9 +317,14 @@ export const Connector2d = memo(({
   /** Fade for segments under foreign node bodies — still visible, not solid. */
   const throughNodeLineOpacity = lineOpacity * 0.45;
   const throughNodeOutlineOpacity = outlineOpacity * 0.36;
+  /** Stronger fade for patch-panel horizontal runs inside the cabinet. */
+  const throughCabinetLineOpacity = lineOpacity * 0.22;
+  const throughCabinetOutlineOpacity = outlineOpacity * 0.16;
 
   return (
     <Box
+      className={`isoflow-cable ${endpointItemIds.map(id => `cable-target-${id}`).join(' ')}`}
+      data-cable-id={connector.id}
       sx={{
         position: 'absolute',
         pointerEvents: 'none',
@@ -363,19 +380,28 @@ export const Connector2d = memo(({
             minY: bounds.minY,
             tileSize: TILE_SIZE_2D
           });
-          const dash = run.throughNode
-            ? throughNodeDashArray
-            : solidDashArray;
+          const isCabinetRun = Boolean(run.throughCabinet);
+          const dash = isCabinetRun
+            ? throughCabinetDashArray
+            : run.throughNode
+              ? throughNodeDashArray
+              : solidDashArray;
           const coreWidth = connectorWidthPx * widthBoost;
-          const runLineOpacity = run.throughNode
-            ? throughNodeLineOpacity
-            : lineOpacity;
-          const runOutlineOpacity = run.throughNode
-            ? throughNodeOutlineOpacity
-            : outlineOpacity;
+          const runLineOpacity = isCabinetRun
+            ? throughCabinetLineOpacity
+            : run.throughNode
+              ? throughNodeLineOpacity
+              : lineOpacity;
+          const runOutlineOpacity = isCabinetRun
+            ? throughCabinetOutlineOpacity
+            : run.throughNode
+              ? throughNodeOutlineOpacity
+              : outlineOpacity;
 
           return (
-            <g key={`${run.throughNode ? 'in' : 'out'}-${index}`}>
+            <g
+              key={`${isCabinetRun ? 'cab' : run.throughNode ? 'in' : 'out'}-${index}`}
+            >
               <path
                 d={pathD}
                 stroke={theme.palette.common.white}

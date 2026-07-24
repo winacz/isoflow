@@ -1,4 +1,18 @@
-import { SHAPE_2D_PC_ID, getShape2dPorts } from 'src/config';
+import {
+  SHAPE_2D_PC_ID,
+  SHAPE_2D_CAMERA_ID,
+  SHAPE_2D_CAMERA_V2_ID,
+  SHAPE_2D_PRINTER_ID,
+  SHAPE_2D_VOIP_ID,
+  SHAPE_2D_SMARTPHONE_ID,
+  SHAPE_2D_IOT_ID,
+  SHAPE_2D_AP_ID,
+  SHAPE_2D_NAS_ID,
+  SHAPE_2D_TABLET_ID,
+  SHAPE_2D_PATCH_PANEL_ID,
+  getShape2dPorts
+} from 'src/config';
+import { findPatchPanelBridgePeer, isPatchPanelItem } from './patchPanel';
 
 /**
  * Visual for VLAN 1 / non-VLAN devices (PC) on ports only.
@@ -16,7 +30,9 @@ export const TRUNK_RAINBOW_COLORS = [
   '#a855f7'
 ] as const;
 
-export const TRUNK_RAINBOW_CSS = `linear-gradient(90deg, ${TRUNK_RAINBOW_COLORS.join(', ')})`;
+export const TRUNK_RAINBOW_CSS = `linear-gradient(90deg, ${TRUNK_RAINBOW_COLORS.join(
+  ', '
+)})`;
 
 /** Outline for invalid trunk links (trunk↔access / trunk↔host). */
 export const TRUNK_MISMATCH_COLOR = '#ef4444';
@@ -134,6 +150,38 @@ export const isVlan1 = (vlan: string | undefined | null) => {
   return !key || key === '1' || key === 'vlan1' || key === 'vlan 1';
 };
 
+/**
+ * Unique VLAN ids configured on a device (ports, trunk allowed lists, SVIs).
+ * Used as the default checklist for trunk links.
+ */
+export const collectModelItemVlans = (
+  item: ModelItemVlanFields | null | undefined
+): string[] => {
+  const vlans = new Set<string>();
+
+  if (item?.ports) {
+    Object.values(item.ports).forEach((port) => {
+      const vlan = port?.vlan?.trim();
+      if (vlan) vlans.add(vlan);
+      port?.allowedVlans?.forEach((entry) => {
+        const key = entry?.trim();
+        if (key) vlans.add(key);
+      });
+    });
+  }
+
+  if (item?.svis) {
+    item.svis.forEach((svi) => {
+      const vlan = svi?.vlan?.trim();
+      if (vlan) vlans.add(vlan);
+    });
+  }
+
+  return Array.from(vlans).sort((a, b) => {
+    return a.localeCompare(b, undefined, { numeric: true });
+  });
+};
+
 export const vlansMatch = (
   a: string | undefined | null,
   b: string | undefined | null
@@ -143,9 +191,25 @@ export const vlansMatch = (
   return Boolean(keyA) && keyA === keyB;
 };
 
-/** Hosts / endpoints that do not understand VLANs (e.g. PC). */
+/** Hosts / endpoints that do not understand VLANs (e.g. PC, Camera, Printer, etc.). */
 export const isNonVlanAwareDevice = (icon?: string | null) => {
-  return icon === SHAPE_2D_PC_ID;
+  return (
+    icon === SHAPE_2D_PC_ID ||
+    icon === SHAPE_2D_CAMERA_ID ||
+    icon === SHAPE_2D_CAMERA_V2_ID ||
+    icon === SHAPE_2D_PRINTER_ID ||
+    icon === SHAPE_2D_VOIP_ID ||
+    icon === SHAPE_2D_SMARTPHONE_ID ||
+    icon === SHAPE_2D_IOT_ID ||
+    icon === SHAPE_2D_AP_ID ||
+    icon === SHAPE_2D_NAS_ID ||
+    icon === SHAPE_2D_TABLET_ID
+  );
+};
+
+/** Passive L1 — never contributes VLAN; cables see through the bridge. */
+export const isPassiveBridgeDevice = (icon?: string | null) => {
+  return icon === SHAPE_2D_PATCH_PANEL_ID;
 };
 
 type PortVlanFields = {
@@ -154,6 +218,7 @@ type PortVlanFields = {
   type?: 'access' | 'trunk';
   name?: string;
   label?: string;
+  allowedVlans?: string[];
 };
 
 type SviVlanFields = {
@@ -213,7 +278,9 @@ export const findSharedVlanColor = (
  * Auto color for a VLAN id (from its number). Returns null for empty / VLAN 1
  * (VLAN 1 must not tint cables or invent a brand color).
  */
-export const getVlanColor = (vlan: string | undefined | null): string | null => {
+export const getVlanColor = (
+  vlan: string | undefined | null
+): string | null => {
   const key = normalizeVlanKey(vlan);
   if (!key || isVlan1(key)) return null;
 
@@ -266,12 +333,24 @@ export const getPortStatusColor = (
  */
 export const getConnectorVlanColor = ({
   anchors,
-  modelItems
+  modelItems,
+  connectors,
+  connectorId
 }: {
   anchors: { ref: { item?: string; port?: string } }[];
   modelItems: ModelItemVlanFields[];
+  connectors?: {
+    id?: string;
+    anchors: { ref: { item?: string; port?: string } }[];
+  }[];
+  connectorId?: string | null;
 }): string | null => {
-  return getConnectorRelationSummary({ anchors, modelItems }).vlanColor;
+  return getConnectorRelationSummary({
+    anchors,
+    modelItems,
+    connectors,
+    connectorId
+  }).vlanColor;
 };
 
 /**
@@ -303,7 +382,9 @@ export const getSinglePortNodeVlanBorderColor = ({
 
   const summary = getConnectorRelationSummary({
     anchors: connector.anchors,
-    modelItems
+    modelItems,
+    connectors,
+    connectorId: (connector as { id?: string }).id
   });
 
   if (summary.linkMode === 'mismatch') return TRUNK_MISMATCH_COLOR;
@@ -355,7 +436,9 @@ export const getMismatchPortIdsForItem = ({
   connectors.forEach((connector) => {
     const summary = getConnectorRelationSummary({
       anchors: connector.anchors,
-      modelItems
+      modelItems,
+      connectors,
+      connectorId: (connector as { id?: string }).id
     });
     if (summary.linkMode !== 'mismatch') return;
 
@@ -418,27 +501,34 @@ export const getPeerHighlightedPortIdsForItem = ({
 
 /**
  * Human-readable relation + VLAN for a cable (hover popup / stroke style).
+ * Patch-panel jacks are bridged: VLAN comes from the real devices on both sides.
  */
 export const getConnectorRelationSummary = ({
   anchors,
   modelItems,
-  resolvePortLabel
+  resolvePortLabel,
+  connectors,
+  connectorId
 }: {
   anchors: { ref: { item?: string; port?: string } }[];
   modelItems: ModelItemVlanFields[];
   resolvePortLabel?: (itemId: string, portId: string) => string;
+  /** Needed to resolve patch-panel bridges to the far endpoint. */
+  connectors?: {
+    id?: string;
+    anchors: { ref: { item?: string; port?: string } }[];
+  }[];
+  /** Current cable id — excluded when looking up the bridge peer. */
+  connectorId?: string | null;
 }): ConnectorRelationSummary => {
   const endpoints: ConnectorEndpointSummary[] = [];
 
-  anchors.forEach((anchor) => {
-    if (!anchor.ref.item) return;
-
+  const pushEndpoint = (itemId: string, portId: string) => {
     const modelItem = modelItems.find((item) => {
-      return item.id === anchor.ref.item;
+      return item.id === itemId;
     });
     if (!modelItem) return;
 
-    const portId = anchor.ref.port ?? '';
     const port = portId ? modelItem.ports?.[portId] : undefined;
     const vlan = port?.vlan?.trim() || '1';
     const isNonVlanAware = isNonVlanAwareDevice(modelItem.icon);
@@ -452,11 +542,11 @@ export const getConnectorRelationSummary = ({
       isNonVlanAware || isVlan1(vlan) ? null : custom ?? getVlanColor(vlan);
 
     endpoints.push({
-      itemId: modelItem.id ?? anchor.ref.item,
+      itemId: modelItem.id ?? itemId,
       itemName: (modelItem as { name?: string }).name?.trim() || 'Urządzenie',
       portId,
       portLabel: portId
-        ? resolvePortLabel?.(anchor.ref.item, portId) ||
+        ? resolvePortLabel?.(itemId, portId) ||
           port?.name?.trim() ||
           port?.label?.trim() ||
           portId
@@ -466,6 +556,35 @@ export const getConnectorRelationSummary = ({
       type: portType,
       isNonVlanAware
     });
+  };
+
+  anchors.forEach((anchor) => {
+    if (!anchor.ref.item) return;
+
+    const modelItem = modelItems.find((item) => {
+      return item.id === anchor.ref.item;
+    });
+    if (!modelItem) return;
+
+    const portId = anchor.ref.port ?? '';
+
+    // Patch panel is a passive bridge — use the other cable on this jack.
+    if (isPatchPanelItem(modelItem) || isPassiveBridgeDevice(modelItem.icon)) {
+      if (portId && connectors) {
+        const peer = findPatchPanelBridgePeer({
+          panelItemId: anchor.ref.item,
+          portId,
+          connectors,
+          excludeConnectorId: connectorId
+        });
+        if (peer) {
+          pushEndpoint(peer.itemId, peer.portId ?? '');
+        }
+      }
+      return;
+    }
+
+    pushEndpoint(anchor.ref.item, portId);
   });
 
   // Cable VLAN: first non–VLAN-1 access port on a VLAN-aware device
@@ -558,7 +677,9 @@ export const classifyStackOverlap = ({
 
     const summary = getConnectorRelationSummary({
       anchors: connector.anchors,
-      modelItems
+      modelItems,
+      connectors,
+      connectorId: connector.id
     });
     const key = linkVlanKey(summary);
     if (key === 'trunk' || key === 'mismatch') {

@@ -15,6 +15,8 @@ export type DeviceTemplateLayout = {
   sectionDividers: number[];
   /** True when sections do not fit the fixed RACK width. */
   overflow: boolean;
+  /** SWITCH role badge (SW / Router / Other). */
+  switchRole?: DeviceTemplate['switchRole'];
 };
 
 const TOP_PORT_Y = 4;
@@ -37,6 +39,41 @@ export const countTemplatePorts = (template: DeviceTemplate): number => {
   return template.sections.reduce((sum, section) => {
     return sum + section.ports;
   }, 0);
+};
+
+/**
+ * SERVER_V2 faceplate is switch-like: port count follows host.pNICs in JSON.
+ */
+export const normalizeServerV2Template = (
+  template: DeviceTemplate
+): DeviceTemplate => {
+  if (template.kind !== 'SERVER_V2' || !template.serverV2Json) {
+    return template;
+  }
+  try {
+    const model = JSON.parse(template.serverV2Json) as {
+      host?: { pNICs?: unknown[]; name?: string };
+    };
+    const pnicCount = Math.max(1, model.host?.pNICs?.length ?? 1);
+    const rows = pnicCount > 24 ? 2 : 1;
+    return {
+      ...template,
+      name: template.name || model.host?.name || template.name,
+      formFactor: template.formFactor || 'RACK',
+      numbering: template.numbering || 'ROWS_LTR',
+      sections: [
+        {
+          id: 'front',
+          ports: pnicCount,
+          media: 'RJ45',
+          cols: Math.ceil(pnicCount / rows),
+          rows
+        }
+      ]
+    };
+  } catch {
+    return template;
+  }
 };
 
 /**
@@ -97,6 +134,7 @@ const numberSection = (
 export const layoutDeviceTemplate = (
   template: DeviceTemplate
 ): DeviceTemplateLayout => {
+  template = normalizeServerV2Template(template);
   const sections = template.sections;
   const sectionWidths = sections.map(sectionWidthTiles);
   const gaps = Math.max(0, sections.length - 1) * SECTION_GAP;
@@ -126,13 +164,19 @@ export const layoutDeviceTemplate = (
     : SIDE_MARGIN;
 
   const instancesCount = template.virtualInstances?.length || 0;
-  // If SERVER, add extra height for instances (about 8 tiles per row of instances)
-  const instancesRows = Math.ceil(instancesCount / 2); // 2 instances per row
-  const extraHeight = template.kind === 'SERVER' ? Math.max(12, instancesRows * 9 + 4) : 0;
+  
+  // A server without VMs is a 1U device. With VMs, we allocate 1U for networking block, plus 1U for every 10 VMs.
+  let rackUnits = 1;
+  if (template.kind === 'SERVER') {
+    if (instancesCount > 0) {
+      const vmRows = Math.ceil(instancesCount / 10);
+      rackUnits = 1 + vmRows;
+    }
+  }
   
   const size: Size = {
     width: bay,
-    height: RACK_1U_HEIGHT_TILES + extraHeight
+    height: rackUnits * RACK_1U_HEIGHT_TILES
   };
 
   let cursorX = isRack ? margin : SIDE_MARGIN;
@@ -166,9 +210,11 @@ export const layoutDeviceTemplate = (
         ? size.height - 3 // Near the bottom edge
         : (row === 0 ? TOP_PORT_Y : BOTTOM_PORT_Y);
       const side = isServer ? 'BOTTOM' : (row === 0 ? 'TOP' : 'BOTTOM');
+      const portId = `${section.id}-p${i + 1}`;
+      const poe = template.portPoe?.[portId];
 
       ports.push({
-        id: `${section.id}-p${i + 1}`,
+        id: portId,
         tile: {
           x: cursorX + col * PORT_PITCH,
           y
@@ -176,7 +222,8 @@ export const layoutDeviceTemplate = (
         side,
         media,
         label: String(labels[i] || i + 1),
-        sectionId: section.id
+        sectionId: section.id,
+        ...(poe ? { poe } : {})
       });
     }
 
@@ -192,7 +239,8 @@ export const layoutDeviceTemplate = (
     ports,
     formFactor: template.formFactor,
     sectionDividers,
-    overflow
+    overflow,
+    switchRole: template.kind === 'SWITCH' ? template.switchRole : undefined
   };
 };
 

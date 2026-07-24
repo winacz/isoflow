@@ -18,6 +18,7 @@ import {
   getPortalDisplayLabel,
   planPortalJump,
   getSinglePortNodeVlanBorderColor,
+  hasPoePowerWarning,
   CoordsUtils
 } from 'src/utils';
 import { useIcon } from 'src/hooks/useIcon';
@@ -130,6 +131,14 @@ export const Node = React.memo(({
     });
   }, [node.id, modelItem.icon, connectors, modelItems]);
 
+  const poePowerWarning = useMemo(() => {
+    return hasPoePowerWarning({
+      item: modelItem,
+      connectors,
+      modelItems
+    });
+  }, [modelItem, connectors, modelItems]);
+
   const portAttention = useUiStateStore((state) => {
     return state.portAttention;
   });
@@ -152,7 +161,9 @@ export const Node = React.memo(({
     peerHighlightPortIds,
     attentionPortId,
     attentionToken,
-    vlanBorderColor
+    vlanBorderColor,
+    Boolean(modelItem.poweredByPoe),
+    poePowerWarning
   );
   const liveTile = useNodeDragStore((state) => {
     return state.tiles[node.id];
@@ -306,6 +317,8 @@ export const Node = React.memo(({
 
   return (
     <Box
+      className="isoflow-node"
+      data-node-id={node.id}
       sx={{
         position: 'absolute',
         zIndex: order,
@@ -404,8 +417,7 @@ export const Node = React.memo(({
         {iconComponent && (
           <Box
             sx={{
-              position: 'absolute',
-              pointerEvents: 'none'
+              position: 'absolute'
             }}
           >
             {iconComponent}

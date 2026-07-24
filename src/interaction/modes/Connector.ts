@@ -9,7 +9,7 @@ import {
   setWindowCursor,
   BLACK_CROSSHAIR_CURSOR,
   SHAPE_2D_PORT_SNAP_DISTANCE,
-  isShape2dPortInUse
+  isShape2dPortUnavailable
 } from 'src/utils';
 import {
   ModeActions,
@@ -71,10 +71,12 @@ const resolveAnchorRef = ({
       modelItems: model.items,
       maxDistance: SHAPE_2D_PORT_SNAP_DISTANCE,
       isPortAvailable: (hit) => {
-        return !isShape2dPortInUse({
+        return !isShape2dPortUnavailable({
           itemId: hit.itemId,
           portId: hit.portId,
           connectors,
+          modelItems: model.items,
+          viewItems: scene.items,
           excludeConnectorId
         });
       }
@@ -142,10 +144,12 @@ export const Connector: ModeActions = {
       if (!startRef.port || !startRef.item) return;
 
       if (
-        isShape2dPortInUse({
+        isShape2dPortUnavailable({
           itemId: startRef.item,
           portId: startRef.port,
-          connectors: getViewConnectors(scene)
+          connectors: getViewConnectors(scene),
+          modelItems: model.items,
+          viewItems: scene.items
         })
       ) {
         return;
@@ -170,7 +174,7 @@ export const Connector: ModeActions = {
       id: newConnector.id
     });
   },
-  mouseup: ({ uiState, scene }) => {
+  mouseup: ({ uiState, scene, model }) => {
     if (uiState.mode.type !== 'CONNECTOR' || !uiState.mode.id) {
       scene.endHistoryTransaction();
       return;
@@ -192,10 +196,12 @@ export const Connector: ModeActions = {
       firstAnchor.ref.port &&
       lastAnchor.ref.item &&
       lastAnchor.ref.port
-        ? !isShape2dPortInUse({
+        ? !isShape2dPortUnavailable({
             itemId: lastAnchor.ref.item,
             portId: lastAnchor.ref.port,
             connectors,
+            modelItems: model.items,
+            viewItems: scene.items,
             excludeConnectorId: uiState.mode.id
           })
         : false;
@@ -220,7 +226,6 @@ export const Connector: ModeActions = {
     if (!isValidIso && !isValid2d) {
       scene.deleteConnector(uiState.mode.id);
     } else if (uiState.projectionMode === 'TWO_D') {
-      // Persist bend corners as editable waypoints.
       scene.updateConnector(
         uiState.mode.id,
         {},

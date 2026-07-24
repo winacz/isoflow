@@ -7,13 +7,14 @@ import { useResizeObserver } from 'src/hooks/useResizeObserver';
 import {
   getShape2dPortAtTile,
   screenToTile2dContinuous,
-  findPeerEndpoint,
+  resolvePortPipPeer,
   findPlanView
 } from 'src/utils';
 
 /**
  * Tracks port-under-cursor in 2Dv2 and fills `portPipHover` for the PiP card.
  * Peer links are resolved from the Plan view connectors (2Dv2 has none).
+ * Patch panels are transparent — PiP shows the bridged node, never the panel.
  */
 export const PortPipHoverController = () => {
   const projectionMode = useUiStateStore((state) => {
@@ -65,7 +66,7 @@ export const PortPipHoverController = () => {
     const model = modelStore.getState();
     const sceneStoreState = sceneStore.getState();
     const uiState = uiStateStoreApi.getState();
-    const currentView = model.views.find(v => v.id === uiState.view);
+    const currentView = model.views.find((v) => v.id === uiState.view);
 
     const mockScene = {
       items: currentView?.items ?? [],
@@ -93,8 +94,9 @@ export const PortPipHoverController = () => {
     }
 
     const plan = findPlanView(model.views);
-    const peer = findPeerEndpoint({
+    const peer = resolvePortPipPeer({
       connectors: plan?.connectors,
+      modelItems: model.items,
       itemId: portHit.itemId,
       portId: portHit.portId
     });

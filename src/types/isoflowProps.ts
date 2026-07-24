@@ -15,7 +15,6 @@ export interface IsoflowProps {
   onModelUpdated?: (Model: Model) => void;
   width?: number | string;
   height?: number | string;
-  enableDebugTools?: boolean;
   editorMode?: keyof typeof EditorModeEnum;
   renderer?: RendererProps;
 }

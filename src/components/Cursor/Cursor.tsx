@@ -10,7 +10,7 @@ import {
   getShape2dCenterPosition,
   getShape2dPlacementTile,
   getTilePosition2d,
-  isShape2dPortInUse,
+  isShape2dPortUnavailable,
   isPlanProjection,
   SHAPE_2D_PORT_SNAP_DISTANCE
 } from 'src/utils';
@@ -68,10 +68,12 @@ export const Cursor = () => {
       modelItems,
       maxDistance: SHAPE_2D_PORT_SNAP_DISTANCE,
       isPortAvailable: (hit) => {
-        return !isShape2dPortInUse({
+        return !isShape2dPortUnavailable({
           itemId: hit.itemId,
           portId: hit.portId,
           connectors: scene.currentView.connectors ?? [],
+          modelItems,
+          viewItems: scene.items,
           excludeConnectorId
         });
       }

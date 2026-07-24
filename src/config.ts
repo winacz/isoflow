@@ -27,12 +27,34 @@ export const PROJECTED_TILE_SIZE = {
 export const SHAPE_2D_SWITCH_ID = 'SWITCH';
 export const SHAPE_2D_PC_ID = 'PC';
 export const SHAPE_2D_CAMERA_ID = 'CAMERA';
+export const SHAPE_2D_CAMERA_V2_ID = 'CAMERA_V2';
+export const SHAPE_2D_PRINTER_ID = 'PRINTER';
+export const SHAPE_2D_VOIP_ID = 'VOIP';
+export const SHAPE_2D_SMARTPHONE_ID = 'SMARTPHONE';
+export const SHAPE_2D_IOT_ID = 'IOT';
+export const SHAPE_2D_AP_ID = 'AP';
+export const SHAPE_2D_NAS_ID = 'NAS';
+export const SHAPE_2D_TABLET_ID = 'TABLET';
 export const SHAPE_2D_CABINET_ID = 'CABINET';
+/** Non-network rack filler / label plate (UPS, blanking, …). */
+export const SHAPE_2D_BLANKING_ID = 'BLANKING';
+/** Passive L1 patch panel — bridges two cables per port when rack-mounted. */
+export const SHAPE_2D_PATCH_PANEL_ID = 'PATCH_PANEL';
 
 /** Default / min / max rack height for cabinets. */
 export const CABINET_DEFAULT_UNITS = 12;
 export const CABINET_MIN_UNITS = 4;
 export const CABINET_MAX_UNITS = 42;
+/** Blanking plate height in U. */
+export const BLANKING_DEFAULT_UNITS = 1;
+export const BLANKING_MIN_UNITS = 1;
+export const BLANKING_MAX_UNITS = 12;
+/** Patch panel port count (1U faceplate). */
+export const PATCH_PANEL_DEFAULT_PORTS = 24;
+export const PATCH_PANEL_MIN_PORTS = 4;
+export const PATCH_PANEL_MAX_PORTS = 48;
+/** Fixed chassis color — dark grey, distinct from switches. */
+export const PATCH_PANEL_COLOR = '#3f4650';
 /** Header strip above U slots (tiles). */
 export const CABINET_HEADER_TILES = 3;
 /** Left/right rail ears (tiles each side). */
@@ -83,6 +105,7 @@ export const PC_2D_SIZE: Size = {
 
 export type Shape2dPortSide = 'TOP' | 'BOTTOM' | 'LEFT' | 'RIGHT';
 export type Shape2dPortMedia = 'RJ45' | 'SFP';
+export type Shape2dPortPoe = 'IN' | 'OUT';
 
 export interface Shape2dPort {
   id: string;
@@ -93,6 +116,8 @@ export interface Shape2dPort {
   /** Display number / label on the jack */
   label?: string;
   sectionId?: string;
+  /** PoE direction from device template (switch workshop). */
+  poe?: Shape2dPortPoe;
 }
 
 /** Footprint of a cabinet for the given rack-unit height. */
@@ -105,6 +130,85 @@ export const getCabinetSize = (rackUnits = CABINET_DEFAULT_UNITS): Size => {
     width: RACK_1U_WIDTH_TILES + CABINET_EAR_TILES * 2,
     height: CABINET_HEADER_TILES + units * RACK_1U_HEIGHT_TILES
   };
+};
+
+/** Footprint of a blanking / utility plate for the given U height.
+ * Width includes rack ears (same outer span as a cabinet bay) so placement
+ * centers the full plate, not just the chassis face.
+ */
+export const getBlankingSize = (rackUnits = BLANKING_DEFAULT_UNITS): Size => {
+  const units = Math.min(
+    BLANKING_MAX_UNITS,
+    Math.max(BLANKING_MIN_UNITS, Math.round(rackUnits) || BLANKING_DEFAULT_UNITS)
+  );
+  return {
+    width: RACK_1U_WIDTH_TILES + CABINET_EAR_TILES * 2,
+    height: units * RACK_1U_HEIGHT_TILES
+  };
+};
+
+export const clampBlankingUnits = (value: unknown): number => {
+  const n = typeof value === 'number' ? value : Number(value);
+  if (!Number.isFinite(n)) return BLANKING_DEFAULT_UNITS;
+  return Math.min(
+    BLANKING_MAX_UNITS,
+    Math.max(BLANKING_MIN_UNITS, Math.round(n))
+  );
+};
+
+/** Footprint of a 1U patch panel (full cabinet bay width, ears included). */
+export const getPatchPanelSize = (): Size => {
+  return {
+    width: RACK_1U_WIDTH_TILES + CABINET_EAR_TILES * 2,
+    height: RACK_1U_HEIGHT_TILES
+  };
+};
+
+export const clampPatchPanelPorts = (value: unknown): number => {
+  const n = typeof value === 'number' ? value : Number(value);
+  if (!Number.isFinite(n)) return PATCH_PANEL_DEFAULT_PORTS;
+  return Math.min(
+    PATCH_PANEL_MAX_PORTS,
+    Math.max(PATCH_PANEL_MIN_PORTS, Math.round(n))
+  );
+};
+
+/**
+ * Lay out N RJ45 jacks across a 1U full-width faceplate.
+ * Fixed integer pitch, row centered in the chassis (pathfinding needs int tiles).
+ * ≤24 → single row; more → two rows (commercial 48-port 1U style).
+ */
+export const getPatchPanelPorts = (portCount = PATCH_PANEL_DEFAULT_PORTS): Shape2dPort[] => {
+  const count = clampPatchPanelPorts(portCount);
+  const size = getPatchPanelSize();
+  const ear = CABINET_EAR_TILES;
+  const chassisW = size.width - ear * 2;
+  const rows = count > 24 ? 2 : 1;
+  const perRow = Math.ceil(count / rows);
+  /** Integer pitch — snug one-after-another; keeps A* grid sizes valid. */
+  const pitch = 2;
+  const yRows =
+    rows === 1
+      ? [Math.floor(size.height / 2)]
+      : [3, size.height - 3];
+
+  const ports: Shape2dPort[] = [];
+  for (let i = 0; i < count; i += 1) {
+    const row = Math.floor(i / perRow);
+    const col = i % perRow;
+    const rowCount = row === rows - 1 ? count - perRow * (rows - 1) : perRow;
+    const groupWidth = Math.max(0, (rowCount - 1) * pitch);
+    const startX = ear + Math.round((chassisW - groupWidth) / 2);
+    const x = startX + col * pitch;
+    ports.push({
+      id: `pp-${i + 1}`,
+      tile: { x, y: yRows[row] ?? yRows[0] },
+      side: row === 0 ? 'TOP' : 'BOTTOM',
+      media: 'RJ45',
+      label: String(i + 1)
+    });
+  }
+  return ports;
 };
 
 /** Soft cap for custom switch templates (typical commercial max). */
@@ -132,7 +236,7 @@ const SWITCH_2D_PORTS: Shape2dPort[] = [
 const PC_2D_PORTS: Shape2dPort[] = [
   {
     id: 'port-1',
-    // Centered on bottom edge of the 1U square
+    // Almost flush with the bottom edge of the 1U square (tiles 0..8).
     tile: { x: Math.floor(UNIT_1U_TILES / 2), y: UNIT_1U_TILES - 2 },
     side: 'BOTTOM',
     label: '1'
@@ -153,14 +257,34 @@ const SHAPE_2D_SIZES: Record<string, Size> = {
   [SHAPE_2D_SWITCH_ID]: SWITCH_2D_SIZE,
   [SHAPE_2D_PC_ID]: PC_2D_SIZE,
   [SHAPE_2D_CAMERA_ID]: { width: 6, height: 6 },
-  [SHAPE_2D_CABINET_ID]: getCabinetSize(CABINET_DEFAULT_UNITS)
+  [SHAPE_2D_CAMERA_V2_ID]: PC_2D_SIZE,
+  [SHAPE_2D_PRINTER_ID]: PC_2D_SIZE,
+  [SHAPE_2D_VOIP_ID]: PC_2D_SIZE,
+  [SHAPE_2D_SMARTPHONE_ID]: PC_2D_SIZE,
+  [SHAPE_2D_IOT_ID]: PC_2D_SIZE,
+  [SHAPE_2D_AP_ID]: PC_2D_SIZE,
+  [SHAPE_2D_NAS_ID]: PC_2D_SIZE,
+  [SHAPE_2D_TABLET_ID]: PC_2D_SIZE,
+  [SHAPE_2D_CABINET_ID]: getCabinetSize(CABINET_DEFAULT_UNITS),
+  [SHAPE_2D_BLANKING_ID]: getBlankingSize(BLANKING_DEFAULT_UNITS),
+  [SHAPE_2D_PATCH_PANEL_ID]: getPatchPanelSize()
 };
 
 const SHAPE_2D_PORTS: Record<string, Shape2dPort[]> = {
   [SHAPE_2D_SWITCH_ID]: SWITCH_2D_PORTS,
   [SHAPE_2D_PC_ID]: PC_2D_PORTS,
   [SHAPE_2D_CAMERA_ID]: CAMERA_2D_PORTS,
-  [SHAPE_2D_CABINET_ID]: []
+  [SHAPE_2D_CAMERA_V2_ID]: PC_2D_PORTS,
+  [SHAPE_2D_PRINTER_ID]: PC_2D_PORTS,
+  [SHAPE_2D_VOIP_ID]: PC_2D_PORTS,
+  [SHAPE_2D_SMARTPHONE_ID]: PC_2D_PORTS,
+  [SHAPE_2D_IOT_ID]: PC_2D_PORTS,
+  [SHAPE_2D_AP_ID]: PC_2D_PORTS,
+  [SHAPE_2D_NAS_ID]: PC_2D_PORTS,
+  [SHAPE_2D_TABLET_ID]: PC_2D_PORTS,
+  [SHAPE_2D_CABINET_ID]: [],
+  [SHAPE_2D_BLANKING_ID]: [],
+  [SHAPE_2D_PATCH_PANEL_ID]: getPatchPanelPorts(PATCH_PANEL_DEFAULT_PORTS)
 };
 
 export const SHAPES_2D: Icon[] = [
@@ -186,6 +310,76 @@ export const SHAPES_2D: Icon[] = [
     isIsometric: false
   },
   {
+    id: SHAPE_2D_CAMERA_V2_ID,
+    name: 'Kamera V2',
+    url: '',
+    collection: 'Stacje',
+    isIsometric: false
+  },
+  {
+    id: SHAPE_2D_PRINTER_ID,
+    name: 'Drukarka',
+    url: '',
+    collection: 'Stacje',
+    isIsometric: false
+  },
+  {
+    id: SHAPE_2D_VOIP_ID,
+    name: 'Telefon VoIP',
+    url: '',
+    collection: 'Stacje',
+    isIsometric: false
+  },
+  {
+    id: SHAPE_2D_SMARTPHONE_ID,
+    name: 'Smartfon',
+    url: '',
+    collection: 'Stacje',
+    isIsometric: false
+  },
+  {
+    id: SHAPE_2D_IOT_ID,
+    name: 'Urządzenie IoT',
+    url: '',
+    collection: 'Stacje',
+    isIsometric: false
+  },
+  {
+    id: SHAPE_2D_AP_ID,
+    name: 'Access Point',
+    url: '',
+    collection: 'Stacje',
+    isIsometric: false
+  },
+  {
+    id: SHAPE_2D_NAS_ID,
+    name: 'Magazyn NAS',
+    url: '',
+    collection: 'Stacje',
+    isIsometric: false
+  },
+  {
+    id: SHAPE_2D_TABLET_ID,
+    name: 'Terminal / Tablet',
+    url: '',
+    collection: 'Stacje',
+    isIsometric: false
+  },
+  {
+    id: SHAPE_2D_BLANKING_ID,
+    name: 'Zaślepka',
+    url: '',
+    collection: 'RACK Utilities',
+    isIsometric: false
+  },
+  {
+    id: SHAPE_2D_PATCH_PANEL_ID,
+    name: 'Patch panel',
+    url: '',
+    collection: 'RACK Utilities',
+    isIsometric: false
+  },
+  {
     id: SHAPE_2D_CABINET_ID,
     name: 'Szafa rack',
     url: '',
@@ -199,6 +393,12 @@ export const getShape2dSize = (shapeId: string | undefined | null): Size | null 
   if (shapeId === SHAPE_2D_CABINET_ID) {
     return getCabinetSize(CABINET_DEFAULT_UNITS);
   }
+  if (shapeId === SHAPE_2D_BLANKING_ID) {
+    return getBlankingSize(BLANKING_DEFAULT_UNITS);
+  }
+  if (shapeId === SHAPE_2D_PATCH_PANEL_ID) {
+    return getPatchPanelSize();
+  }
   if (SHAPE_2D_SIZES[shapeId]) return SHAPE_2D_SIZES[shapeId];
 
   // Lazy require avoids circular import (registry → layout → config).
@@ -209,7 +409,7 @@ export const getShape2dSize = (shapeId: string | undefined | null): Size | null 
   return getDeviceTemplateSize(shapeId);
 };
 
-/** Footprint for a placed model item (cabinet uses rackUnits). */
+/** Footprint for a placed model item (cabinet / blanking use rackUnits). */
 export const getModelItemSize = (item: {
   icon?: string;
   rackUnits?: number;
@@ -218,13 +418,23 @@ export const getModelItemSize = (item: {
   if (item.icon === SHAPE_2D_CABINET_ID) {
     return getCabinetSize(item.rackUnits ?? CABINET_DEFAULT_UNITS);
   }
+  if (item.icon === SHAPE_2D_BLANKING_ID) {
+    return getBlankingSize(item.rackUnits ?? BLANKING_DEFAULT_UNITS);
+  }
+  if (item.icon === SHAPE_2D_PATCH_PANEL_ID) {
+    return getPatchPanelSize();
+  }
   return getShape2dSize(item.icon);
 };
 
 export const getShape2dPorts = (
-  shapeId: string | undefined | null
+  shapeId: string | undefined | null,
+  options?: { portCount?: number }
 ): Shape2dPort[] => {
   if (!shapeId) return [];
+  if (shapeId === SHAPE_2D_PATCH_PANEL_ID) {
+    return getPatchPanelPorts(options?.portCount ?? PATCH_PANEL_DEFAULT_PORTS);
+  }
   if (SHAPE_2D_PORTS[shapeId]) return SHAPE_2D_PORTS[shapeId];
 
   // eslint-disable-next-line @typescript-eslint/no-var-requires
@@ -232,6 +442,14 @@ export const getShape2dPorts = (
     getDeviceTemplatePorts: (id: string) => Shape2dPort[] | null;
   };
   return getDeviceTemplatePorts(shapeId) ?? [];
+};
+
+/** Ports for a placed item (patch panel uses dynamic portCount). */
+export const getModelItemPorts = (item: {
+  icon?: string;
+  portCount?: number;
+}): Shape2dPort[] => {
+  return getShape2dPorts(item.icon, { portCount: item.portCount });
 };
 
 /**
@@ -350,6 +568,7 @@ export const INITIAL_UI_STATE = {
     offset: CoordsUtils.zero()
   },
   projectionMode: 'ISOMETRIC' as const,
+  isWorkshopOpen: false,
   showGrid: true,
   gridStyle: 'rack' as const,
   canvasByMode: {

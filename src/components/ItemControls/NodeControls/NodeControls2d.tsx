@@ -3,14 +3,17 @@ import {
   Accordion,
   AccordionDetails,
   AccordionSummary,
+  Alert,
   Box,
   Button,
   FormControl,
+  FormControlLabel,
   InputLabel,
   MenuItem,
   Select,
   Slider,
   Stack,
+  Switch,
   Tab,
   Tabs,
   TextField,
@@ -23,14 +26,31 @@ import EditOutlined from '@mui/icons-material/EditOutlined';
 import AddOutlined from '@mui/icons-material/AddOutlined';
 import DeleteOutline from '@mui/icons-material/DeleteOutline';
 import {
-  getShape2dPorts,
+  getModelItemPorts,
   isShape2dIcon,
   SHAPE_2D_PC_ID,
   SHAPE_2D_CAMERA_ID,
+  SHAPE_2D_CAMERA_V2_ID,
+  SHAPE_2D_PRINTER_ID,
+  SHAPE_2D_VOIP_ID,
+  SHAPE_2D_SMARTPHONE_ID,
+  SHAPE_2D_IOT_ID,
+  SHAPE_2D_AP_ID,
+  SHAPE_2D_NAS_ID,
+  SHAPE_2D_TABLET_ID,
   SHAPE_2D_CABINET_ID,
+  SHAPE_2D_BLANKING_ID,
+  SHAPE_2D_PATCH_PANEL_ID,
   CABINET_DEFAULT_UNITS,
   CABINET_MIN_UNITS,
   CABINET_MAX_UNITS,
+  BLANKING_DEFAULT_UNITS,
+  BLANKING_MIN_UNITS,
+  BLANKING_MAX_UNITS,
+  PATCH_PANEL_DEFAULT_PORTS,
+  PATCH_PANEL_MIN_PORTS,
+  PATCH_PANEL_MAX_PORTS,
+  clampPatchPanelPorts,
   MARKDOWN_EMPTY_VALUE,
   type Shape2dPort
 } from 'src/config';
@@ -44,10 +64,13 @@ import {
   parseDeviceColor,
   normalizeDeviceColorInput,
   setDeviceColorAlpha,
+  getValidPatchPanelPortIds,
+  isPatchPanelMounted,
   isDeviceTemplateId,
   generateId,
   getMountedChildren,
   getCabinetSlotTile,
+  collectOccupiedRackUnits,
   isFullWidthRackItem
 } from 'src/utils';
 import { useScene } from 'src/hooks/useScene';
@@ -387,10 +410,12 @@ export const NodeControls2d = ({ id }: Props) => {
     updateViewItem,
     setVlanColorAcrossModel,
     deleteViewItem,
+    deleteConnector,
     regenerateRoutesForItems,
     beginHistoryTransaction,
     endHistoryTransaction,
-    items: viewItems
+    items: viewItems,
+    connectors
   } = useScene();
   const uiStateActions = useUiStateStore((state) => {
     return state.actions;
@@ -414,19 +439,128 @@ export const NodeControls2d = ({ id }: Props) => {
 
   const shapePorts = useMemo(() => {
     if (!isShape2dIcon(modelItem.icon)) return [];
-    return getShape2dPorts(modelItem.icon ?? '');
-  }, [modelItem.icon]);
+    return getModelItemPorts(modelItem);
+  }, [modelItem]);
+
+  const applyBlankingUnits = useCallback(
+    (next: number) => {
+      const units = Math.min(
+        BLANKING_MAX_UNITS,
+        Math.max(BLANKING_MIN_UNITS, Math.round(next))
+      );
+      beginHistoryTransaction();
+      updateModelItem(viewItem.id, { rackUnits: units });
+      if (viewItem.parentId != null && viewItem.rackUnit !== undefined) {
+        const cabinet = viewItems.find((item) => {
+          return item.id === viewItem.parentId;
+        });
+        const cabinetModel = cabinet
+          ? modelItems.find((item) => {
+              return item.id === cabinet.id;
+            })
+          : undefined;
+        if (cabinet && cabinetModel) {
+          const occupied = collectOccupiedRackUnits({
+            cabinetId: cabinet.id,
+            viewItems,
+            modelItems,
+            excludeItemIds: [viewItem.id]
+          });
+          const cabUnits = cabinetModel.rackUnits ?? CABINET_DEFAULT_UNITS;
+          let fits = viewItem.rackUnit + units <= cabUnits;
+          for (let i = 0; i < units && fits; i += 1) {
+            if (occupied.has(viewItem.rackUnit + i)) fits = false;
+          }
+          if (!fits) {
+            updateViewItem(viewItem.id, {
+              parentId: undefined,
+              rackUnit: undefined
+            });
+          }
+        }
+      }
+      endHistoryTransaction();
+    },
+    [
+      beginHistoryTransaction,
+      endHistoryTransaction,
+      modelItems,
+      updateModelItem,
+      updateViewItem,
+      viewItem.id,
+      viewItem.parentId,
+      viewItem.rackUnit,
+      viewItems
+    ]
+  );
+
+  const applyPatchPanelPorts = useCallback(
+    (next: number) => {
+      const count = clampPatchPanelPorts(next);
+      const validIds = getValidPatchPanelPortIds(count);
+      beginHistoryTransaction();
+      updateModelItem(viewItem.id, { portCount: count });
+      connectors.forEach((connector) => {
+        const usesRemoved = connector.anchors.some((anchor) => {
+          return (
+            anchor.ref.item === viewItem.id &&
+            Boolean(anchor.ref.port) &&
+            !validIds.has(anchor.ref.port!)
+          );
+        });
+        if (usesRemoved) {
+          deleteConnector(connector.id);
+        }
+      });
+      endHistoryTransaction();
+    },
+    [
+      beginHistoryTransaction,
+      connectors,
+      deleteConnector,
+      endHistoryTransaction,
+      updateModelItem,
+      viewItem.id
+    ]
+  );
 
   const isPc =
     modelItem.icon === SHAPE_2D_PC_ID ||
-    modelItem.icon === SHAPE_2D_CAMERA_ID;
+    modelItem.icon === SHAPE_2D_CAMERA_ID ||
+    modelItem.icon === SHAPE_2D_CAMERA_V2_ID ||
+    modelItem.icon === SHAPE_2D_PRINTER_ID ||
+    modelItem.icon === SHAPE_2D_VOIP_ID ||
+    modelItem.icon === SHAPE_2D_SMARTPHONE_ID ||
+    modelItem.icon === SHAPE_2D_IOT_ID ||
+    modelItem.icon === SHAPE_2D_AP_ID ||
+    modelItem.icon === SHAPE_2D_NAS_ID ||
+    modelItem.icon === SHAPE_2D_TABLET_ID;
   const isCabinet = modelItem.icon === SHAPE_2D_CABINET_ID;
-  const isSwitch = !isPc && !isCabinet && isShape2dIcon(modelItem.icon);
+  const isBlanking = modelItem.icon === SHAPE_2D_BLANKING_ID;
+  const isPatchPanel = modelItem.icon === SHAPE_2D_PATCH_PANEL_ID;
+  const isPatchPanelActive = isPatchPanel && isPatchPanelMounted(viewItem);
+  const isSwitch =
+    !isPc &&
+    !isCabinet &&
+    !isBlanking &&
+    !isPatchPanel &&
+    isShape2dIcon(modelItem.icon);
   const canEditTemplate = isDeviceTemplateId(modelItem.icon);
+  const serverTemplate = useModelStore((state) => {
+    if (!modelItem.icon) return null;
+    return (
+      (state.deviceTemplates ?? []).find((t) => t.id === modelItem.icon) ?? null
+    );
+  });
+  const isServerTemplate = serverTemplate?.kind === 'SERVER';
   const deviceColor = parseDeviceColor(modelItem.color);
   const [sidebarTab, setSidebarTab] = useState<'ports' | 'svi'>('ports');
   const svis = modelItem.svis ?? [];
-  const rackUnits = modelItem.rackUnits ?? CABINET_DEFAULT_UNITS;
+  const rackUnits = isBlanking
+    ? modelItem.rackUnits ?? BLANKING_DEFAULT_UNITS
+    : modelItem.rackUnits ?? CABINET_DEFAULT_UNITS;
+  const patchPortCount =
+    modelItem.portCount ?? PATCH_PANEL_DEFAULT_PORTS;
   const multiPort = focusedPortIds.length > 1;
   const hasDescription = Boolean(
     modelItem.description &&
@@ -729,6 +863,7 @@ export const NodeControls2d = ({ id }: Props) => {
                 size="small"
                 sx={fieldSx}
                 value={modelItem.name}
+                disabled={isPatchPanel}
                 onChange={(e) => {
                   const text = e.target.value;
                   if (modelItem.name !== text) {
@@ -738,11 +873,14 @@ export const NodeControls2d = ({ id }: Props) => {
               />
             </Stack>
           </Box>
+          {!isPatchPanel && (
           <Box
             title={
               isCabinet
                 ? 'Kolor szafy (tint + przezroczystość)'
-                : 'Kolor urządzenia (delikatny tint + przezroczystość)'
+                : isBlanking
+                  ? 'Kolor zaślepki (tint + przezroczystość)'
+                  : 'Kolor urządzenia (delikatny tint + przezroczystość)'
             }
             sx={{
               flexShrink: 0,
@@ -775,7 +913,34 @@ export const NodeControls2d = ({ id }: Props) => {
               {Math.round(deviceColor.alpha * 100)}%
             </Typography>
           </Box>
+          )}
         </Stack>
+        {isPc && (
+          <FormControlLabel
+            sx={{ mt: 1, ml: 0, mr: 0 }}
+            control={
+              <Switch
+                size="small"
+                checked={Boolean(modelItem.poweredByPoe)}
+                onChange={(e) => {
+                  updateModelItem(viewItem.id, {
+                    poweredByPoe: e.target.checked
+                  });
+                }}
+              />
+            }
+            label={
+              <Typography sx={{ fontSize: 12.5, color: 'text.secondary' }}>
+                Urządzenie zasilane PoE
+              </Typography>
+            }
+          />
+        )}
+        {isPatchPanel && !isPatchPanelActive && (
+          <Alert severity="info" sx={{ mt: 1.25, py: 0, fontSize: 12 }}>
+            Umieść patch panel w szafie, aby włączyć porty i połączenia.
+          </Alert>
+        )}
         {isCabinet && (
           <Box sx={{ mt: 1.25 }}>
             <Typography
@@ -818,9 +983,7 @@ export const NodeControls2d = ({ id }: Props) => {
                           viewItem.tile,
                           child.rackUnit,
                           {
-                            fullWidth: Boolean(
-                              childModel && isFullWidthRackItem(childModel)
-                            )
+                            fullWidth: isFullWidthRackItem(childModel ?? {})
                           }
                         )
                       });
@@ -830,13 +993,11 @@ export const NodeControls2d = ({ id }: Props) => {
                 }}
                 valueLabelDisplay="auto"
                 valueLabelFormat={(v) => `${v}U`}
-                sx={{ flex: 1 }}
               />
               <Typography
                 sx={{
-                  fontSize: 13,
+                  fontSize: 12,
                   fontWeight: 700,
-                  fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
                   minWidth: 36,
                   textAlign: 'right'
                 }}
@@ -846,6 +1007,140 @@ export const NodeControls2d = ({ id }: Props) => {
             </Stack>
           </Box>
         )}
+        {isBlanking && (
+          <Box sx={{ mt: 1.25 }}>
+            <Typography
+              sx={{
+                fontSize: 10,
+                fontWeight: 600,
+                letterSpacing: 0.4,
+                color: 'text.secondary',
+                textTransform: 'uppercase',
+                mb: 0.5
+              }}
+            >
+              Wysokość (U)
+            </Typography>
+            <Stack direction="row" spacing={1} alignItems="center">
+              <TextField
+                size="small"
+                type="number"
+                inputProps={{
+                  min: BLANKING_MIN_UNITS,
+                  max: BLANKING_MAX_UNITS,
+                  step: 1
+                }}
+                value={rackUnits}
+                onChange={(e) => {
+                  const raw = Number(e.target.value);
+                  if (!Number.isFinite(raw)) return;
+                  applyBlankingUnits(raw);
+                }}
+                sx={{
+                  width: 72,
+                  ...fieldSx,
+                  '& input': { textAlign: 'center', fontWeight: 700 }
+                }}
+              />
+              <Slider
+                size="small"
+                min={BLANKING_MIN_UNITS}
+                max={BLANKING_MAX_UNITS}
+                value={rackUnits}
+                onChange={(_, value) => {
+                  const next = Array.isArray(value) ? value[0] : value;
+                  applyBlankingUnits(next);
+                }}
+                valueLabelDisplay="auto"
+                valueLabelFormat={(v) => `${v}U`}
+                sx={{ flex: 1 }}
+              />
+              <Typography
+                sx={{
+                  fontSize: 12,
+                  fontWeight: 700,
+                  minWidth: 28,
+                  textAlign: 'right'
+                }}
+              >
+                U
+              </Typography>
+            </Stack>
+          </Box>
+        )}
+        {isPatchPanel && (
+          <Box sx={{ mt: 1.25 }}>
+            <Typography
+              sx={{
+                fontSize: 10,
+                fontWeight: 600,
+                letterSpacing: 0.4,
+                color: 'text.secondary',
+                textTransform: 'uppercase',
+                mb: 0.5
+              }}
+            >
+              Liczba portów
+            </Typography>
+            <Stack direction="row" spacing={1} alignItems="center">
+              <TextField
+                size="small"
+                type="number"
+                inputProps={{
+                  min: PATCH_PANEL_MIN_PORTS,
+                  max: PATCH_PANEL_MAX_PORTS,
+                  step: 1
+                }}
+                value={patchPortCount}
+                onChange={(e) => {
+                  const raw = Number(e.target.value);
+                  if (!Number.isFinite(raw)) return;
+                  applyPatchPanelPorts(raw);
+                }}
+                sx={{
+                  width: 72,
+                  ...fieldSx,
+                  '& input': { textAlign: 'center', fontWeight: 700 }
+                }}
+              />
+              <Slider
+                size="small"
+                min={PATCH_PANEL_MIN_PORTS}
+                max={PATCH_PANEL_MAX_PORTS}
+                step={1}
+                value={patchPortCount}
+                onChange={(_, value) => {
+                  const next = Array.isArray(value) ? value[0] : value;
+                  applyPatchPanelPorts(next);
+                }}
+                valueLabelDisplay="auto"
+                sx={{ flex: 1 }}
+              />
+              <Typography
+                sx={{
+                  fontSize: 12,
+                  fontWeight: 700,
+                  minWidth: 36,
+                  textAlign: 'right'
+                }}
+              >
+                {patchPortCount}
+              </Typography>
+            </Stack>
+            <Typography
+              sx={{
+                mt: 0.75,
+                fontSize: 11,
+                color: 'text.secondary',
+                lineHeight: 1.35
+              }}
+            >
+              Każdy port łączy dwa przewody (bridge). Po zaznaczeniu portu
+              podświetlane są tylko węzeł początkowy i końcowy.
+            </Typography>
+          </Box>
+        )}
+        {!isPatchPanel && (
         <Box sx={{ mt: 1 }}>
           <Typography
             sx={{
@@ -877,6 +1172,8 @@ export const NodeControls2d = ({ id }: Props) => {
             valueLabelFormat={(v) => `${v}%`}
           />
         </Box>
+        )}
+        {!isPatchPanel && (
         <Box sx={{ mt: 1.25 }}>
           <Accordion
             disableGutters
@@ -981,9 +1278,10 @@ export const NodeControls2d = ({ id }: Props) => {
             </AccordionDetails>
           </Accordion>
         </Box>
+        )}
       </Box>
 
-      {!isCabinet && (
+      {!isCabinet && !isBlanking && !isPatchPanel && (
       <Box sx={{ px: 1.5, pt: 0.5, pb: 1 }}>
         {isSwitch ? (
           <>
@@ -1496,7 +1794,7 @@ export const NodeControls2d = ({ id }: Props) => {
               }}
               sx={{ textTransform: 'none', justifyContent: 'flex-start' }}
             >
-              Edytuj szablon
+              {isServerTemplate ? 'Edytuj serwer' : 'Edytuj szablon'}
             </Button>
           )}
           <Button

@@ -14,22 +14,93 @@ export const deviceTemplateToIcon = (template: DeviceTemplate): Icon => {
   };
 };
 
+/**
+ * Fork a template for a single placed node — new template id, but keep
+ * section / port / instance ids so existing cables stay attached.
+ */
+export const forkDeviceTemplateForNode = (
+  template: DeviceTemplate
+): DeviceTemplate => {
+  return {
+    ...template,
+    id: generateId()
+  };
+};
+
 /** Deep-clone a template with fresh ids (for „Kopiuj szablon”). */
 export const cloneDeviceTemplate = (
   template: DeviceTemplate,
   nameSuffix = ' (kopia)'
 ): DeviceTemplate => {
+  const sections = template.sections.map((section) => {
+    return {
+      ...section,
+      id: generateId()
+    };
+  });
+
+  const virtualInstances = template.virtualInstances?.map((inst) => {
+    return {
+      ...inst,
+      id: generateId(),
+      interfaces: inst.interfaces.map((iface) => {
+        return {
+          ...iface,
+          id: generateId()
+          // targetPortId kept — layout regenerates section-pN ids identically
+          // only when section ids stay the same; after clone section ids change,
+          // so clear bridge targets to avoid dangling refs.
+        };
+      })
+    };
+  });
+
+  // Remap bridge targets: old `${oldSectionId}-pN` → new `${newSectionId}-pN`
+  const oldToNewSection = new Map(
+    template.sections.map((section, i) => [section.id, sections[i].id])
+  );
+  const remappedInstances = virtualInstances?.map((inst) => {
+    return {
+      ...inst,
+      interfaces: inst.interfaces.map((iface) => {
+        if (!iface.targetPortId) return iface;
+        for (const [oldId, newId] of oldToNewSection) {
+          const prefix = `${oldId}-p`;
+          if (iface.targetPortId.startsWith(prefix)) {
+            return {
+              ...iface,
+              targetPortId: `${newId}-p${iface.targetPortId.slice(prefix.length)}`
+            };
+          }
+        }
+        // Mgmt port — keep only if same id regenerated below
+        return { ...iface, targetPortId: undefined };
+      })
+    };
+  });
+
   return {
     ...template,
     id: generateId(),
     name: `${template.name}${nameSuffix}`,
-    sections: template.sections.map((section) => {
-      return {
-        ...section,
-        id: generateId()
-      };
-    })
+    sections,
+    virtualInstances: remappedInstances,
+    managementPort: template.managementPort
+      ? {
+          ...template.managementPort,
+          id: generateId()
+        }
+      : undefined
   };
+};
+
+/** Remove a template from the persistent library. */
+export const deleteSavedDeviceTemplate = (templateId: string) => {
+  const next = loadSavedDeviceTemplates().filter((item) => {
+    return item.id !== templateId;
+  });
+  saveDeviceTemplatesLibrary(next);
+  return next;
 };
 
 export const loadSavedDeviceTemplates = (): DeviceTemplate[] => {

@@ -1,5 +1,16 @@
 import { produce } from 'immer';
-import { SHAPE_2D_PC_ID } from 'src/config';
+import {
+  SHAPE_2D_PC_ID,
+  SHAPE_2D_CAMERA_ID,
+  SHAPE_2D_CAMERA_V2_ID,
+  SHAPE_2D_PRINTER_ID,
+  SHAPE_2D_VOIP_ID,
+  SHAPE_2D_SMARTPHONE_ID,
+  SHAPE_2D_IOT_ID,
+  SHAPE_2D_AP_ID,
+  SHAPE_2D_NAS_ID,
+  SHAPE_2D_TABLET_ID
+} from 'src/config';
 import { ModelItem } from 'src/types';
 import { getItemByIdOrThrow, isVlan1, vlansMatch } from 'src/utils';
 import { State } from './types';
@@ -23,24 +34,19 @@ export const updateModelItem = (
 };
 
 export const createModelItem = (
-  newModelItem: ModelItem,
+  item: ModelItem,
   state: State
 ): State => {
-  const newState = produce(state, (draft) => {
-    draft.model.items.push(newModelItem);
+  return produce(state, (draft) => {
+    draft.model.items.push(item);
   });
-
-  return updateModelItem(newModelItem.id, newModelItem, newState);
 };
 
 export const deleteModelItem = (id: string, state: State): State => {
   const modelItem = getItemByIdOrThrow(state.model.items, id);
-
-  const newState = produce(state, (draft) => {
-    delete draft.model.items[modelItem.index];
+  return produce(state, (draft) => {
+    draft.model.items.splice(modelItem.index, 1);
   });
-
-  return newState;
 };
 
 /** Apply a manual VLAN color to every non-PC port/SVI with the same VLAN. */
@@ -56,7 +62,20 @@ export const setVlanColorAcrossModel = (
 
   return produce(state, (draft) => {
     draft.model.items.forEach((item, index) => {
-      if (item.icon === SHAPE_2D_PC_ID) return;
+      if (
+        item.icon === SHAPE_2D_PC_ID ||
+        item.icon === SHAPE_2D_CAMERA_ID ||
+        item.icon === SHAPE_2D_CAMERA_V2_ID ||
+        item.icon === SHAPE_2D_PRINTER_ID ||
+        item.icon === SHAPE_2D_VOIP_ID ||
+        item.icon === SHAPE_2D_SMARTPHONE_ID ||
+        item.icon === SHAPE_2D_IOT_ID ||
+        item.icon === SHAPE_2D_AP_ID ||
+        item.icon === SHAPE_2D_NAS_ID ||
+        item.icon === SHAPE_2D_TABLET_ID
+      ) {
+        return;
+      }
 
       let changed = false;
       let nextItem = item;

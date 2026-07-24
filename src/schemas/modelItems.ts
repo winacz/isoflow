@@ -6,10 +6,16 @@ export const portTypeSchema = z.enum(['access', 'trunk']);
 export const shape2dPortConfigSchema = z.object({
   label: z.string().max(50).optional(),
   name: z.string().max(100).optional(),
+  /** Access VLAN, or native VLAN when type is trunk. */
   vlan: z.string().max(32).optional(),
   /** Manual override for VLAN display / cable color (hex). */
   vlanColor: z.string().max(32).optional(),
   type: portTypeSchema.optional(),
+  /**
+   * VLANs allowed on a trunk port (tagged). Native stays in `vlan`.
+   * Populated by the trunk VLAN picker (UI TBD).
+   */
+  allowedVlans: z.array(z.string().max(32)).max(64).optional(),
   speed: z.string().max(20).optional()
 });
 
@@ -33,8 +39,15 @@ export const modelItemSchema = z.object({
   ports: z.record(shape2dPortConfigSchema).optional(),
   /** Switch SVIs (not used on hosts / PC). */
   svis: z.array(sviSchema).optional(),
-  /** Cabinet height in rack units (U). Only for CABINET icon. */
-  rackUnits: z.number().int().min(4).max(42).optional(),
+  /** Rack height in U — cabinet (4–42) or blanking plate (1–12). */
+  rackUnits: z.number().int().min(1).max(42).optional(),
+  /** Patch panel jack count (4–48). */
+  portCount: z.number().int().min(4).max(48).optional(),
+  /**
+   * Endpoint devices (PC, AP, camera…) — powered via PoE from a switch port.
+   * When true, a green bolt shows on the jack; warn if not linked to PoE OUT.
+   */
+  poweredByPoe: z.boolean().optional(),
   /** Portal from isometric node → Plan (2D) item / rectangle. */
   portal: z
     .object({

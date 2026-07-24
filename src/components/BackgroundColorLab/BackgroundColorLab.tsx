@@ -10,7 +10,6 @@ import {
   ToggleButtonGroup
 } from '@mui/material';
 import {
-  PaletteOutlined as PaletteIcon,
   Close as CloseIcon,
   ExpandLess,
   ExpandMore,
@@ -37,12 +36,17 @@ const GRID_OPTIONS: Array<{ value: GridStyle; label: string; hint: string }> = [
   { value: 'rack', label: 'RACK', hint: 'Kwadrat = 1U' }
 ];
 
+interface Props {
+  open: boolean;
+  onClose: () => void;
+}
+
 /**
- * Left-side temp panel: canvas / VLAN1 / grid colors + 2D grid density.
+ * Temp panel: canvas / VLAN1 / grid colors + 2D grid density.
  * Session-only — not persisted to the model. Prefs are per projection mode.
+ * Opened from the main menu.
  */
-export const BackgroundColorLab = () => {
-  const [open, setOpen] = useState(false);
+export const BackgroundColorLab = ({ open, onClose }: Props) => {
   const [collapsed, setCollapsed] = useState(false);
   const projectionMode = useUiStateStore((state) => {
     return state.projectionMode;
@@ -99,20 +103,7 @@ export const BackgroundColorLab = () => {
   const activeGrid = gridColor ?? defaultGrid;
 
   if (!open) {
-    return (
-      <UiElement>
-        <IconButton
-          size="small"
-          title="TEMP kolory / siatka"
-          onClick={() => {
-            setOpen(true);
-          }}
-          sx={{ color: 'text.secondary' }}
-        >
-          <PaletteIcon fontSize="small" />
-        </IconButton>
-      </UiElement>
-    );
+    return null;
   }
 
   return (
@@ -153,9 +144,7 @@ export const BackgroundColorLab = () => {
             <IconButton
               size="small"
               title="Ukryj panel"
-              onClick={() => {
-                setOpen(false);
-              }}
+              onClick={onClose}
             >
               <CloseIcon fontSize="small" />
             </IconButton>

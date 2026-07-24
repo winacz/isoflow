@@ -20,6 +20,9 @@ export const ViewModeTabs = () => {
   const projectionMode = useUiStateStore((state) => {
     return state.projectionMode;
   });
+  const isWorkshopOpen = useUiStateStore((state) => {
+    return state.isWorkshopOpen;
+  });
   const activeViewId = useUiStateStore((state) => {
     return state.view;
   });
@@ -136,6 +139,7 @@ export const ViewModeTabs = () => {
               key={tab.viewId}
               variant="text"
               onClick={() => {
+                uiStateActions.setWorkshopOpen(false);
                 onSelectTab(tab.viewId, tab.kind);
               }}
               sx={{
@@ -144,14 +148,34 @@ export const ViewModeTabs = () => {
                 py: 1,
                 minWidth: 'auto',
                 fontWeight: 600,
-                color: isActive ? 'grey.200' : 'grey.500',
-                bgcolor: isActive ? 'primary.light' : undefined
+                color: (isActive && !isWorkshopOpen) ? 'grey.200' : 'grey.500',
+                bgcolor: (isActive && !isWorkshopOpen) ? 'primary.light' : undefined
               }}
             >
               {tab.label}
             </Button>
           );
         })}
+        
+        {/* WARSZTAT TAB */}
+        <Button
+          variant="text"
+          onClick={() => {
+            uiStateActions.setWorkshopOpen(true);
+          }}
+          sx={{
+            borderRadius: 0,
+            px: 2,
+            py: 1,
+            minWidth: 'auto',
+            fontWeight: 600,
+            color: isWorkshopOpen ? 'grey.200' : 'grey.500',
+            bgcolor: isWorkshopOpen ? 'primary.light' : undefined
+          }}
+        >
+          Warsztat
+        </Button>
+
         <Tooltip title="Nowa zakładka 2D">
           <IconButton
             size="small"

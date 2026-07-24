@@ -296,6 +296,10 @@ export const ConnectorStackBadges = () => {
         return (
           <Box
             key={`stack-${key}`}
+            className="isoflow-stack-badge"
+            data-stack-key={key}
+            data-connector-ids={badge.connectorIds.join(',')}
+            data-stack-connectors={badge.connectorIds.join(',')}
             sx={{
               position: 'absolute',
               left: center.x,

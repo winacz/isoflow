@@ -4,6 +4,11 @@ import { useUiStateStore } from 'src/stores/uiStateStore';
 import { useModelStore } from 'src/stores/modelStore';
 import { useScene } from 'src/hooks/useScene';
 import { SHAPE_2D_CABINET_ID } from 'src/config';
+import {
+  getPortPeerItemIds,
+  isPatchPanelItem,
+  expandConnectorIdsThroughPatchPanels
+} from 'src/utils';
 import { Node } from './Node/Node';
 
 interface Props {
@@ -87,24 +92,84 @@ export const Nodes = React.memo(({ nodes }: Props) => {
     }
 
     if (itemControls.type === 'CONNECTOR') {
-      const connector = connectors.find((con) => {
-        return con.id === itemControls.id;
+      const bridgeIds = expandConnectorIdsThroughPatchPanels({
+        connectorIds: [itemControls.id],
+        connectors,
+        modelItems
       });
-
-      return getEndpointItemIds(connector);
+      const ids = new Set<string>();
+      bridgeIds.forEach((connectorId) => {
+        const connector = connectors.find((con) => {
+          return con.id === connectorId;
+        });
+        getEndpointItemIds(connector).forEach((id) => {
+          // Prefer real endpoints — skip dimming the panel itself when bridged.
+          if (isPatchPanelItem(modelItems.find((m) => m.id === id))) {
+            return;
+          }
+          ids.add(id);
+        });
+      });
+      // If bridge incomplete, still show whatever endpoints we have (incl. panel).
+      if (ids.size === 0) {
+        const connector = connectors.find((con) => {
+          return con.id === itemControls.id;
+        });
+        return getEndpointItemIds(connector);
+      }
+      return ids;
     }
 
     if (itemControls.type === 'ITEM') {
+      const modelItem = modelItems.find((item) => {
+        return item.id === itemControls.id;
+      });
+      const isPanel = isPatchPanelItem(modelItem);
+
+      // Patch panel port focus: highlight only the bridged endpoints (not the panel).
+      if (isPanel && focusedPortIds.length > 0) {
+        return getPortPeerItemIds({
+          itemId: itemControls.id,
+          portIds: focusedPortIds,
+          connectors
+        });
+      }
+
       const ids = new Set<string>([itemControls.id]);
 
-      // Port focus: only the peer(s) on cables attached to those RJ45s.
+      // Selecting a cabinet: keep mounted gear highlighted (not dimmed),
+      // otherwise cabinet tint shows through semi-transparent switches.
+      if (iconById.get(itemControls.id) === SHAPE_2D_CABINET_ID) {
+        nodes.forEach((node) => {
+          if (node.parentId === itemControls.id) {
+            ids.add(node.id);
+          }
+        });
+      }
+
+      // Port focus: peers on those RJ45s + far side through patch-panel bridges.
       if (focusedPortIds.length > 0) {
+        const directConnectorIds: string[] = [];
         connectors.forEach((connector) => {
           const usesFocused = focusedPortIds.some((portId) => {
             return connectorUsesPort(connector, itemControls.id, portId);
           });
           if (!usesFocused) return;
+          directConnectorIds.push(connector.id);
+        });
+
+        expandConnectorIdsThroughPatchPanels({
+          connectorIds: directConnectorIds,
+          connectors,
+          modelItems
+        }).forEach((connectorId) => {
+          const connector = connectors.find((con) => {
+            return con.id === connectorId;
+          });
           getEndpointItemIds(connector).forEach((id) => {
+            if (isPatchPanelItem(modelItems.find((m) => m.id === id))) {
+              return;
+            }
             ids.add(id);
           });
         });
@@ -132,7 +197,10 @@ export const Nodes = React.memo(({ nodes }: Props) => {
     itemControls,
     selectedItemIds,
     connectors,
-    focusedPortIds
+    focusedPortIds,
+    modelItems,
+    iconById,
+    nodes
   ]);
 
   return (

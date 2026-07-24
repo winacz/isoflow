@@ -26,7 +26,17 @@ module.exports = {
     rules: [
       {
         test: /\.(ts|tsx)$/,
-        use: 'ts-loader',
+        use: {
+          loader: 'ts-loader',
+          options: {
+            // Not needed for the dev server bundle — avoids the same
+            // duplicate-declaration-asset class of issue as prod.config.js.
+            compilerOptions: {
+              declaration: false,
+              declarationMap: false
+            }
+          }
+        },
         exclude: /node_modules/
       },
       {

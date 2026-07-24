@@ -16,6 +16,7 @@ import {
   getShape2dSize,
   getModelItemSize,
   getShape2dPorts,
+  getModelItemPorts,
   SHAPE_2D_CABINET_ID
 } from 'src/config';
 import {
@@ -362,6 +363,11 @@ export type ConnectorPathStyleRun = {
   points: Coords[];
   /** Dashed only while crossing a foreign device body (not own endpoints). */
   throughNode: boolean;
+  /**
+   * Patch-panel → external node: faded dashed run while inside the panel's cabinet.
+   * Takes visual priority over throughNode when both apply.
+   */
+  throughCabinet?: boolean;
 };
 
 /** Entry/exit points where segment a→b tunnels through foreign rects (t ∈ (0,1)). */
@@ -440,22 +446,26 @@ const segmentTunnelEdges = (
 };
 
 /**
- * Split a connector path into solid / through-node (dashed) runs.
+ * Split a connector path into solid / through-node (dashed) / through-cabinet runs.
  * Transition sits exactly on the device outer edge (not tile centers before/after).
  * Endpoint devices stay solid — dash only when crossing a foreign node body.
  * Sparse A↔B previews still dash mid-segment when the chord tunnels a body.
+ * Optional `fadeCabinetRect`: patch→external cables fade inside the cabinet.
  */
 export const splitConnectorPathByNodeBodies = ({
   tiles,
   items,
   modelItems,
-  endpointItemIds
+  endpointItemIds,
+  fadeCabinetRect
 }: {
   tiles: Coords[];
   items: { id: string; tile: Coords }[];
   modelItems: { id: string; icon?: string }[];
   /** Connector's own nodes — cable over these stays solid. */
   endpointItemIds?: Iterable<string>;
+  /** Cabinet AABB — segments inside get throughCabinet styling. */
+  fadeCabinetRect?: Shape2dRect | null;
 }): ConnectorPathStyleRun[] => {
   if (tiles.length === 0) return [];
 
@@ -466,45 +476,75 @@ export const splitConnectorPathByNodeBodies = ({
     : items;
   const excludedArr = endpointItemIds ? [...endpointItemIds] : [];
   const rects = getShape2dRects(foreignItems, undefined, modelItemMap);
-  const flags = tiles.map((tile) => {
-    return isTileOnAnyShape2dBody({
-      tile,
-      items,
-      modelItemMap,
-      excludeItemIds: excludedArr
-    });
+
+  type RunKind = 'solid' | 'node' | 'cabinet';
+  const kindOf = (tile: Coords): RunKind => {
+    const center = tileCenter(tile);
+    if (fadeCabinetRect && isPointInRect(center, fadeCabinetRect)) {
+      return 'cabinet';
+    }
+    if (
+      isTileOnAnyShape2dBody({
+        tile,
+        items,
+        modelItemMap,
+        excludeItemIds: excludedArr
+      })
+    ) {
+      return 'node';
+    }
+    return 'solid';
+  };
+
+  const toFlags = (kind: RunKind) => ({
+    throughNode: kind === 'node',
+    throughCabinet: kind === 'cabinet'
   });
+
+  const flags = tiles.map((tile) => kindOf(tile));
 
   const runs: ConnectorPathStyleRun[] = [];
   let currentPoints: Coords[] = [tileCenter(tiles[0])];
-  let currentThrough = flags[0];
+  let currentKind: RunKind = flags[0];
 
   const flush = () => {
     if (currentPoints.length >= 2) {
       runs.push({
         points: currentPoints,
-        throughNode: currentThrough
+        ...toFlags(currentKind)
       });
     }
   };
 
+  const boundaryRectFor = (
+    insideTile: Coords,
+    outsideTile: Coords,
+    kind: RunKind
+  ): Shape2dRect | null => {
+    if (kind === 'cabinet' && fadeCabinetRect) return fadeCabinetRect;
+    return (
+      findRectContainingTile(insideTile, rects) ??
+      findRectContainingTile(outsideTile, rects)
+    );
+  };
+
   for (let i = 1; i < tiles.length; i += 1) {
-    const prevFlag = flags[i - 1];
-    const nextFlag = flags[i];
+    const prevKind = flags[i - 1];
+    const nextKind = flags[i];
     const prevCenter = tileCenter(tiles[i - 1]);
     const nextCenter = tileCenter(tiles[i]);
 
-    // Both outside — chord may still tunnel through a foreign body (sparse A↔B).
-    if (!prevFlag && !nextFlag && rects.length > 0) {
+    // Both outside nodes/cabinet — chord may still tunnel a foreign body.
+    if (prevKind === 'solid' && nextKind === 'solid' && rects.length > 0) {
       const edges = segmentTunnelEdges(prevCenter, nextCenter, rects);
       if (edges.length >= 2) {
         for (let e = 0; e + 1 < edges.length; e += 2) {
           currentPoints.push(edges[e]);
           flush();
-          currentThrough = true;
+          currentKind = 'node';
           currentPoints = [edges[e], edges[e + 1]];
           flush();
-          currentThrough = false;
+          currentKind = 'solid';
           currentPoints = [edges[e + 1]];
         }
         currentPoints.push(nextCenter);
@@ -512,17 +552,41 @@ export const splitConnectorPathByNodeBodies = ({
       }
     }
 
-    if (prevFlag === nextFlag) {
+    // Chord may enter/leave the fade cabinet between sparse tiles.
+    if (
+      fadeCabinetRect &&
+      prevKind === 'solid' &&
+      nextKind === 'solid' &&
+      !isPointInRect(prevCenter, fadeCabinetRect) &&
+      !isPointInRect(nextCenter, fadeCabinetRect)
+    ) {
+      const edges = segmentTunnelEdges(prevCenter, nextCenter, [
+        fadeCabinetRect
+      ]);
+      if (edges.length >= 2) {
+        for (let e = 0; e + 1 < edges.length; e += 2) {
+          currentPoints.push(edges[e]);
+          flush();
+          currentKind = 'cabinet';
+          currentPoints = [edges[e], edges[e + 1]];
+          flush();
+          currentKind = 'solid';
+          currentPoints = [edges[e + 1]];
+        }
+        currentPoints.push(nextCenter);
+        continue;
+      }
+    }
+
+    if (prevKind === nextKind) {
       currentPoints.push(nextCenter);
       continue;
     }
 
-    // Crossing a node boundary — join exactly on the outer edge
-    const insideTile = prevFlag ? tiles[i - 1] : tiles[i];
-    const outsideTile = prevFlag ? tiles[i] : tiles[i - 1];
-    const rect =
-      findRectContainingTile(insideTile, rects) ??
-      findRectContainingTile(outsideTile, rects);
+    const insideTile = prevKind !== 'solid' ? tiles[i - 1] : tiles[i];
+    const outsideTile = prevKind !== 'solid' ? tiles[i] : tiles[i - 1];
+    const crossingKind = prevKind !== 'solid' ? prevKind : nextKind;
+    const rect = boundaryRectFor(insideTile, outsideTile, crossingKind);
 
     const edge = rect
       ? exitPointOnRectEdge(
@@ -538,7 +602,7 @@ export const splitConnectorPathByNodeBodies = ({
     currentPoints.push(edge);
     flush();
 
-    currentThrough = nextFlag;
+    currentKind = nextKind;
     currentPoints = [edge, nextCenter];
   }
 
@@ -819,8 +883,8 @@ export const getBoundingBoxSize = (boundingBox: Coords[]): Size => {
   const { lowX, lowY, highX, highY } = sortByPosition(boundingBox);
 
   return {
-    width: highX - lowX + 1,
-    height: highY - lowY + 1
+    width: Math.max(1, Math.round(highX) - Math.round(lowX) + 1),
+    height: Math.max(1, Math.round(highY) - Math.round(lowY) + 1)
   };
 };
 
@@ -951,7 +1015,7 @@ export const getAnchorTile = (
         : modelItems.find((item) => {
             return item.id === anchor.ref.item;
           });
-      const port = getShape2dPorts(modelItem?.icon ?? '').find((candidate) => {
+      const port = getModelItemPorts(modelItem ?? {}).find((candidate) => {
         return candidate.id === anchor.ref.port;
       });
 
@@ -1292,27 +1356,36 @@ export const isShape2dPortInUse = ({
   portId,
   connectors,
   excludeConnectorId,
-  excludeAnchorId
+  excludeAnchorId,
+  maxConnections = 1
 }: {
   itemId: string;
   portId: string;
   connectors: Pick<Connector, 'id' | 'anchors'>[];
   excludeConnectorId?: string | null;
   excludeAnchorId?: string | null;
+  /** Patch panel jacks accept 2 cables (bridge). Default 1. */
+  maxConnections?: number;
 }): boolean => {
-  return connectors.some((connector) => {
+  let count = 0;
+  for (const connector of connectors) {
     if (excludeConnectorId && connector.id === excludeConnectorId) {
-      return false;
+      continue;
     }
 
-    return connector.anchors.some((anchor) => {
+    for (const anchor of connector.anchors) {
       if (excludeAnchorId && anchor.id === excludeAnchorId) {
-        return false;
+        continue;
       }
 
-      return anchor.ref.item === itemId && anchor.ref.port === portId;
-    });
-  });
+      if (anchor.ref.item === itemId && anchor.ref.port === portId) {
+        count += 1;
+        if (count >= maxConnections) return true;
+      }
+    }
+  }
+
+  return false;
 };
 
 /**
@@ -1334,13 +1407,13 @@ export const getShape2dPortAtPoint = ({
   let best: Shape2dPortHit | null = null;
   let bestDistSq = Infinity;
 
-  const map = new Map(modelItems.map(i => [i.id, i]));
+  const map = new Map(modelItems.map((i) => [i.id, i]));
   for (const viewItem of scene.items) {
     const modelItem = map.get(viewItem.id);
 
     if (!modelItem?.icon) continue;
 
-    const ports = getShape2dPorts(modelItem.icon);
+    const ports = getModelItemPorts(modelItem);
 
     for (const port of ports) {
       const worldTile = getShape2dPortWorldTile(viewItem.tile, port.tile);
@@ -1404,13 +1477,13 @@ export const getNearestShape2dPort = ({
   let best: Shape2dPortHit | null = null;
   let bestDistance = Infinity;
 
-  const map = new Map(modelItems.map(i => [i.id, i]));
+  const map = new Map(modelItems.map((i) => [i.id, i]));
   for (const viewItem of scene.items) {
     const modelItem = map.get(viewItem.id);
 
     if (!modelItem?.icon) continue;
 
-    const ports = getShape2dPorts(modelItem.icon);
+    const ports = getModelItemPorts(modelItem);
 
     for (const port of ports) {
       const worldTile = getShape2dPortWorldTile(viewItem.tile, port.tile);
@@ -1837,14 +1910,16 @@ export const getFitToViewParams = (
   const unprojectedBounds = getUnprojectedBounds(view, options);
   const minZoom =
     isPlanProjection(options?.projectionMode ?? 'ISOMETRIC') ? MIN_ZOOM_2D : MIN_ZOOM;
-  const zoom = clamp(
-    Math.min(
-      viewportSize.width / Math.max(1, unprojectedBounds.width),
-      viewportSize.height / Math.max(1, unprojectedBounds.height)
-    ),
-    minZoom,
-    MAX_ZOOM
-  );
+  const rawZoom = Math.min(
+    viewportSize.width / Math.max(1, unprojectedBounds.width),
+    viewportSize.height / Math.max(1, unprojectedBounds.height)
+  ) * 0.75; // Zostawiamy 25% na delikatne oddalenie marginesowe wokół projektu
+  
+  // Max zoom 1.5 (zamiast MAX_ZOOM), żeby nie powiększać za bardzo małych projektów
+  const zoom = clamp(rawZoom, minZoom, 1.5);
+
+  // Kompensacja prawego sidebara (~300px), przesuwamy środek o 150px w lewo
+  const SIDEBAR_X_OFFSET = 150;
 
   if (isPlanProjection(options?.projectionMode ?? 'ISOMETRIC')) {
     const centerPx = {
@@ -1859,7 +1934,7 @@ export const getFitToViewParams = (
     return {
       zoom,
       scroll: {
-        x: -centerPx.x * zoom,
+        x: -centerPx.x * zoom - SIDEBAR_X_OFFSET,
         y: -centerPx.y * zoom
       }
     };
@@ -1870,6 +1945,7 @@ export const getFitToViewParams = (
     y: (sortedCornerPositions.lowY + boundingBoxSize.height / 2) * zoom
   };
   const scroll = getTileScrollPosition(scrollTarget);
+  scroll.x -= SIDEBAR_X_OFFSET;
 
   return {
     zoom,

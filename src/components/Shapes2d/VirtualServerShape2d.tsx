@@ -15,6 +15,7 @@ import { Rj45Port } from 'src/components/Shapes2d/Rj45Port';
 import { DeviceTypeIcon } from 'src/components/Icons/DeviceTypeIcon';
 
 interface Props {
+  itemId?: string;
   shapeId: string;
   /** Override pixel size (e.g. menu preview). */
   width?: number;
@@ -63,6 +64,7 @@ interface Props {
  * Server device with virtualization blocks.
  */
 export const VirtualServerShape2d = ({
+  itemId,
   shapeId,
   width,
   height,
@@ -628,6 +630,8 @@ export const VirtualServerShape2d = ({
           >
             <Rj45Port
               side={port.side}
+              itemId={itemId}
+              portId={port.id}
               tileSize={portTileSize}
               portNumber={index + 1}
               portLabel={iface}

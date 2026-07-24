@@ -26,7 +26,7 @@ import {
   parseWaypointSegmentId,
   prepareWaypointSegmentDrag,
   doShape2dFootprintsOverlap,
-  isShape2dPortInUse,
+  isShape2dPortUnavailable,
   BLACK_CROSSHAIR_CURSOR,
   setWindowCursor,
   screenToTile2dContinuous,
@@ -665,10 +665,12 @@ export const Cursor: ModeActions = {
       if (
         portHit &&
         portHit.itemId === uiState.mode.mousedownItem.id &&
-        !isShape2dPortInUse({
+        !isShape2dPortUnavailable({
           itemId: portHit.itemId,
           portId: portHit.portId,
-          connectors: scene.currentView.connectors ?? []
+          connectors: scene.currentView.connectors ?? [],
+          modelItems: model.items,
+          viewItems: scene.items
         })
       ) {
         const startRef = {

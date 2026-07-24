@@ -223,12 +223,24 @@ export const CabinetShape2d = ({
                 : undefined,
               display: 'flex',
               alignItems: 'center',
-              justifyContent: 'center'
+              justifyContent: 'center',
+              zIndex: 1
             }}
           >
+            {isFree && chassisTint.alpha > 0.01 && (
+              <Box
+                sx={{
+                  position: 'absolute',
+                  inset: 0,
+                  bgcolor: chassisTint.css,
+                  pointerEvents: 'none'
+                }}
+              />
+            )}
             {isFree && (
               <Typography
                 sx={{
+                  position: 'relative',
                   fontSize: Math.max(9, Math.round(slotH * 0.22)),
                   fontWeight: 800,
                   letterSpacing: 1.2,
@@ -245,19 +257,46 @@ export const CabinetShape2d = ({
         );
       })}
 
+      {/* Cabinet color on frame only (header + ears) — never over mounted gear. */}
       {chassisTint.alpha > 0.01 && (
-        <Box
-          sx={{
-            position: 'absolute',
-            left: earW,
-            top: headerH,
-            width: contentW,
-            height: pxHeight - headerH,
-            bgcolor: chassisTint.css,
-            pointerEvents: 'none',
-            zIndex: 2
-          }}
-        />
+        <>
+          <Box
+            sx={{
+              position: 'absolute',
+              left: 0,
+              top: 0,
+              width: pxWidth,
+              height: headerH,
+              bgcolor: chassisTint.css,
+              pointerEvents: 'none',
+              zIndex: 2
+            }}
+          />
+          <Box
+            sx={{
+              position: 'absolute',
+              left: 0,
+              top: headerH,
+              width: earW,
+              height: pxHeight - headerH,
+              bgcolor: chassisTint.css,
+              pointerEvents: 'none',
+              zIndex: 2
+            }}
+          />
+          <Box
+            sx={{
+              position: 'absolute',
+              right: 0,
+              top: headerH,
+              width: earW,
+              height: pxHeight - headerH,
+              bgcolor: chassisTint.css,
+              pointerEvents: 'none',
+              zIndex: 2
+            }}
+          />
+        </>
       )}
 
       {/* U labels — right side of chassis body */}

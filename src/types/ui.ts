@@ -240,12 +240,17 @@ export interface UiState {
     title?: string;
     screen: Coords;
   } | null;
+  sviHover: {
+    vlan: number;
+    ip?: string;
+    screen: Coords;
+    color: string;
+  } | null;
   contextMenu: ContextMenu | null;
   zoom: number;
   scroll: Scroll;
   mouse: Mouse;
   rendererEl: HTMLDivElement | null;
-  enableDebugTools: boolean;
   projectionMode: ProjectionMode;
   /** Whether the background grid is drawn (logical snap grid is always active). */
   showGrid: boolean;
@@ -275,6 +280,8 @@ export interface UiState {
    * Through-node dash coloring still applies.
    */
   simplePaths: boolean;
+  /** Whether the Workshop view is currently active. */
+  isWorkshopOpen: boolean;
 }
 
 export interface UiStateActions {
@@ -289,8 +296,8 @@ export interface UiStateActions {
   setIsMainMenuOpen: (isOpen: boolean) => void;
   setDialog: (dialog: keyof typeof DialogTypeEnum | null) => void;
   setZoom: (zoom: number) => void;
-  /** Continuous zoom from mouse wheel / trackpad pinch (scroll stays put). */
-  adjustZoomByWheel: (deltaY: number, deltaMode?: number) => void;
+  /** Continuous zoom from mouse wheel / trackpad pinch (scroll stays put unless focal point provided). */
+  adjustZoomByWheel: (deltaY: number, deltaMode?: number, focalFromCenter?: Coords) => void;
   /** Pan canvas from trackpad two-finger scroll / mouse wheel tilt. */
   panByWheel: (deltaX: number, deltaY: number, deltaMode?: number) => void;
   setScroll: (scroll: Scroll) => void;
@@ -311,12 +318,14 @@ export interface UiStateActions {
   setPortPipHover: (
     hover: UiState['portPipHover']
   ) => void;
+  setSviHover: (
+    hover: UiState['sviHover']
+  ) => void;
   setContextMenu: (contextMenu: ContextMenu | null) => void;
   setMouse: (mouse: Mouse) => void;
   /** Imperative read — lets event handlers avoid subscribing to every mousemove. */
   getMouse: () => Mouse;
   setRendererEl: (el: HTMLDivElement) => void;
-  setEnableDebugTools: (enabled: boolean) => void;
   setProjectionMode: (projectionMode: ProjectionMode) => void;
   setShowGrid: (showGrid: boolean) => void;
   toggleShowGrid: () => void;
@@ -331,6 +340,7 @@ export interface UiStateActions {
   setVlan1CableColor: (color: string | null) => void;
   setSimplePaths: (enabled: boolean) => void;
   toggleSimplePaths: () => void;
+  setWorkshopOpen: (isWorkshopOpen: boolean) => void;
 }
 
 export type UiStateStore = UiState & {

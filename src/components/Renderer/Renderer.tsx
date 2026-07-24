@@ -13,7 +13,6 @@ import { ConnectorStackBadges } from 'src/components/SceneLayers/Connectors/Conn
 import { WaypointGuides } from 'src/components/SceneLayers/Connectors/WaypointGuides';
 import { ConnectorLabels } from 'src/components/SceneLayers/ConnectorLabels/ConnectorLabels';
 import { TextBoxes } from 'src/components/SceneLayers/TextBoxes/TextBoxes';
-import { SizeIndicator } from 'src/components/DebugUtils/SizeIndicator';
 import { SceneLayer } from 'src/components/SceneLayer/SceneLayer';
 import { TransformControlsManager } from 'src/components/TransformControlsManager/TransformControlsManager';
 import { useScene } from 'src/hooks/useScene';
@@ -37,9 +36,6 @@ const getConnectorItemIds = (connector: ConnectorModel) => {
 export const Renderer = ({ showGrid, backgroundColor }: RendererProps) => {
   const containerRef = useRef<HTMLDivElement>();
   const interactionsRef = useRef<HTMLDivElement>();
-  const enableDebugTools = useUiStateStore((state) => {
-    return state.enableDebugTools;
-  });
   const mode = useUiStateStore((state) => {
     return state.mode;
   });
@@ -87,7 +83,12 @@ export const Renderer = ({ showGrid, backgroundColor }: RendererProps) => {
         !isPlanProjection(projectionMode) || isWheelZoomGesture(e);
 
       if (shouldZoom) {
-        uiStateActions.adjustZoomByWheel(e.deltaY, e.deltaMode);
+        const rect = el.getBoundingClientRect();
+        const focalFromCenter = {
+          x: e.clientX - rect.left - rect.width / 2,
+          y: e.clientY - rect.top - rect.height / 2
+        };
+        uiStateActions.adjustZoomByWheel(e.deltaY, e.deltaMode, focalFromCenter);
         return;
       }
 
@@ -151,6 +152,8 @@ export const Renderer = ({ showGrid, backgroundColor }: RendererProps) => {
   return (
     <Box
       ref={containerRef}
+      id="isoflow-canvas-container"
+      data-isoflow-canvas=""
       sx={{
         position: 'absolute',
         top: 0,
@@ -207,11 +210,6 @@ export const Renderer = ({ showGrid, backgroundColor }: RendererProps) => {
           <SceneLayer>
             <ConnectorLabels connectors={visibleConnectors} />
           </SceneLayer>
-          {enableDebugTools && (
-            <SceneLayer>
-              <SizeIndicator />
-            </SceneLayer>
-          )}
         </>
       )}
       <SceneLayer
@@ -252,6 +250,7 @@ export const Renderer = ({ showGrid, backgroundColor }: RendererProps) => {
       {/* Must stay on top so mouse events reach interaction manager */}
       <Box
         ref={interactionsRef}
+        className="isoflow-interaction-layer"
         sx={{
           position: 'absolute',
           left: 0,

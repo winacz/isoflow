@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useMemo, useState, useRef } from 'react';
 import {
   Box,
   Button,
@@ -34,6 +34,12 @@ import {
   cloneDeviceTemplate
 } from 'src/utils';
 import type { DeviceTemplate } from 'src/types';
+import { WorkshopLayout } from 'src/components/Workshop/WorkshopLayout';
+import { useResizeObserver } from 'src/hooks/useResizeObserver';
+import {
+  SWITCH_ROLE_LABELS,
+  switchRoleOptions
+} from 'src/schemas/deviceTemplates';
 
 const PORT_OPTIONS_BASE = [1, 2, 4, 8, 12, 16, 24] as const;
 /** RACK may use a single dense 48-port block (24 cols × 2 rows). */
@@ -55,6 +61,7 @@ const createDraft = (): DeviceTemplate => {
     kind: 'SWITCH',
     formFactor: 'DIN',
     numbering: 'ROWS_LTR',
+    switchRole: 'SW',
     sections: [defaultSection()]
   };
 };
@@ -66,20 +73,31 @@ interface Props {
   mode?: 'create' | 'edit';
   onCancel: () => void;
   onSave: (template: DeviceTemplate) => void;
+  /** When set, shows „Usuń szablon” in edit mode. */
+  onDelete?: () => void;
+  isWorkshopMode?: boolean;
 }
 
 export const DeviceCreatorPanel = ({
   initialTemplate,
   mode: initialMode = 'create',
   onCancel,
-  onSave
+  onSave,
+  onDelete,
+  isWorkshopMode
 }: Props) => {
-  const [draft, setDraft] = useState<DeviceTemplate>(
-    () => initialTemplate ?? createDraft()
-  );
-  const [mode, setMode] = useState<'create' | 'edit'>(
-    initialTemplate ? initialMode : 'create'
-  );
+  const [draft, setDraft] = useState<DeviceTemplate>(() => {
+    const base = initialTemplate ?? createDraft();
+    if (base.kind === 'SWITCH' && !base.switchRole) {
+      return { ...base, switchRole: 'SW' };
+    }
+    return base;
+  });
+  const [mode, setMode] = useState<'create' | 'edit'>(initialTemplate ? 'edit' : 'create');
+
+  const previewContainerRef = useRef<HTMLDivElement>(null);
+  const { size: containerSize } = useResizeObserver(previewContainerRef.current);
+  const [manualZoom, setManualZoom] = useState(1);
 
   const layout = useMemo(() => {
     return layoutDeviceTemplate(draft);
@@ -93,22 +111,76 @@ export const DeviceCreatorPanel = ({
     return sum + section.ports;
   }, 0);
 
-  const previewWidth = Math.min(380, layout.size.width * TILE_SIZE_2D * 0.22);
-  const scale = previewWidth / (layout.size.width * TILE_SIZE_2D);
-  const previewHeight = Math.round(layout.size.height * TILE_SIZE_2D * scale);
+  const normalPreviewWidth = Math.min(380, layout.size.width * TILE_SIZE_2D * 0.22);
+  const normalScale = normalPreviewWidth / (layout.size.width * TILE_SIZE_2D);
+  const normalPreviewHeight = Math.round(layout.size.height * TILE_SIZE_2D * normalScale);
   const naturalW = layout.size.width * TILE_SIZE_2D;
   const naturalH = layout.size.height * TILE_SIZE_2D;
+  
+  let scale = normalScale;
+  let previewWidth = normalPreviewWidth;
+  let previewHeight = normalPreviewHeight;
+  
+  if (isWorkshopMode) {
+    previewWidth = '100%' as any;
+    previewHeight = '100%' as any;
+    if (containerSize.width > 0 && containerSize.height > 0) {
+      const scaleX = (containerSize.width * 0.8) / Math.max(1, naturalW);
+      const scaleY = (containerSize.height * 0.8) / Math.max(1, naturalH);
+      scale = Math.min(scaleX, scaleY, 1.5) * manualZoom;
+    } else {
+      scale = 1 * manualZoom;
+    }
+  }
 
   const updateSection = (
     sectionId: string,
     patch: Partial<DeviceTemplate['sections'][number]>
   ) => {
     setDraft((prev) => {
+      const sections = prev.sections.map((section) => {
+        return section.id === sectionId ? { ...section, ...patch } : section;
+      });
+      const nextDraft = { ...prev, sections };
+      const validIds = new Set(
+        layoutDeviceTemplate(nextDraft).ports.map((p) => p.id)
+      );
+      const portPoe = Object.fromEntries(
+        Object.entries(prev.portPoe || {}).filter(([id]) => validIds.has(id))
+      );
+      return {
+        ...nextDraft,
+        portPoe: Object.keys(portPoe).length ? portPoe : undefined
+      };
+    });
+  };
+
+  const setPortPoe = (portId: string, value: 'IN' | 'OUT' | 'NONE') => {
+    setDraft((prev) => {
+      const next = { ...(prev.portPoe || {}) };
+      if (value === 'NONE') {
+        delete next[portId];
+      } else {
+        next[portId] = value;
+      }
       return {
         ...prev,
-        sections: prev.sections.map((section) => {
-          return section.id === sectionId ? { ...section, ...patch } : section;
-        })
+        portPoe: Object.keys(next).length ? next : undefined
+      };
+    });
+  };
+
+  const setAllRj45Poe = (value: 'IN' | 'OUT' | 'NONE') => {
+    setDraft((prev) => {
+      const next = { ...(prev.portPoe || {}) };
+      layout.ports.forEach((port) => {
+        if ((port.media ?? 'RJ45') !== 'RJ45') return;
+        if (value === 'NONE') delete next[port.id];
+        else next[port.id] = value;
+      });
+      return {
+        ...prev,
+        portPoe: Object.keys(next).length ? next : undefined
       };
     });
   };
@@ -129,140 +201,149 @@ export const DeviceCreatorPanel = ({
     draft.formFactor === 'RACK' ? PORT_OPTIONS_RACK : PORT_OPTIONS_BASE;
 
   const canSave = draft.name.trim().length > 0 && !fitError;
+  const switchRole = draft.switchRole || 'SW';
   const title =
-    mode === 'edit' ? 'Edycja szablonu' : 'Kreator switcha';
+    mode === 'edit'
+      ? `Edycja szablonu (${SWITCH_ROLE_LABELS[switchRole]})`
+      : `Kreator: ${SWITCH_ROLE_LABELS[switchRole]}`;
 
-  return (
-    <ControlsContainer
-      header={
-        <Section sx={{ position: 'sticky', top: 0, pt: 6, pb: 2 }}>
-          <Stack spacing={1.5}>
-            <Typography variant="body2" color="text.secondary">
-              {title}
-            </Typography>
-            <Typography variant="caption" color="text.secondary">
-              {mode === 'edit'
-                ? 'Zmiany trafią do wszystkich urządzeń z tym szablonem.'
-                : 'Zdefiniuj sekcje portów — podgląd aktualizuje się na żywo.'}
-            </Typography>
-          </Stack>
-        </Section>
-      }
+  const handleWheel = (e: React.WheelEvent) => {
+    if (!isWorkshopMode) return;
+    const delta = e.deltaY > 0 ? -0.1 : 0.1;
+    setManualZoom(z => Math.max(0.1, Math.min(5, z + delta)));
+  };
+
+  const previewContent = (
+    <Box
+      ref={previewContainerRef}
+      onWheel={handleWheel}
+      sx={{
+        width: previewWidth,
+        height: previewHeight,
+        mx: 'auto',
+        overflow: 'hidden',
+        borderRadius: 1,
+        border: isWorkshopMode ? 'none' : '1px solid',
+        borderColor: 'divider',
+        bgcolor: isWorkshopMode ? 'transparent' : '#f8fafc',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center'
+      }}
     >
-      <Section>
-        <Stack spacing={2}>
-          <FormControl>
-            <FormLabel sx={{ fontSize: 11, mb: 0.5, fontWeight: 600 }}>
-              Typ obudowy
-            </FormLabel>
-            <RadioGroup
-              row
-              value={draft.formFactor}
-              onChange={(event) => {
-                const formFactor = event.target
-                  .value as DeviceTemplate['formFactor'];
-                setDraft((prev) => {
-                  const sections =
-                    formFactor === 'RACK'
-                      ? prev.sections
-                      : prev.sections.map((section) => {
-                          // 48 is RACK-only in the UI; clamp when leaving RACK.
-                          return section.ports > 24
-                            ? { ...section, ports: 24 }
-                            : section;
-                        });
-                  return { ...prev, formFactor, sections };
-                });
-              }}
-              sx={{
-                flexWrap: 'wrap',
-                columnGap: 0.5,
-                rowGap: 0,
-                '& .MuiFormControlLabel-root': {
-                  mr: 0.75,
-                  ml: 0
-                },
-                '& .MuiFormControlLabel-label': {
-                  fontSize: 11,
-                  fontWeight: 600
-                },
-                '& .MuiRadio-root': {
-                  py: 0.25,
-                  px: 0.5
-                }
-              }}
-            >
-              <FormControlLabel
-                value="RACK"
-                control={<Radio size="small" />}
-                label="RACK"
-              />
-              <FormControlLabel
-                value="DIN"
-                control={<Radio size="small" />}
-                label="DIN"
-              />
-              <FormControlLabel
-                value="CUSTOM"
-                control={<Radio size="small" />}
-                label="Dowolna"
-              />
-            </RadioGroup>
-          </FormControl>
+      <Box
+        sx={{
+          width: naturalW,
+          height: naturalH,
+          transform: `scale(${scale})`,
+          transformOrigin: isWorkshopMode ? 'center' : 'top left'
+        }}
+      >
+        <DeviceShape2d
+          shapeId={draft.id}
+          centered={false}
+          name={draft.name || 'SWITCH'}
+          layoutOverride={layout}
+        />
+      </Box>
+    </Box>
+  );
 
-          <Box
-            sx={{
-              width: previewWidth,
-              height: previewHeight,
-              mx: 'auto',
-              overflow: 'hidden',
-              borderRadius: 1,
-              border: '1px solid',
-              borderColor: 'divider',
-              bgcolor: '#f8fafc'
-            }}
-          >
-            <Box
-              sx={{
-                width: naturalW,
-                height: naturalH,
-                transform: `scale(${scale})`,
-                transformOrigin: 'top left'
-              }}
-            >
-              <DeviceShape2d
-                shapeId={draft.id}
-                centered={false}
-                name={draft.name || 'SWITCH'}
-                layoutOverride={layout}
-              />
-            </Box>
-          </Box>
+  const basicInfo = (
+    <Stack spacing={2}>
+      <FormControl>
+        <FormLabel sx={{ fontSize: 11, mb: 0.5, fontWeight: 600 }}>
+          Typ obudowy
+        </FormLabel>
+        <RadioGroup
+          row
+          value={draft.formFactor}
+          onChange={(event) => {
+            const formFactor = event.target.value as DeviceTemplate['formFactor'];
+            setDraft((prev) => {
+              const sections =
+                formFactor === 'RACK'
+                  ? prev.sections
+                  : prev.sections.map((section) => {
+                      return section.ports > 24 ? { ...section, ports: 24 } : section;
+                    });
+              return { ...prev, formFactor, sections };
+            });
+          }}
+          sx={{
+            flexWrap: 'wrap',
+            columnGap: 0.5,
+            rowGap: 0,
+            '& .MuiFormControlLabel-root': { mr: 0.75, ml: 0 },
+            '& .MuiFormControlLabel-label': { fontSize: 11, fontWeight: 600 },
+            '& .MuiRadio-root': { py: 0.25, px: 0.5 }
+          }}
+        >
+          <FormControlLabel value="RACK" control={<Radio size="small" />} label="RACK" />
+          <FormControlLabel value="DIN" control={<Radio size="small" />} label="DIN" />
+          <FormControlLabel value="CUSTOM" control={<Radio size="small" />} label="Dowolna" />
+        </RadioGroup>
+      </FormControl>
 
-          <Typography variant="caption" color="text.secondary" textAlign="center">
-            {totalPorts}/{MAX_SWITCH_TEMPLATE_PORTS} portów · {layout.size.width}×
-            {layout.size.height} kratek
-          </Typography>
+      <Typography variant="caption" color="text.secondary" textAlign="center">
+        {totalPorts}/{MAX_SWITCH_TEMPLATE_PORTS} portów · {layout.size.width}×
+        {layout.size.height} kratek
+      </Typography>
 
-          {fitError && <Alert severity="warning">{fitError}</Alert>}
+      {fitError && <Alert severity="warning">{fitError}</Alert>}
 
-          <TextField
-            label="Nazwa"
-            size="small"
-            fullWidth
-            value={draft.name}
-            onChange={(event) => {
-              setDraft((prev) => {
-                return { ...prev, name: event.target.value };
-              });
-            }}
-          />
+      <TextField
+        label="Nazwa"
+        size="small"
+        fullWidth
+        value={draft.name}
+        onChange={(event) => {
+          setDraft((prev) => {
+            return { ...prev, name: event.target.value };
+          });
+        }}
+      />
 
-          <Typography variant="caption" color="text.secondary">
-            Porty RJ45: 1, 2, 3… (góra L→P, potem dół)
-          </Typography>
+      <FormControl>
+        <FormLabel sx={{ fontSize: 11, mb: 0.5, fontWeight: 600 }}>
+          Typ urządzenia
+        </FormLabel>
+        <RadioGroup
+          row
+          value={switchRole}
+          onChange={(event) => {
+            setDraft((prev) => ({
+              ...prev,
+              switchRole: event.target.value as DeviceTemplate['switchRole']
+            }));
+          }}
+          sx={{
+            flexWrap: 'wrap',
+            columnGap: 0.5,
+            '& .MuiFormControlLabel-root': { mr: 0.75, ml: 0 },
+            '& .MuiFormControlLabel-label': { fontSize: 11, fontWeight: 600 },
+            '& .MuiRadio-root': { py: 0.25, px: 0.5 }
+          }}
+        >
+          {switchRoleOptions.map((role) => (
+            <FormControlLabel
+              key={role}
+              value={role}
+              control={<Radio size="small" />}
+              label={SWITCH_ROLE_LABELS[role]}
+            />
+          ))}
+        </RadioGroup>
+      </FormControl>
 
-          <Divider />
+      <Typography variant="caption" color="text.secondary">
+        Porty RJ45: 1, 2, 3… (góra L→P, potem dół)
+      </Typography>
+    </Stack>
+  );
+
+  const sectionsInfo = (
+    <Stack spacing={2}>
 
           <Stack
             direction="row"
@@ -326,11 +407,23 @@ export const DeviceCreatorPanel = ({
                       disabled={draft.sections.length <= 1}
                       onClick={() => {
                         setDraft((prev) => {
+                          const sections = prev.sections.filter((item) => {
+                            return item.id !== section.id;
+                          });
+                          const nextDraft = { ...prev, sections };
+                          const validIds = new Set(
+                            layoutDeviceTemplate(nextDraft).ports.map((p) => p.id)
+                          );
+                          const portPoe = Object.fromEntries(
+                            Object.entries(prev.portPoe || {}).filter(([id]) =>
+                              validIds.has(id)
+                            )
+                          );
                           return {
-                            ...prev,
-                            sections: prev.sections.filter((item) => {
-                              return item.id !== section.id;
-                            })
+                            ...nextDraft,
+                            portPoe: Object.keys(portPoe).length
+                              ? portPoe
+                              : undefined
                           };
                         });
                       }}
@@ -382,6 +475,107 @@ export const DeviceCreatorPanel = ({
               </Box>
             );
           })}
+    </Stack>
+  );
+
+  const rj45Ports = layout.ports.filter((p) => (p.media ?? 'RJ45') === 'RJ45');
+
+  const poeInfo = (
+    <Stack spacing={1.5}>
+      <Stack
+        direction="row"
+        justifyContent="space-between"
+        alignItems="center"
+        flexWrap="wrap"
+        gap={1}
+      >
+        <Typography variant="subtitle2">PoE na portach (RJ45)</Typography>
+        <Stack direction="row" spacing={0.5}>
+          <Button size="small" onClick={() => setAllRj45Poe('NONE')}>
+            Wyczyść
+          </Button>
+          <Button size="small" onClick={() => setAllRj45Poe('OUT')}>
+            Wszystkie Out
+          </Button>
+          <Button size="small" onClick={() => setAllRj45Poe('IN')}>
+            Wszystkie In
+          </Button>
+        </Stack>
+      </Stack>
+      <Typography variant="caption" color="text.secondary">
+        PoE Out — zasilanie urządzeń (AP, kamera). PoE In — port przyjmujący
+        zasilanie.
+      </Typography>
+      <Box
+        sx={{
+          display: 'flex',
+          flexWrap: 'wrap',
+          gap: 0.75
+        }}
+      >
+        {rj45Ports.map((port) => {
+          const value = draft.portPoe?.[port.id] || 'NONE';
+          return (
+            <FormControl key={port.id} size="small" sx={{ minWidth: 88 }}>
+              <Select
+                value={value}
+                displayEmpty
+                onChange={(event) => {
+                  setPortPoe(
+                    port.id,
+                    event.target.value as 'IN' | 'OUT' | 'NONE'
+                  );
+                }}
+                sx={{
+                  fontSize: 11,
+                  '& .MuiSelect-select': { py: 0.6, pr: 3 }
+                }}
+              >
+                <MenuItem value="NONE">
+                  {port.label || '?'} · —
+                </MenuItem>
+                <MenuItem value="OUT">
+                  {port.label || '?'} · Out
+                </MenuItem>
+                <MenuItem value="IN">
+                  {port.label || '?'} · In
+                </MenuItem>
+              </Select>
+            </FormControl>
+          );
+        })}
+      </Box>
+      {rj45Ports.length === 0 && (
+        <Typography variant="caption" color="text.secondary">
+          Brak portów RJ45 — dodaj sekcję RJ45 powyżej.
+        </Typography>
+      )}
+    </Stack>
+  );
+
+  const formBody = isWorkshopMode ? (
+    <Box sx={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 4 }}>
+      <Stack spacing={3}>
+        {basicInfo}
+        <Divider />
+        {poeInfo}
+      </Stack>
+      {sectionsInfo}
+    </Box>
+  ) : (
+    <Stack spacing={2}>
+      {!isWorkshopMode && previewContent}
+      {basicInfo}
+      <Divider />
+      {sectionsInfo}
+      <Divider />
+      {poeInfo}
+    </Stack>
+  );
+
+  const formContent = (
+    <Stack spacing={2}>
+      {formBody}
 
           <Stack spacing={1} sx={{ pt: 1 }}>
             {(mode === 'edit' || initialTemplate) && (
@@ -397,15 +591,34 @@ export const DeviceCreatorPanel = ({
                 Kopiuj szablon
               </Button>
             )}
+            {mode === 'edit' && onDelete && (
+              <Button
+                color="error"
+                variant="outlined"
+                startIcon={<DeleteIcon />}
+                onClick={onDelete}
+                sx={{ textTransform: 'none', justifyContent: 'flex-start' }}
+              >
+                Usuń szablon
+              </Button>
+            )}
             <Stack direction="row" spacing={1} justifyContent="flex-end">
               <Button onClick={onCancel}>Anuluj</Button>
               <Button
                 variant="contained"
                 disabled={!canSave}
                 onClick={() => {
+                  const validIds = new Set(layout.ports.map((p) => p.id));
+                  const portPoe = Object.fromEntries(
+                    Object.entries(draft.portPoe || {}).filter(([id]) =>
+                      validIds.has(id)
+                    )
+                  );
                   onSave({
                     ...draft,
-                    name: draft.name.trim()
+                    name: draft.name.trim(),
+                    switchRole: draft.switchRole || 'SW',
+                    portPoe: Object.keys(portPoe).length ? portPoe : undefined
                   });
                 }}
               >
@@ -414,7 +627,46 @@ export const DeviceCreatorPanel = ({
             </Stack>
           </Stack>
         </Stack>
-      </Section>
+  );
+
+  if (isWorkshopMode) {
+    return (
+      <WorkshopLayout
+        preview={previewContent}
+        form={
+          <Stack spacing={4}>
+            <Stack spacing={1}>
+              <Typography variant="h6">{title}</Typography>
+              <Typography variant="body2" color="text.secondary">
+                Zdefiniuj typ (SW / Router / Other), sekcje portów i PoE In/Out —
+                podgląd aktualizuje się na żywo.
+              </Typography>
+            </Stack>
+            {formContent}
+          </Stack>
+        }
+      />
+    );
+  }
+
+  return (
+    <ControlsContainer
+      header={
+        <Section sx={{ position: 'sticky', top: 0, pt: 6, pb: 2 }}>
+          <Stack spacing={1.5}>
+            <Typography variant="body2" color="text.secondary">
+              {title}
+            </Typography>
+            <Typography variant="caption" color="text.secondary">
+              {mode === 'edit'
+                ? 'Zmiany trafią do wszystkich urządzeń z tym szablonem.'
+                : 'Zdefiniuj sekcje portów — podgląd aktualizuje się na żywo.'}
+            </Typography>
+          </Stack>
+        </Section>
+      }
+    >
+      <Section>{formContent}</Section>
     </ControlsContainer>
   );
 };

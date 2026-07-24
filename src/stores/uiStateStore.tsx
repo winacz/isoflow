@@ -55,13 +55,14 @@ const initialState = () => {
       focusedPortIds: [],
       portAttention: null,
       portPipHover: null,
-      enableDebugTools: false,
+      sviHover: null,
       showGrid: INITIAL_UI_STATE.showGrid,
       gridStyle: INITIAL_UI_STATE.gridStyle,
       canvasByMode: INITIAL_UI_STATE.canvasByMode,
       viewTransformByMode: INITIAL_UI_STATE.viewTransformByMode,
       vlan1CableColor: INITIAL_UI_STATE.vlan1CableColor,
       simplePaths: INITIAL_UI_STATE.simplePaths,
+      isWorkshopOpen: INITIAL_UI_STATE.isWorkshopOpen,
       actions: {
         setView: (view) => {
           set({ view });
@@ -131,7 +132,7 @@ const initialState = () => {
           smoothZoom.sync(next);
           set({ zoom: next });
         },
-        adjustZoomByWheel: (deltaY, deltaMode = 0) => {
+        adjustZoomByWheel: (deltaY, deltaMode = 0, focalFromCenter) => {
           const { zoom, projectionMode } = get();
           const minZoom = isPlanProjection(projectionMode)
             ? MIN_ZOOM_2D
@@ -139,8 +140,12 @@ const initialState = () => {
           smoothZoom.applyWheel(deltaY, deltaMode, {
             zoom,
             minZoom,
+            focalFromCenter,
             setZoom: (next) => {
               set({ zoom: next });
+            },
+            setScroll: (updater) => {
+              set((state) => ({ scroll: updater(state.scroll) }));
             }
           });
         },
@@ -268,6 +273,9 @@ const initialState = () => {
         setPortPipHover: (portPipHover) => {
           set({ portPipHover });
         },
+        setSviHover: (sviHover) => {
+          set({ sviHover });
+        },
         setContextMenu: (contextMenu) => {
           set({ contextMenu });
         },
@@ -276,9 +284,6 @@ const initialState = () => {
         },
         getMouse: () => {
           return get().mouse;
-        },
-        setEnableDebugTools: (enableDebugTools) => {
-          set({ enableDebugTools });
         },
         setRendererEl: (el) => {
           set({ rendererEl: el });
@@ -355,18 +360,18 @@ const initialState = () => {
               [key]: { ...get().canvasByMode[key], backgroundColor }
             }
           });
-        },
+},
         setVlan1CableColor: (vlan1CableColor) => {
           set({ vlan1CableColor });
         },
         setSimplePaths: (simplePaths) => {
-          setSimplePathsEnabled(simplePaths);
           set({ simplePaths });
         },
         toggleSimplePaths: () => {
-          const next = !get().simplePaths;
-          setSimplePathsEnabled(next);
-          set({ simplePaths: next });
+          set((state) => ({ simplePaths: !state.simplePaths }));
+        },
+        setWorkshopOpen: (isWorkshopOpen) => {
+          set({ isWorkshopOpen });
         }
       }
     };
@@ -383,6 +388,7 @@ interface ProviderProps {
 
 // TODO: Typings below are pretty gnarly due to the way Zustand works.
 // see https://github.com/pmndrs/zustand/discussions/1180#discussioncomment-3439061
+
 export const UiStateProvider = ({ children }: ProviderProps) => {
   const storeRef = useRef<ReturnType<typeof initialState>>();
 

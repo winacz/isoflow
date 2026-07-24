@@ -16,7 +16,7 @@ import {
   getAnchorParent,
   getItemAtTile,
   getShape2dPortAtTile,
-  isShape2dPortInUse,
+  isShape2dPortUnavailable,
   isShape2dPlacementFree,
   resolveShape2dDragOrigin,
   parseWaypointSegmentId,
@@ -37,6 +37,7 @@ import {
   findCabinetAtTile,
   resolveCabinetSnap,
   getMountedChildren,
+  getRackSpanUnits,
   screenToTile2dContinuous,
   snapTile2dToGrid,
   getGridSnapStep,
@@ -300,8 +301,10 @@ const dragItems = (
             cabinetViewItem: cabinet.viewItem,
             cabinetModelItem: cabinet.modelItem,
             viewItems: scene.items,
+            modelItems,
             excludeItemIds: excludeIds,
-            fullWidth: isFullWidthRackItem(modelItem)
+            fullWidth: isFullWidthRackItem(modelItem),
+            spanUnits: getRackSpanUnits(modelItem)
           });
           if (snap) {
             nextTiles[id] = snap.tile;
@@ -743,10 +746,12 @@ const dragItems = (
             scene,
             modelItems: options.modelItems ?? [],
             isPortAvailable: (hit) => {
-              return !isShape2dPortInUse({
+              return !isShape2dPortUnavailable({
                 itemId: hit.itemId,
                 portId: hit.portId,
                 connectors: viewConnectors,
+                modelItems: options.modelItems ?? [],
+                viewItems: scene.items,
                 excludeAnchorId: item.id
               });
             }
@@ -1345,12 +1350,20 @@ export const DragItems: ModeActions = {
         });
 
         // Same as the "Test" button: Porządkuj + Mój algorytm after a move.
+        // Then finalize every touched cable so leftover fastPath previews
+        // (e.g. trunks skipped by an older hub filter) become real routes.
         if (didMove && !uiState.simplePaths) {
           scene.runTestLayoutForItems(draggedIds);
-        } else {
+        }
+
+        {
+          const freshView = model.actions.get().views.find((candidate) => {
+            return candidate.id === uiState.view;
+          });
+          const freshConnectors = freshView?.connectors ?? scene.connectors;
           const touched = new Set<string>();
           draggedIds.forEach((id) => {
-            scene.connectors.forEach((connector) => {
+            freshConnectors.forEach((connector) => {
               if (
                 connector.anchors.some((anchor) => {
                   return anchor.ref.item === id;
@@ -1361,7 +1374,7 @@ export const DragItems: ModeActions = {
             });
           });
           touched.forEach((connectorId) => {
-            const connector = scene.connectors.find((candidate) => {
+            const connector = freshConnectors.find((candidate) => {
               return candidate.id === connectorId;
             });
             if (!connector) return;

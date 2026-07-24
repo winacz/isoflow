@@ -7,12 +7,13 @@ import { IconSelectionControls } from 'src/components/ItemControls/IconSelection
 import { ShapeSelectionControls } from 'src/components/ItemControls/ShapeSelectionControls/ShapeSelectionControls';
 import { DeviceTemplateEditorControls } from 'src/components/ItemControls/DeviceCreator/DeviceTemplateEditorControls';
 import { MultiNodeControls } from 'src/components/ItemControls/MultiNodeControls/MultiNodeControls';
+import { isPlanProjection } from 'src/utils';
 import { NodeControls } from './NodeControls/NodeControls';
 import { NodeControls2d } from './NodeControls/NodeControls2d';
 import { ConnectorControls } from './ConnectorControls/ConnectorControls';
+import { ConnectorControls2d } from './ConnectorControls/ConnectorControls2d';
 import { TextBoxControls } from './TextBoxControls/TextBoxControls';
 import { RectangleControls } from './RectangleControls/RectangleControls';
-import { isPlanProjection } from 'src/utils';
 
 const NodeControlsSwitcher = ({
   id,
@@ -45,8 +46,28 @@ export const ItemControlsManager = () => {
   });
 
   const Controls = useMemo(() => {
-    if (isPlanProjection(projectionMode) && selectedItemIds.length >= 2) {
+    const planMulti =
+      isPlanProjection(projectionMode) && selectedItemIds.length >= 2;
+    const planSingleItem =
+      isPlanProjection(projectionMode) &&
+      selectedItemIds.length === 1 &&
+      itemControls?.type === 'ITEM';
+
+    if (planMulti) {
       return <MultiNodeControls />;
+    }
+
+    if (planSingleItem) {
+      return (
+        <>
+          <NodeControlsSwitcher
+            key={itemControls.id}
+            id={itemControls.id}
+            prefer2d
+          />
+          <MultiNodeControls />
+        </>
+      );
     }
 
     switch (itemControls?.type) {
@@ -59,7 +80,11 @@ export const ItemControlsManager = () => {
           />
         );
       case 'CONNECTOR':
-        return <ConnectorControls key={itemControls.id} id={itemControls.id} />;
+        return isPlanProjection(projectionMode) ? (
+          <ConnectorControls2d key={itemControls.id} id={itemControls.id} />
+        ) : (
+          <ConnectorControls key={itemControls.id} id={itemControls.id} />
+        );
       case 'TEXTBOX':
         return <TextBoxControls key={itemControls.id} id={itemControls.id} />;
       case 'RECTANGLE':

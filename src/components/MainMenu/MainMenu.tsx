@@ -1,5 +1,5 @@
 import React, { useState, useCallback, useMemo } from 'react';
-import { Menu, Typography, Divider, Card } from '@mui/material';
+import { Box, Menu, Typography, Divider, Card } from '@mui/material';
 import {
   Menu as MenuIcon,
   GitHub as GitHubIcon,
@@ -10,16 +10,24 @@ import {
   Save as SaveIcon,
   DeleteOutline as DeleteOutlineIcon,
   NoteAdd as NoteAddIcon,
-  DriveFileRenameOutline as RenameIcon
+  DriveFileRenameOutline as RenameIcon,
+  PictureAsPdf as ExportPdfIcon,
+  DarkModeOutlined as DarkModeIcon,
+  LightModeOutlined as LightModeIcon,
+  PaletteOutlined as PaletteIcon
 } from '@mui/icons-material';
 import { UiElement } from 'src/components/UiElement/UiElement';
 import { IconButton } from 'src/components/IconButton/IconButton';
+import { BackgroundColorLab } from 'src/components/BackgroundColorLab/BackgroundColorLab';
 import { useUiStateStore } from 'src/stores/uiStateStore';
 import {
   createEmptyProject,
   exportAsJSON,
   buildProjectSnapshot,
-  generateProjectFilename
+  generateProjectFilename,
+  exportAsInteractivePdf,
+  isPlanProjection,
+  projectionPrefsKey
 } from 'src/utils';
 import { useInitialDataManager } from 'src/hooks/useInitialDataManager';
 import { useModelStore, useModelStoreApi } from 'src/stores/modelStore';
@@ -28,6 +36,7 @@ import { MenuItem } from './MenuItem';
 
 export const MainMenu = () => {
   const [anchorEl, setAnchorEl] = useState<null | HTMLElement>(null);
+  const [colorLabOpen, setColorLabOpen] = useState(false);
   const modelStoreApi = useModelStoreApi();
   const projectTitle = useModelStore((state) => {
     return state.title;
@@ -50,8 +59,18 @@ export const MainMenu = () => {
   const uiStateActions = useUiStateStore((state) => {
     return state.actions;
   });
+  const canvasTheme = useUiStateStore((state) => {
+    return state.canvasByMode[projectionPrefsKey(state.projectionMode)].theme;
+  });
+  const toggleCanvasTheme = useUiStateStore((state) => {
+    return state.actions.toggleCanvasTheme;
+  });
   const initialDataManager = useInitialDataManager();
   const { clearView } = useScene();
+  const isDarkCanvas = canvasTheme === 'dark';
+  const showIsoflowVersion =
+    !isPlanProjection(projectionMode) &&
+    mainMenuOptions.includes('VERSION');
 
   const onToggleMenu = useCallback(
     (event: React.MouseEvent<HTMLButtonElement>) => {
@@ -82,7 +101,10 @@ export const MainMenu = () => {
   }, [load, uiStateActions]);
 
   const onRenameProject = useCallback(() => {
-    const next = window.prompt('Nazwa projektu', projectTitle || 'Untitled project');
+    const next = window.prompt(
+      'Nazwa projektu',
+      projectTitle || 'Untitled project'
+    );
     if (next === null) return;
     const trimmed = next.trim();
     if (!trimmed) return;
@@ -106,7 +128,7 @@ export const MainMenu = () => {
 
       fileReader.onload = async (e) => {
         const modelData = JSON.parse(e.target?.result as string);
-        load(modelData);
+        load({ ...modelData, fitToView: true });
       };
       fileReader.readAsText(file);
 
@@ -149,6 +171,30 @@ export const MainMenu = () => {
     uiStateActions.setIsMainMenuOpen(false);
     uiStateActions.setDialog('EXPORT_IMAGE');
   }, [uiStateActions]);
+
+  const onExportPdf = useCallback(() => {
+    uiStateActions.setIsMainMenuOpen(false);
+    exportAsInteractivePdf({
+      model: buildProjectSnapshot(modelStoreApi.getState(), {
+        view: activeViewId,
+        projectionMode
+      }),
+      filename: generateProjectFilename(projectTitle || 'Untitled', 'pdf')
+    }).catch((error: unknown) => {
+      // eslint-disable-next-line no-console -- surface unexpected export
+      // failures instead of silently doing nothing.
+      console.error('Eksport do PDF nie powiódł się:', error);
+      window.alert(
+        'Eksport do PDF nie powiódł się. Sprawdź konsolę po szczegóły.'
+      );
+    });
+  }, [
+    modelStoreApi,
+    activeViewId,
+    projectionMode,
+    projectTitle,
+    uiStateActions
+  ]);
 
   const { clear } = initialDataManager;
 
@@ -195,121 +241,167 @@ export const MainMenu = () => {
           return opt.includes('LINK');
         })
       ),
-      version: Boolean(mainMenuOptions.includes('VERSION'))
+      version: showIsoflowVersion
     };
-  }, [mainMenuOptions]);
+  }, [mainMenuOptions, showIsoflowVersion]);
 
   if (mainMenuOptions.length === 0) {
     return null;
   }
 
   return (
-    <UiElement>
-      <IconButton Icon={<MenuIcon />} name="Main menu" onClick={onToggleMenu} />
+    <Box
+      sx={{
+        display: 'flex',
+        flexDirection: 'column',
+        alignItems: 'flex-start',
+        gap: 1
+      }}
+    >
+      <UiElement>
+        <IconButton
+          Icon={<MenuIcon />}
+          name="Main menu"
+          onClick={onToggleMenu}
+        />
 
-      <Menu
-        anchorEl={anchorEl}
-        open={isMainMenuOpen}
-        onClose={() => {
-          uiStateActions.setIsMainMenuOpen(false);
-        }}
-        elevation={0}
-        sx={{
-          mt: 2
-        }}
-        MenuListProps={{
-          sx: {
-            minWidth: '250px',
-            py: 0
-          }
-        }}
-      >
-        <Card sx={{ py: 1 }}>
-          {mainMenuOptions.includes('ACTION.NEW_PROJECT') && (
-            <MenuItem onClick={onNewProject} Icon={<NoteAddIcon />}>
-              New project
+        <Menu
+          anchorEl={anchorEl}
+          open={isMainMenuOpen}
+          onClose={() => {
+            uiStateActions.setIsMainMenuOpen(false);
+          }}
+          elevation={0}
+          sx={{
+            mt: 2
+          }}
+          MenuListProps={{
+            sx: {
+              minWidth: '250px',
+              py: 0
+            }
+          }}
+        >
+          <Card sx={{ py: 1 }}>
+            {mainMenuOptions.includes('ACTION.NEW_PROJECT') && (
+              <MenuItem onClick={onNewProject} Icon={<NoteAddIcon />}>
+                New project
+              </MenuItem>
+            )}
+
+            {mainMenuOptions.includes('ACTION.RENAME_PROJECT') && (
+              <MenuItem onClick={onRenameProject} Icon={<RenameIcon />}>
+                Rename project
+              </MenuItem>
+            )}
+
+            {mainMenuOptions.includes('ACTION.OPEN') && (
+              <MenuItem onClick={onOpenModel} Icon={<FolderOpenIcon />}>
+                Open project
+              </MenuItem>
+            )}
+
+            {mainMenuOptions.includes('ACTION.SAVE_PROJECT') && (
+              <MenuItem onClick={onSaveProject} Icon={<SaveIcon />}>
+                Save project
+              </MenuItem>
+            )}
+
+            {mainMenuOptions.includes('EXPORT.JSON') && (
+              <MenuItem onClick={onExportAsJSON} Icon={<ExportJsonIcon />}>
+                Export as JSON
+              </MenuItem>
+            )}
+
+            {mainMenuOptions.includes('EXPORT.PNG') && (
+              <MenuItem onClick={onExportAsImage} Icon={<ExportImageIcon />}>
+                Export as image
+              </MenuItem>
+            )}
+
+            {mainMenuOptions.includes('EXPORT.JSON') && (
+              <MenuItem onClick={onExportPdf} Icon={<ExportPdfIcon />}>
+                Export as PDF
+              </MenuItem>
+            )}
+
+            {mainMenuOptions.includes('ACTION.CLEAR_CANVAS') && (
+              <MenuItem onClick={onClearCanvas} Icon={<DeleteOutlineIcon />}>
+                Clear the canvas
+              </MenuItem>
+            )}
+
+            <Divider />
+
+            <MenuItem
+              onClick={() => {
+                toggleCanvasTheme();
+                uiStateActions.setIsMainMenuOpen(false);
+              }}
+              Icon={isDarkCanvas ? <LightModeIcon /> : <DarkModeIcon />}
+            >
+              {isDarkCanvas ? 'Motyw jasny' : 'Motyw ciemny'}
             </MenuItem>
-          )}
 
-          {mainMenuOptions.includes('ACTION.RENAME_PROJECT') && (
-            <MenuItem onClick={onRenameProject} Icon={<RenameIcon />}>
-              Rename project
+            <MenuItem
+              onClick={() => {
+                setColorLabOpen(true);
+                uiStateActions.setIsMainMenuOpen(false);
+              }}
+              Icon={<PaletteIcon />}
+            >
+              Kolory / siatka
             </MenuItem>
-          )}
 
-          {mainMenuOptions.includes('ACTION.OPEN') && (
-            <MenuItem onClick={onOpenModel} Icon={<FolderOpenIcon />}>
-              Open project
-            </MenuItem>
-          )}
+            {sectionVisibility.links && (
+              <>
+                <Divider />
 
-          {mainMenuOptions.includes('ACTION.SAVE_PROJECT') && (
-            <MenuItem onClick={onSaveProject} Icon={<SaveIcon />}>
-              Save project
-            </MenuItem>
-          )}
+                {mainMenuOptions.includes('LINK.GITHUB') && (
+                  <MenuItem
+                    onClick={() => {
+                      return gotoUrl(`${REPOSITORY_URL}`);
+                    }}
+                    Icon={<GitHubIcon />}
+                  >
+                    GitHub
+                  </MenuItem>
+                )}
 
-          {mainMenuOptions.includes('EXPORT.JSON') && (
-            <MenuItem onClick={onExportAsJSON} Icon={<ExportJsonIcon />}>
-              Export as JSON
-            </MenuItem>
-          )}
+                {mainMenuOptions.includes('LINK.DISCORD') && (
+                  <MenuItem
+                    onClick={() => {
+                      return gotoUrl('https://discord.gg/QYPkvZth7D');
+                    }}
+                    Icon={<QuestionAnswerIcon />}
+                  >
+                    Discord
+                  </MenuItem>
+                )}
+              </>
+            )}
 
-          {mainMenuOptions.includes('EXPORT.PNG') && (
-            <MenuItem onClick={onExportAsImage} Icon={<ExportImageIcon />}>
-              Export as image
-            </MenuItem>
-          )}
+            {sectionVisibility.version && (
+              <>
+                <Divider />
 
-          {mainMenuOptions.includes('ACTION.CLEAR_CANVAS') && (
-            <MenuItem onClick={onClearCanvas} Icon={<DeleteOutlineIcon />}>
-              Clear the canvas
-            </MenuItem>
-          )}
-
-          {sectionVisibility.links && (
-            <>
-              <Divider />
-
-              {mainMenuOptions.includes('LINK.GITHUB') && (
-                <MenuItem
-                  onClick={() => {
-                    return gotoUrl(`${REPOSITORY_URL}`);
-                  }}
-                  Icon={<GitHubIcon />}
-                >
-                  GitHub
-                </MenuItem>
-              )}
-
-              {mainMenuOptions.includes('LINK.DISCORD') && (
-                <MenuItem
-                  onClick={() => {
-                    return gotoUrl('https://discord.gg/QYPkvZth7D');
-                  }}
-                  Icon={<QuestionAnswerIcon />}
-                >
-                  Discord
-                </MenuItem>
-              )}
-            </>
-          )}
-
-          {sectionVisibility.version && (
-            <>
-              <Divider />
-
-              {mainMenuOptions.includes('VERSION') && (
                 <MenuItem>
                   <Typography variant="body2" color="text.secondary">
                     Isoflow v{PACKAGE_VERSION}
                   </Typography>
                 </MenuItem>
-              )}
-            </>
-          )}
-        </Card>
-      </Menu>
-    </UiElement>
+              </>
+            )}
+          </Card>
+        </Menu>
+      </UiElement>
+
+      <BackgroundColorLab
+        open={colorLabOpen}
+        onClose={() => {
+          setColorLabOpen(false);
+        }}
+      />
+    </Box>
   );
 };

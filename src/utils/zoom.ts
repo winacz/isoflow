@@ -57,6 +57,7 @@ export const zoomFromWheelDelta = (
 };
 
 type ZoomSetter = (zoom: number) => void;
+type ScrollSetter = (updater: (prevScroll: Scroll) => Scroll) => void;
 
 /**
  * Smooth zoom controller: wheel updates a target; rAF lerps the displayed zoom.
@@ -68,6 +69,8 @@ export const createSmoothZoomController = () => {
   let minZoom = MIN_ZOOM;
   let rafId = 0;
   let setZoom: ZoomSetter | null = null;
+  let setScroll: ScrollSetter | null = null;
+  let currentFocal: Coords | null = null;
 
   const stop = () => {
     if (rafId) {
@@ -88,8 +91,14 @@ export const createSmoothZoomController = () => {
       return;
     }
 
-    // Ease toward target — feels continuous even on notch wheels
+    const oldZoom = current;
     current += diff * 0.28;
+    
+    if (setScroll && currentFocal) {
+      const fc = currentFocal; // copy for closure
+      setScroll((prevScroll) => getScrollForZoomChange(oldZoom, current, prevScroll, fc));
+    }
+    
     setZoom(current);
     rafId = requestAnimationFrame(tick);
   };
@@ -109,9 +118,13 @@ export const createSmoothZoomController = () => {
         zoom: number;
         minZoom: number;
         setZoom: ZoomSetter;
+        setScroll?: ScrollSetter;
+        focalFromCenter?: Coords;
       }
     ) {
       setZoom = opts.setZoom;
+      setScroll = opts.setScroll ?? null;
+      currentFocal = opts.focalFromCenter ?? null;
       minZoom = opts.minZoom;
       if (target === null) {
         current = opts.zoom;

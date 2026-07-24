@@ -71,6 +71,7 @@ export const MultiNodeControls = () => {
   const [nextVariant, setNextVariant] = useState(TIDY_IN_PLACE_VARIANTS[0]);
 
   const count = selectedItemIds.length;
+  const multi = count >= 2;
 
   return (
     <ControlsContainer>
@@ -85,11 +86,14 @@ export const MultiNodeControls = () => {
             mb: 0.5
           }}
         >
-          Zaznaczenie
+          Algorytmy
         </Typography>
         <Typography sx={{ fontSize: 12, fontWeight: 600, mb: 1 }}>
-          Zaznaczono {count}{' '}
-          {count === 1 ? 'urządzenie' : count < 5 ? 'urządzenia' : 'urządzeń'}
+          {count === 0
+            ? 'Brak zaznaczenia'
+            : `Zaznaczono ${count} ${
+                count === 1 ? 'urządzenie' : count < 5 ? 'urządzenia' : 'urządzeń'
+              }`}
         </Typography>
 
         <Stack spacing={0.5}>
@@ -100,6 +104,7 @@ export const MultiNodeControls = () => {
             onClick={() => {
               layoutViewItems(selectedItemIds, 'vertical');
             }}
+            disabled={!multi}
             sx={actionBtnSx}
           >
             Rozłóż w pionie
@@ -111,6 +116,7 @@ export const MultiNodeControls = () => {
             onClick={() => {
               layoutViewItems(selectedItemIds, 'horizontal');
             }}
+            disabled={!multi}
             sx={actionBtnSx}
           >
             Rozłóż w poziomie
@@ -122,6 +128,7 @@ export const MultiNodeControls = () => {
             onClick={() => {
               layoutViewItems(selectedItemIds, 'grid');
             }}
+            disabled={!multi}
             sx={actionBtnSx}
           >
             Rozłóż w siatce
@@ -133,6 +140,7 @@ export const MultiNodeControls = () => {
             onClick={() => {
               tidyItems(selectedItemIds);
             }}
+            disabled={!multi}
             sx={actionBtnSx}
           >
             Porządkuj
@@ -144,7 +152,7 @@ export const MultiNodeControls = () => {
             onClick={() => {
               routeDiagonalFanForItems(selectedItemIds);
             }}
-            disabled={simplePaths}
+            disabled={simplePaths || count < 1}
             sx={actionBtnSx}
           >
             Mój algorytm
@@ -156,7 +164,7 @@ export const MultiNodeControls = () => {
             onClick={() => {
               runTestLayoutForItems(selectedItemIds);
             }}
-            disabled={simplePaths}
+            disabled={simplePaths || count < 1}
             sx={actionBtnSx}
           >
             Test
@@ -168,7 +176,7 @@ export const MultiNodeControls = () => {
             onClick={() => {
               runSmartLayoutForItems(selectedItemIds);
             }}
-            disabled={simplePaths}
+            disabled={simplePaths || count < 1}
             sx={actionBtnSx}
             color="secondary"
           >
@@ -181,7 +189,7 @@ export const MultiNodeControls = () => {
             onClick={() => {
               runSmartLayout2ForItems(selectedItemIds);
             }}
-            disabled={simplePaths}
+            disabled={simplePaths || count < 1}
             sx={actionBtnSx}
             color="secondary"
           >
@@ -204,6 +212,7 @@ export const MultiNodeControls = () => {
                 ]
               );
             }}
+            disabled={!multi}
             sx={actionBtnSx}
           >
             Porządkuj w miejscu ({TIDY_IN_PLACE_LABELS[nextVariant]})
@@ -226,6 +235,7 @@ export const MultiNodeControls = () => {
             onClick={() => {
               regenerateRoutesForItems(selectedItemIds);
             }}
+            disabled={count < 1}
             sx={actionBtnSx}
           >
             Generuj nowe trasy

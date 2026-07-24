@@ -24,7 +24,7 @@ interface Props {
  */
 export const ConnectorRelationPanel = ({ connectorId }: Props) => {
   const connector = useConnector(connectorId);
-  const { items: viewItems } = useScene();
+  const { items: viewItems, connectors: sceneConnectors } = useScene();
   const modelItems = useModelStore((state) => {
     return state.items;
   });
@@ -40,6 +40,8 @@ export const ConnectorRelationPanel = ({ connectorId }: Props) => {
     return getConnectorRelationSummary({
       anchors: connector.anchors,
       modelItems,
+      connectors: sceneConnectors,
+      connectorId,
       resolvePortLabel: (itemId, portId) => {
         const modelItem = modelItems.find((item) => {
           return item.id === itemId;
@@ -47,7 +49,7 @@ export const ConnectorRelationPanel = ({ connectorId }: Props) => {
         return getShape2dPortIfaceName(modelItem?.icon ?? '', portId);
       }
     });
-  }, [connector.anchors, modelItems]);
+  }, [connector.anchors, connectorId, modelItems, sceneConnectors]);
 
   const jumpToEndpoint = useCallback(
     (itemId: string, portId: string) => {

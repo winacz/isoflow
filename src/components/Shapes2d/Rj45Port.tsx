@@ -11,36 +11,38 @@ const RJ45_BODY = '#455a64';
 const RJ45_PINS = '#fdd835';
 
 interface Props {
+  itemId?: string; // ID of the device this port belongs to
   side: Shape2dPortSide;
   tileSize?: number;
+  portId?: string; // Add portId to construct the ID
   portNumber?: number;
   portLabel?: string;
   statusColor?: string;
-  /** Trunk port — status bar uses rainbow instead of solid VLAN color. */
   isTrunk?: boolean;
-  /** Highlight port with a red ring (trunk↔access / trunk↔host mismatch). */
   hasMismatch?: boolean;
-  /** Soft selection ring when this port is focused in the sidebar. */
   isFocused?: boolean;
-  /** Strong ring — peer port on the other end of a cable from the selected node. */
   isPeerHighlight?: boolean;
-  /** Brief shake after jumping here from the relation panel. */
   isAttentionPulse?: boolean;
   isConnected?: boolean;
-  /** RJ45 jack (default) or open SFP cage. */
   media?: 'RJ45' | 'SFP';
-  /** Smaller iface labels for dense rack layouts (e.g. Gi0/0). */
   compactLabel?: boolean;
+  hideStatusBar?: boolean;
+  /** Template PoE direction — yellow bolt + PoE IN/Out label. */
+  poe?: 'IN' | 'OUT' | null;
+  /** Endpoint powered by PoE — green bolt next to port number. */
+  poweredByPoe?: boolean;
+  /**
+   * Where the port number sits relative to the jack.
+   * Bottom-row ports should use `above` so labels stay inside the chassis.
+   */
+  labelPosition?: 'below' | 'above';
 }
 
-/**
- * Port square with LibreICONS RJ45 jack (or SFP cage).
- * VLAN badge is glued to the top of the jack, same width / bezel background.
- * Jack center = connection attachment point (no visible handle dots).
- */
 export const Rj45Port = ({
+  itemId,
   side: _side,
   tileSize = TILE_SIZE_2D,
+  portId,
   portNumber = 1,
   portLabel,
   statusColor = PORT_STATUS_COLORS[(portNumber - 1) % PORT_STATUS_COLORS.length],
@@ -51,10 +53,14 @@ export const Rj45Port = ({
   isAttentionPulse = false,
   isConnected = false,
   media = 'RJ45',
-  compactLabel = false
+  compactLabel = false,
+  hideStatusBar = false,
+  poe = null,
+  poweredByPoe = false,
+  labelPosition = 'above'
 }: Props) => {
   const jackSize = Math.round(tileSize * 0.72);
-  const barH = Math.max(3, Math.round(jackSize * 0.16));
+  const barH = hideStatusBar ? 0 : Math.max(3, Math.round(jackSize * 0.16));
   const iconSize = Math.round(jackSize * 0.92);
   const portW = iconSize;
   const label = portLabel ?? String(portNumber);
@@ -64,9 +70,16 @@ export const Rj45Port = ({
   const isSfp = media === 'SFP';
   const stackH = barH + iconSize;
   const bezelBg = hasMismatch ? '#fecaca' : RJ45_BEZEL;
+  const labelAbove = labelPosition !== 'below';
+  // Number stays above the jack; PoE sits below so they never collide.
+  const poeBelow = labelAbove;
 
   return (
     <Box
+      id={itemId && portId ? `isoflow-port-${itemId}-${portId}` : undefined}
+      className={itemId && portId ? "isoflow-export-port" : undefined}
+      data-item-id={itemId}
+      data-port-id={portId}
       sx={{
         position: 'relative',
         width: tileSize,
@@ -152,6 +165,7 @@ export const Rj45Port = ({
         }}
       >
         {/* VLAN badge — glued to top, same width as port, on port bezel bg */}
+        {!hideStatusBar && (
         <Box
           sx={{
             width: '100%',
@@ -181,6 +195,7 @@ export const Rj45Port = ({
             }}
           />
         </Box>
+        )}
 
         <Box
           sx={{
@@ -348,22 +363,88 @@ export const Rj45Port = ({
         </Box>
       </Box>
 
-      <Typography
+      <Box
         sx={{
           position: 'absolute',
           left: '50%',
-          top: `calc(50% + ${stackH / 2}px + 2px)`,
-          transform: 'translateX(-50%)',
-          fontSize: numberSize,
-          lineHeight: 1,
-          color: '#8b9bb0',
-          fontWeight: 500,
-          userSelect: 'none',
+          top: labelAbove
+            ? `calc(50% - ${stackH / 2}px - 1px)`
+            : `calc(50% + ${stackH / 2}px + 2px)`,
+          transform: labelAbove ? 'translate(-50%, -100%)' : 'translateX(-50%)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          gap: '2px',
+          pointerEvents: 'none',
           whiteSpace: 'nowrap'
         }}
       >
-        {label}
-      </Typography>
+        <Typography
+          component="span"
+          sx={{
+            fontSize: numberSize,
+            lineHeight: 1,
+            color: '#8b9bb0',
+            fontWeight: 500,
+            userSelect: 'none'
+          }}
+        >
+          {label}
+        </Typography>
+        {(poe || poweredByPoe) && (
+          <Box
+            component="svg"
+            viewBox="0 0 12 16"
+            aria-hidden
+            sx={{
+              width: Math.max(7, Math.round(numberSize * 0.95)),
+              height: Math.max(9, Math.round(numberSize * 1.2)),
+              display: 'block',
+              flexShrink: 0
+            }}
+          >
+            <path
+              d="M7.2 0.5L2.1 8.2h3.1L3.4 15.5 10.2 6.4H6.8L7.2 0.5z"
+              fill={poweredByPoe && !poe ? '#22c55e' : '#facc15'}
+              stroke={poweredByPoe && !poe ? '#15803d' : '#ca8a04'}
+              strokeWidth={0.4}
+              strokeLinejoin="round"
+            />
+          </Box>
+        )}
+      </Box>
+
+      {poe && (
+        <Box
+          sx={{
+            position: 'absolute',
+            left: '50%',
+            top: poeBelow
+              ? `calc(50% + ${stackH / 2}px + 2px)`
+              : `calc(50% - ${stackH / 2}px - 2px)`,
+            transform: poeBelow
+              ? 'translateX(-50%)'
+              : 'translate(-50%, -100%)',
+            px: 0.35,
+            py: 0.1,
+            borderRadius: 0.5,
+            bgcolor: 'transparent',
+            border: 'none',
+            color: poe === 'OUT' ? '#a16207' : '#64748b',
+            fontSize: Math.max(6, Math.round(tileSize * 0.145)),
+            fontWeight: 500,
+            letterSpacing: 0.15,
+            lineHeight: 1.15,
+            fontFamily:
+              'ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
+            userSelect: 'none',
+            whiteSpace: 'nowrap',
+            pointerEvents: 'none'
+          }}
+        >
+          {poe === 'OUT' ? 'PoE Out' : 'PoE IN'}
+        </Box>
+      )}
     </Box>
   );
 };
