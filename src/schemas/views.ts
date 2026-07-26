@@ -18,6 +18,11 @@ export const viewItemSchema = z.object({
    * x right, y down (negative = above the device).
    */
   labelOffset: coords.optional(),
+  /**
+   * Floating description callout (plakietka) on Plan 2D.
+   * Default true — set false to hide while keeping description on the Node face.
+   */
+  showDescriptionLabel: z.boolean().optional(),
   /** Cabinet this item is mounted in (RACK switches). */
   parentId: id.optional(),
   /** 0-based rack unit from the top of the cabinet. */

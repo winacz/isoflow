@@ -70,6 +70,7 @@ const resolveAnchorRef = ({
       scene,
       modelItems: model.items,
       maxDistance: SHAPE_2D_PORT_SNAP_DISTANCE,
+      stickyHover: uiState.shape2dPortHover,
       isPortAvailable: (hit) => {
         return !isShape2dPortUnavailable({
           itemId: hit.itemId,

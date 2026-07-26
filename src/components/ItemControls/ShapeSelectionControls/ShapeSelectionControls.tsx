@@ -257,7 +257,7 @@ const ShapePreview = ({ shape }: { shape: Icon }) => {
             shape.id === SHAPE_2D_SWITCH_ID
               ? 'SW-CORE-01'
               : shape.id === SHAPE_2D_PC_ID
-                ? 'PC-01'
+                ? 'NODE-01'
                 : shape.id === SHAPE_2D_CAMERA_ID
                   ? 'CAM-01'
                   : shape.id === SHAPE_2D_CAMERA_V2_ID

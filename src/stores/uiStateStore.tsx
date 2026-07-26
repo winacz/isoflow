@@ -55,6 +55,7 @@ const initialState = () => {
       focusedPortIds: [],
       portAttention: null,
       portPipHover: null,
+      shape2dPortHover: null,
       sviHover: null,
       showGrid: INITIAL_UI_STATE.showGrid,
       gridStyle: INITIAL_UI_STATE.gridStyle,
@@ -63,6 +64,7 @@ const initialState = () => {
       vlan1CableColor: INITIAL_UI_STATE.vlan1CableColor,
       simplePaths: INITIAL_UI_STATE.simplePaths,
       isWorkshopOpen: INITIAL_UI_STATE.isWorkshopOpen,
+      isRightSidebarOpen: INITIAL_UI_STATE.isRightSidebarOpen,
       actions: {
         setView: (view) => {
           set({ view });
@@ -178,6 +180,15 @@ const initialState = () => {
             return;
           }
 
+          // Algorithms panel must keep the current multi-selection.
+          if (itemControls?.type === 'ALGORITHMS') {
+            set({
+              itemControls,
+              focusedPortIds: []
+            });
+            return;
+          }
+
           set({
             itemControls,
             selectedItemIds: [],
@@ -200,8 +211,10 @@ const initialState = () => {
             set({
               selectedItemIds: unique,
               selectedWaypointIds: [],
-              itemControls: null,
-              focusedPortIds: []
+              // Open algorithms / layout tools in the sidebar (old multi-select UX).
+              itemControls: { type: 'ALGORITHMS' },
+              focusedPortIds: [],
+              isRightSidebarOpen: true
             });
             return;
           }
@@ -273,6 +286,16 @@ const initialState = () => {
         setPortPipHover: (portPipHover) => {
           set({ portPipHover });
         },
+        setShape2dPortHover: (shape2dPortHover) => {
+          const prev = get().shape2dPortHover;
+          if (
+            prev?.itemId === shape2dPortHover?.itemId &&
+            prev?.portId === shape2dPortHover?.portId
+          ) {
+            return;
+          }
+          set({ shape2dPortHover });
+        },
         setSviHover: (sviHover) => {
           set({ sviHover });
         },
@@ -311,7 +334,8 @@ const initialState = () => {
             viewTransformByMode,
             zoom: restored.zoom,
             scroll: restored.scroll,
-            portPipHover: null
+            portPipHover: null,
+            shape2dPortHover: null
           });
           smoothZoom.sync(restored.zoom);
         },
@@ -372,6 +396,14 @@ const initialState = () => {
         },
         setWorkshopOpen: (isWorkshopOpen) => {
           set({ isWorkshopOpen });
+        },
+        setRightSidebarOpen: (isRightSidebarOpen) => {
+          set({ isRightSidebarOpen });
+        },
+        toggleRightSidebar: () => {
+          set((state) => ({
+            isRightSidebarOpen: !state.isRightSidebarOpen
+          }));
         }
       }
     };

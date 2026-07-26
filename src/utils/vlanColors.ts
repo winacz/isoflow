@@ -224,12 +224,17 @@ type PortVlanFields = {
 type SviVlanFields = {
   vlan?: string | null;
   vlanColor?: string | null;
+  ip?: string | null;
 };
 
 type ModelItemVlanFields = {
   id?: string;
   name?: string;
   icon?: string;
+  /** Management / host IP (nodes, DIN switches). */
+  ip?: string;
+  /** Host uses DHCP instead of a static `ip`. */
+  dhcp?: boolean;
   ports?: Record<string, PortVlanFields>;
   svis?: SviVlanFields[];
 };
@@ -402,6 +407,11 @@ export type ConnectorEndpointSummary = {
   vlanColor: string | null;
   type: 'access' | 'trunk';
   isNonVlanAware: boolean;
+  /**
+   * Display IP: host management IP, or switch SVI IP for the link VLAN
+   * (SVI matching the access VLAN the connected node is on).
+   */
+  ip?: string | null;
 };
 
 export type ConnectorLinkMode = 'access' | 'trunk' | 'mismatch';
@@ -625,7 +635,64 @@ export const getConnectorRelationSummary = ({
     vlanColor = null;
   }
 
-  return { endpoints, vlanLabel, vlanColor, linkMode };
+  /** Access VLAN carried by this link (for matching switch SVIs). */
+  const linkAccessVlan = (() => {
+    for (const endpoint of endpoints) {
+      if (endpoint.isNonVlanAware) continue;
+      if (endpoint.type !== 'access') continue;
+      return endpoint.vlan;
+    }
+    return '1';
+  })();
+
+  const endpointsWithIp: ConnectorEndpointSummary[] = endpoints.map(
+    (endpoint) => {
+      const modelItem = modelItems.find((item) => {
+        return item.id === endpoint.itemId;
+      });
+      if (!modelItem) return { ...endpoint, ip: null };
+
+      // Host / endpoint node → management IP (or DHCP)
+      if (endpoint.isNonVlanAware) {
+        if (modelItem.dhcp) {
+          return { ...endpoint, ip: 'DHCP' };
+        }
+        const hostIp = modelItem.ip?.trim();
+        return { ...endpoint, ip: hostIp || null };
+      }
+
+      // Switch with SVIs → IP of SVI for the VLAN this link (node) is on
+      if (modelItem.svis && modelItem.svis.length > 0) {
+        const vlanForSvi =
+          endpoint.type === 'access' ? endpoint.vlan : linkAccessVlan;
+        const svi = modelItem.svis.find((candidate) => {
+          return vlansMatch(candidate.vlan, vlanForSvi);
+        });
+        const sviIp = svi?.ip?.trim();
+        if (sviIp) return { ...endpoint, ip: sviIp };
+        // Trunk without a matching access VLAN — optional management IP
+        if (modelItem.dhcp) {
+          return { ...endpoint, ip: 'DHCP' };
+        }
+        const mgmt = modelItem.ip?.trim();
+        return { ...endpoint, ip: mgmt || null };
+      }
+
+      // Servers / other nodes → management IP (or DHCP)
+      if (modelItem.dhcp) {
+        return { ...endpoint, ip: 'DHCP' };
+      }
+      const mgmt = modelItem.ip?.trim();
+      return { ...endpoint, ip: mgmt || null };
+    }
+  );
+
+  return {
+    endpoints: endpointsWithIp,
+    vlanLabel,
+    vlanColor,
+    linkMode
+  };
 };
 
 /** Stack-badge severity for overlapping cables. */

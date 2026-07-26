@@ -6,7 +6,7 @@ import { isShape2dIcon } from 'src/config';
 import { IconSelectionControls } from 'src/components/ItemControls/IconSelectionControls/IconSelectionControls';
 import { ShapeSelectionControls } from 'src/components/ItemControls/ShapeSelectionControls/ShapeSelectionControls';
 import { DeviceTemplateEditorControls } from 'src/components/ItemControls/DeviceCreator/DeviceTemplateEditorControls';
-import { MultiNodeControls } from 'src/components/ItemControls/MultiNodeControls/MultiNodeControls';
+import { AlgorithmsControls } from 'src/components/AlgorithmsPopup/AlgorithmsPopup';
 import { isPlanProjection } from 'src/utils';
 import { NodeControls } from './NodeControls/NodeControls';
 import { NodeControls2d } from './NodeControls/NodeControls2d';
@@ -41,11 +41,12 @@ export const ItemControlsManager = () => {
   const projectionMode = useUiStateStore((state) => {
     return state.projectionMode;
   });
-  const uiStateActions = useUiStateStore((state) => {
-    return state.actions;
-  });
 
   const Controls = useMemo(() => {
+    if (itemControls?.type === 'ALGORITHMS') {
+      return <AlgorithmsControls />;
+    }
+
     const planMulti =
       isPlanProjection(projectionMode) && selectedItemIds.length >= 2;
     const planSingleItem =
@@ -53,20 +54,25 @@ export const ItemControlsManager = () => {
       selectedItemIds.length === 1 &&
       itemControls?.type === 'ITEM';
 
+    // Multi-select: keep settings for primary item; algorithms open via tool button.
     if (planMulti) {
-      return <MultiNodeControls />;
+      const primaryId =
+        itemControls?.type === 'ITEM' ? itemControls.id : selectedItemIds[0];
+      if (primaryId) {
+        return (
+          <NodeControlsSwitcher key={primaryId} id={primaryId} prefer2d />
+        );
+      }
+      return null;
     }
 
     if (planSingleItem) {
       return (
-        <>
-          <NodeControlsSwitcher
-            key={itemControls.id}
-            id={itemControls.id}
-            prefer2d
-          />
-          <MultiNodeControls />
-        </>
+        <NodeControlsSwitcher
+          key={itemControls.id}
+          id={itemControls.id}
+          prefer2d
+        />
       );
     }
 
@@ -106,7 +112,7 @@ export const ItemControlsManager = () => {
       default:
         return null;
     }
-  }, [itemControls, selectedItemIds, projectionMode, uiStateActions]);
+  }, [itemControls, selectedItemIds, projectionMode]);
 
   return (
     <Box

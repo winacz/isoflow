@@ -55,6 +55,36 @@ export type DeviceTypeIconKind =
   | 'tablet'
   | 'other';
 
+/** Endpoint Node face icons — one consistent MUI Outlined set. */
+export type NodeIconKind = Extract<
+  DeviceTypeIconKind,
+  | 'pc'
+  | 'camera'
+  | 'cameraV2'
+  | 'printer'
+  | 'voip'
+  | 'smartphone'
+  | 'iot'
+  | 'ap'
+  | 'nas'
+  | 'tablet'
+  | 'other'
+>;
+
+export const NODE_ICON_OPTIONS: { kind: NodeIconKind; label: string }[] = [
+  { kind: 'pc', label: 'Komputer' },
+  { kind: 'camera', label: 'Kamera' },
+  { kind: 'cameraV2', label: 'Kamera (alt)' },
+  { kind: 'printer', label: 'Drukarka' },
+  { kind: 'voip', label: 'Telefon' },
+  { kind: 'smartphone', label: 'Smartfon' },
+  { kind: 'iot', label: 'IoT' },
+  { kind: 'ap', label: 'Access Point' },
+  { kind: 'nas', label: 'NAS' },
+  { kind: 'tablet', label: 'Tablet' },
+  { kind: 'other', label: 'Inne' }
+];
+
 export const resolveDeviceTypeIconKind = (
   iconId: string | undefined | null
 ): DeviceTypeIconKind => {

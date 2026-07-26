@@ -1350,6 +1350,14 @@ export const SHAPE_2D_PORT_SNAP_DISTANCE = 3;
  */
 export const SHAPE_2D_PORT_VISUAL_SIZE_TILES = 2.25;
 
+/** Hover “zoom” scale for RJ45/SFP jacks (visual + sticky hit box). */
+export const SHAPE_2D_PORT_HOVER_SCALE = 1.55;
+
+export type Shape2dPortHover = {
+  itemId: string;
+  portId: string;
+};
+
 /** Whether any connector anchor already uses this item+port pair. */
 export const isShape2dPortInUse = ({
   itemId,
@@ -1391,19 +1399,23 @@ export const isShape2dPortInUse = ({
 /**
  * Port under a continuous tile-space point (visual jack box, not just cell).
  * When several ports overlap, the nearest jack center wins.
+ * `stickyHover` keeps the magnified jack hittable (hysteresis).
  */
 export const getShape2dPortAtPoint = ({
   point,
   scene,
   modelItems,
-  isPortAvailable
+  isPortAvailable,
+  stickyHover = null
 }: {
   point: Coords;
   scene: GetShape2dItemAtTile['scene'];
   modelItems: GetShape2dItemAtTile['modelItems'];
   isPortAvailable?: (hit: Shape2dPortHit) => boolean;
+  stickyHover?: Shape2dPortHover | null;
 }): Shape2dPortHit | null => {
-  const half = SHAPE_2D_PORT_VISUAL_SIZE_TILES / 2;
+  const baseHalf = SHAPE_2D_PORT_VISUAL_SIZE_TILES / 2;
+  const stickyHalf = baseHalf * SHAPE_2D_PORT_HOVER_SCALE;
   let best: Shape2dPortHit | null = null;
   let bestDistSq = Infinity;
 
@@ -1421,11 +1433,17 @@ export const getShape2dPortAtPoint = ({
       const cy = worldTile.y + 0.5;
       const dx = Math.abs(point.x - cx);
       const dy = Math.abs(point.y - cy);
+      const isSticky =
+        stickyHover?.itemId === viewItem.id &&
+        stickyHover?.portId === port.id;
+      const half = isSticky ? stickyHalf : baseHalf;
 
       if (dx > half || dy > half) continue;
 
       const distSq = dx * dx + dy * dy;
-      if (distSq >= bestDistSq) continue;
+      // Prefer keeping the sticky hover when still inside its expanded box.
+      const score = isSticky ? distSq * 0.35 : distSq;
+      if (score >= bestDistSq) continue;
 
       const hit: Shape2dPortHit = {
         itemId: viewItem.id,
@@ -1436,7 +1454,7 @@ export const getShape2dPortAtPoint = ({
 
       if (isPortAvailable && !isPortAvailable(hit)) continue;
 
-      bestDistSq = distSq;
+      bestDistSq = score;
       best = hit;
     }
   }
@@ -1449,17 +1467,20 @@ export const getShape2dPortAtTile = ({
   scene,
   modelItems,
   isPortAvailable,
-  point
+  point,
+  stickyHover = null
 }: GetShape2dItemAtTile & {
   isPortAvailable?: (hit: Shape2dPortHit) => boolean;
   /** Continuous tile coords — preferred for accurate visual hits. */
   point?: Coords;
+  stickyHover?: Shape2dPortHover | null;
 }): Shape2dPortHit | null => {
   return getShape2dPortAtPoint({
     point: point ?? { x: tile.x + 0.5, y: tile.y + 0.5 },
     scene,
     modelItems,
-    isPortAvailable
+    isPortAvailable,
+    stickyHover
   });
 };
 
@@ -1469,10 +1490,12 @@ export const getNearestShape2dPort = ({
   scene,
   modelItems,
   maxDistance = SHAPE_2D_PORT_SNAP_DISTANCE,
-  isPortAvailable
+  isPortAvailable,
+  stickyHover = null
 }: GetShape2dItemAtTile & {
   maxDistance?: number;
   isPortAvailable?: (hit: Shape2dPortHit) => boolean;
+  stickyHover?: Shape2dPortHover | null;
 }): Shape2dPortHit | null => {
   let best: Shape2dPortHit | null = null;
   let bestDistance = Infinity;
@@ -1491,8 +1514,16 @@ export const getNearestShape2dPort = ({
         Math.abs(worldTile.x - tile.x),
         Math.abs(worldTile.y - tile.y)
       );
+      const isSticky =
+        stickyHover?.itemId === viewItem.id &&
+        stickyHover?.portId === port.id;
+      const limit = isSticky
+        ? maxDistance * SHAPE_2D_PORT_HOVER_SCALE
+        : maxDistance;
 
-      if (distance > maxDistance || distance >= bestDistance) continue;
+      if (distance > limit) continue;
+      const score = isSticky ? distance * 0.35 : distance;
+      if (score >= bestDistance) continue;
 
       const hit: Shape2dPortHit = {
         itemId: viewItem.id,
@@ -1503,7 +1534,7 @@ export const getNearestShape2dPort = ({
 
       if (isPortAvailable && !isPortAvailable(hit)) continue;
 
-      bestDistance = distance;
+      bestDistance = score;
       best = hit;
     }
   }

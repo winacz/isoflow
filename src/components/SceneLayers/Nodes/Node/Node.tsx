@@ -146,6 +146,11 @@ export const Node = React.memo(({
     portAttention?.itemId === node.id ? portAttention.portId : null;
   const attentionToken =
     portAttention?.itemId === node.id ? portAttention.token : null;
+  const shape2dPortHover = useUiStateStore((state) => {
+    return state.shape2dPortHover;
+  });
+  const hoveredPortId =
+    shape2dPortHover?.itemId === node.id ? shape2dPortHover.portId : null;
 
   const { iconComponent } = useIcon(
     modelItem.icon,
@@ -163,7 +168,8 @@ export const Node = React.memo(({
     attentionToken,
     vlanBorderColor,
     Boolean(modelItem.poweredByPoe),
-    poePowerWarning
+    poePowerWarning,
+    hoveredPortId
   );
   const liveTile = useNodeDragStore((state) => {
     return state.tiles[node.id];

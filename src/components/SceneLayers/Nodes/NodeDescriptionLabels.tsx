@@ -111,6 +111,7 @@ export const NodeDescriptionLabels = ({ nodes }: Props) => {
           ? modelItem.description
           : null;
       if (!description) return [];
+      if (node.showDescriptionLabel === false) return [];
 
       const shapeSize = getModelItemSize(modelItem);
       const tile = liveTiles[node.id] ?? node.tile;

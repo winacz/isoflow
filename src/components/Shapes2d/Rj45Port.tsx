@@ -36,6 +36,8 @@ interface Props {
    * Bottom-row ports should use `above` so labels stay inside the chassis.
    */
   labelPosition?: 'below' | 'above';
+  /** Cursor hover — jack zooms for easier click / cable start. */
+  isHovered?: boolean;
 }
 
 export const Rj45Port = ({
@@ -57,7 +59,8 @@ export const Rj45Port = ({
   hideStatusBar = false,
   poe = null,
   poweredByPoe = false,
-  labelPosition = 'above'
+  labelPosition = 'above',
+  isHovered = false
 }: Props) => {
   const jackSize = Math.round(tileSize * 0.72);
   const barH = hideStatusBar ? 0 : Math.max(3, Math.round(jackSize * 0.16));
@@ -86,6 +89,8 @@ export const Rj45Port = ({
         height: tileSize,
         boxSizing: 'border-box',
         pointerEvents: 'none',
+        overflow: 'visible',
+        zIndex: isHovered ? 5 : undefined,
         '@keyframes portAttentionShake': {
           '0%, 100%': {
             transform: 'translate(-50%, -50%) rotate(0deg) scale(1)'
@@ -116,9 +121,27 @@ export const Rj45Port = ({
           position: 'absolute',
           left: '50%',
           top: '50%',
+          width: tileSize,
+          height: tileSize,
+          transform: isHovered
+            ? 'translate(-50%, -50%) scale(1.22)'
+            : 'translate(-50%, -50%) scale(1)',
+          transformOrigin: 'center center',
+          transition: 'transform 0.14s ease',
+          overflow: 'visible'
+        }}
+      >
+      <Box
+        sx={{
+          position: 'absolute',
+          left: '50%',
+          top: '50%',
           width: portW,
           height: stackH,
           transform: 'translate(-50%, -50%)',
+          transformOrigin: 'center center',
+          transition:
+            'transform 0.14s ease, box-shadow 0.14s ease, border-color 0.14s ease',
           boxSizing: 'border-box',
           display: 'flex',
           flexDirection: 'column',
@@ -148,6 +171,15 @@ export const Rj45Port = ({
             ? {
                 border: '2px solid #3b82f6',
                 boxShadow: `0 0 0 3px rgba(59, 130, 246, 0.32), 0 0 10px rgba(59, 130, 246, 0.22)`
+              }
+            : null),
+          ...(isHovered && !hasMismatch && !isPeerHighlight && !isAttentionPulse
+            ? {
+                border: isFocused
+                  ? '2px solid #3b82f6'
+                  : '2px solid rgba(59, 130, 246, 0.9)',
+                boxShadow:
+                  '0 0 0 3px rgba(59, 130, 246, 0.4), 0 0 14px rgba(59, 130, 246, 0.45)'
               }
             : null),
           ...(isAttentionPulse
@@ -384,8 +416,12 @@ export const Rj45Port = ({
           sx={{
             fontSize: numberSize,
             lineHeight: 1,
-            color: '#8b9bb0',
-            fontWeight: 500,
+            color: isHovered ? '#2563eb' : '#8b9bb0',
+            fontWeight: isHovered ? 700 : 500,
+            textShadow: isHovered
+              ? '0 0 6px rgba(37, 99, 235, 0.45)'
+              : undefined,
+            transition: 'color 0.14s ease, text-shadow 0.14s ease',
             userSelect: 'none'
           }}
         >
@@ -445,6 +481,7 @@ export const Rj45Port = ({
           {poe === 'OUT' ? 'PoE Out' : 'PoE IN'}
         </Box>
       )}
+      </Box>
     </Box>
   );
 };

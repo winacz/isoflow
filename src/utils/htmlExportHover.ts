@@ -42,7 +42,12 @@ export type HtmlExportNodeInfo = {
 export type HtmlExportCableInfo = {
   vlanLabel: string;
   linkMode: string;
-  endpoints: { itemId: string; itemName: string; portLabel: string }[];
+  endpoints: {
+    itemId: string;
+    itemName: string;
+    portLabel: string;
+    ip?: string | null;
+  }[];
 };
 
 export type HtmlExportHoverGraph = {
@@ -282,7 +287,8 @@ export const buildHtmlExportHoverGraph = ({
         return {
           itemId: endpoint.itemId,
           itemName: endpoint.itemName,
-          portLabel: endpoint.portLabel
+          portLabel: endpoint.portLabel,
+          ip: endpoint.ip
         };
       })
     };

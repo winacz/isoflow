@@ -110,8 +110,13 @@ export const VirtualServerShape2d = ({
   const chassisTint = parseDeviceColor(color);
   /** Header band ≈ top third of the chassis (name + icon + divider). */
   const headerBandH = pxHeight / 3;
-  const headerIconSize = Math.max(36, Math.round(headerBandH * 0.45));
-  const headerNameSize = Math.max(18, Math.round(headerBandH * 0.28));
+  // Rack: title fills nearly the full header height (same as DeviceShape2d).
+  const headerIconSize = isRack
+    ? Math.max(18, Math.round(headerBandH * 0.72))
+    : Math.max(36, Math.round(headerBandH * 0.45));
+  const headerNameSize = isRack
+    ? Math.max(16, Math.round(headerBandH * 0.78))
+    : Math.max(18, Math.round(headerBandH * 0.28));
   const chassisRadius = Math.max(2, Math.round(cellSize * 0.12));
 
   const ports = useMemo(() => {
@@ -451,7 +456,7 @@ export const VirtualServerShape2d = ({
                 fontSize: headerNameSize,
                 fontWeight: 700,
                 letterSpacing: 0.2,
-                lineHeight: 1.15,
+                lineHeight: isRack ? 1 : 1.15,
                 userSelect: 'none',
                 whiteSpace: 'nowrap',
                 overflow: 'hidden',
@@ -462,7 +467,7 @@ export const VirtualServerShape2d = ({
               {name}
             </Typography>
           </Box>
-          {subtitle && (
+          {subtitle && !isRack && (
             <Typography
               sx={{
                 color: '#6b7280',

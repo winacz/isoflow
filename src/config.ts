@@ -236,8 +236,8 @@ const SWITCH_2D_PORTS: Shape2dPort[] = [
 const PC_2D_PORTS: Shape2dPort[] = [
   {
     id: 'port-1',
-    // Almost flush with the bottom edge of the 1U square (tiles 0..8).
-    tile: { x: Math.floor(UNIT_1U_TILES / 2), y: UNIT_1U_TILES - 2 },
+    // Bottom band — slightly above bottom edge so the 2.25-tile jack stays in-chassis.
+    tile: { x: Math.floor(UNIT_1U_TILES / 2), y: UNIT_1U_TILES - 2.15 },
     side: 'BOTTOM',
     label: '1'
   }
@@ -297,70 +297,7 @@ export const SHAPES_2D: Icon[] = [
   },
   {
     id: SHAPE_2D_PC_ID,
-    name: 'PC',
-    url: '',
-    collection: 'Stacje',
-    isIsometric: false
-  },
-  {
-    id: SHAPE_2D_CAMERA_ID,
-    name: 'Kamera IP',
-    url: '',
-    collection: 'Stacje',
-    isIsometric: false
-  },
-  {
-    id: SHAPE_2D_CAMERA_V2_ID,
-    name: 'Kamera V2',
-    url: '',
-    collection: 'Stacje',
-    isIsometric: false
-  },
-  {
-    id: SHAPE_2D_PRINTER_ID,
-    name: 'Drukarka',
-    url: '',
-    collection: 'Stacje',
-    isIsometric: false
-  },
-  {
-    id: SHAPE_2D_VOIP_ID,
-    name: 'Telefon VoIP',
-    url: '',
-    collection: 'Stacje',
-    isIsometric: false
-  },
-  {
-    id: SHAPE_2D_SMARTPHONE_ID,
-    name: 'Smartfon',
-    url: '',
-    collection: 'Stacje',
-    isIsometric: false
-  },
-  {
-    id: SHAPE_2D_IOT_ID,
-    name: 'Urządzenie IoT',
-    url: '',
-    collection: 'Stacje',
-    isIsometric: false
-  },
-  {
-    id: SHAPE_2D_AP_ID,
-    name: 'Access Point',
-    url: '',
-    collection: 'Stacje',
-    isIsometric: false
-  },
-  {
-    id: SHAPE_2D_NAS_ID,
-    name: 'Magazyn NAS',
-    url: '',
-    collection: 'Stacje',
-    isIsometric: false
-  },
-  {
-    id: SHAPE_2D_TABLET_ID,
-    name: 'Terminal / Tablet',
+    name: 'Node',
     url: '',
     collection: 'Stacje',
     isIsometric: false
@@ -513,7 +450,13 @@ export const VIEW_DEFAULTS: Required<
 export const VIEW_ITEM_DEFAULTS: Required<
   Omit<
     ViewItem,
-    'id' | 'tile' | 'parentId' | 'rackUnit' | 'labelScale' | 'labelOffset'
+    | 'id'
+    | 'tile'
+    | 'parentId'
+    | 'rackUnit'
+    | 'labelScale'
+    | 'labelOffset'
+    | 'showDescriptionLabel'
   >
 > = {
   labelHeight: 80,
@@ -569,6 +512,7 @@ export const INITIAL_UI_STATE = {
   },
   projectionMode: 'ISOMETRIC' as const,
   isWorkshopOpen: false,
+  isRightSidebarOpen: true,
   showGrid: true,
   gridStyle: 'rack' as const,
   canvasByMode: {

@@ -4,11 +4,15 @@ import {
   MainMenuOptions,
   ProjectionMode
 } from './common';
-import { Icon } from './model';
+import { Icon, type ModelItem } from './model';
 import { ItemReference } from './scene';
 
 interface AddItemControls {
   type: 'ADD_ITEM';
+}
+
+interface AlgorithmsControls {
+  type: 'ALGORITHMS';
 }
 
 /** Sidebar: edit a custom switch template (from device selection). */
@@ -22,6 +26,7 @@ interface EditDeviceTemplateControls {
 export type ItemControls =
   | ItemReference
   | AddItemControls
+  | AlgorithmsControls
   | EditDeviceTemplateControls;
 
 export interface Mouse {
@@ -82,6 +87,11 @@ export interface PlaceIconMode {
   type: 'PLACE_ICON';
   showCursor: boolean;
   id: string | null;
+  /**
+   * When set, the next click places a deep copy of this model item
+   * (right-click → Duplikuj) instead of a blank shape of `id`.
+   */
+  draftModelItem?: ModelItem | null;
 }
 
 export interface ConnectorMode {
@@ -240,6 +250,13 @@ export interface UiState {
     title?: string;
     screen: Coords;
   } | null;
+  /**
+   * Plan 2D: port under cursor — drives RJ45 hover zoom + sticky hit-test.
+   */
+  shape2dPortHover: {
+    itemId: string;
+    portId: string;
+  } | null;
   sviHover: {
     vlan: number;
     ip?: string;
@@ -282,6 +299,11 @@ export interface UiState {
   simplePaths: boolean;
   /** Whether the Workshop view is currently active. */
   isWorkshopOpen: boolean;
+  /**
+   * Plan (2D): right item-controls dock is visible.
+   * When false, only a reopen chevron is shown on the right edge.
+   */
+  isRightSidebarOpen: boolean;
 }
 
 export interface UiStateActions {
@@ -318,6 +340,9 @@ export interface UiStateActions {
   setPortPipHover: (
     hover: UiState['portPipHover']
   ) => void;
+  setShape2dPortHover: (
+    hover: UiState['shape2dPortHover']
+  ) => void;
   setSviHover: (
     hover: UiState['sviHover']
   ) => void;
@@ -341,6 +366,8 @@ export interface UiStateActions {
   setSimplePaths: (enabled: boolean) => void;
   toggleSimplePaths: () => void;
   setWorkshopOpen: (isWorkshopOpen: boolean) => void;
+  setRightSidebarOpen: (isOpen: boolean) => void;
+  toggleRightSidebar: () => void;
 }
 
 export type UiStateStore = UiState & {

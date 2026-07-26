@@ -15,9 +15,15 @@ import { IconButton } from 'src/components/IconButton/IconButton';
 import { UiElement } from 'src/components/UiElement/UiElement';
 import { useScene } from 'src/hooks/useScene';
 import { TEXTBOX_DEFAULTS } from 'src/config';
-import { generateId, removeMidWaypointsByIds } from 'src/utils';
+import { generateId, removeMidWaypointsByIds, isPlanProjection } from 'src/utils';
+import { AlgorithmsToolButton } from 'src/components/AlgorithmsPopup/AlgorithmsPopup';
 
-export const ToolMenu = () => {
+export const ToolMenu = ({
+  /** Render without card chrome — for embedding in the plan sidebar header. */
+  embedded = false
+}: {
+  embedded?: boolean;
+} = {}) => {
   const {
     createTextBox,
     undo,
@@ -49,6 +55,7 @@ export const ToolMenu = () => {
   });
 
   const isTwoD = projectionMode === 'TWO_D';
+  const isPlan = isPlanProjection(projectionMode);
   const isEditable = editorMode === 'EDITABLE';
 
   const onUndo = useCallback(() => {
@@ -161,83 +168,96 @@ export const ToolMenu = () => {
     });
   }, [uiStateStoreActions]);
 
-  return (
-    <UiElement>
-      <Stack direction="row">
-        <IconButton
-          name="Undo (Ctrl+Z)"
-          Icon={<UndoIcon />}
-          onClick={onUndo}
-          disabled={!isEditable || !canUndo}
-        />
-        <IconButton
-          name="Select"
-          Icon={<NearMeIcon />}
-          onClick={() => {
-            uiStateStoreActions.setMode({
-              type: 'CURSOR',
-              showCursor: true,
-              mousedownItem: null
-            });
-            uiStateStoreActions.setItemControls(null);
-          }}
-          isActive={mode.type === 'CURSOR' || mode.type === 'DRAG_ITEMS'}
-        />
-        <IconButton
-          name="Pan"
-          Icon={<PanToolIcon />}
-          onClick={() => {
-            uiStateStoreActions.setMode({
-              type: 'PAN',
-              showCursor: false
-            });
+  const tools = (
+    <Stack
+      direction="row"
+      flexWrap="wrap"
+      spacing={0}
+      sx={{
+        justifyContent: embedded ? 'flex-start' : undefined,
+        width: embedded ? '100%' : undefined
+      }}
+    >
+      <IconButton
+        name="Undo (Ctrl+Z)"
+        Icon={<UndoIcon />}
+        onClick={onUndo}
+        disabled={!isEditable || !canUndo}
+      />
+      <IconButton
+        name="Select"
+        Icon={<NearMeIcon />}
+        onClick={() => {
+          uiStateStoreActions.setMode({
+            type: 'CURSOR',
+            showCursor: true,
+            mousedownItem: null
+          });
+          uiStateStoreActions.setItemControls(null);
+        }}
+        isActive={mode.type === 'CURSOR' || mode.type === 'DRAG_ITEMS'}
+      />
+      <IconButton
+        name="Pan"
+        Icon={<PanToolIcon />}
+        onClick={() => {
+          uiStateStoreActions.setMode({
+            type: 'PAN',
+            showCursor: false
+          });
 
-            uiStateStoreActions.setItemControls(null);
-          }}
-          isActive={mode.type === 'PAN'}
-        />
-        <IconButton
-          name={isTwoD ? 'Add shape' : 'Add item'}
-          Icon={<AddIcon />}
-          onClick={openAddMenu}
-          isActive={mode.type === 'PLACE_ICON'}
-        />
-        <IconButton
-          name="Connector"
-          Icon={<ConnectorIcon />}
-          onClick={() => {
-            uiStateStoreActions.setMode({
-              type: 'CONNECTOR',
-              id: null,
-              showCursor: true
-            });
-            uiStateStoreActions.setItemControls(null);
-          }}
-          isActive={mode.type === 'CONNECTOR'}
-        />
-        {!isTwoD && (
-          <>
-            <IconButton
-              name="Rectangle"
-              Icon={<CropSquareIcon />}
-              onClick={() => {
-                uiStateStoreActions.setMode({
-                  type: 'RECTANGLE.DRAW',
-                  showCursor: true,
-                  id: null
-                });
-              }}
-              isActive={mode.type === 'RECTANGLE.DRAW'}
-            />
-            <IconButton
-              name="Text"
-              Icon={<TitleIcon />}
-              onClick={createTextBoxProxy}
-              isActive={mode.type === 'TEXTBOX'}
-            />
-          </>
-        )}
-      </Stack>
-    </UiElement>
+          uiStateStoreActions.setItemControls(null);
+        }}
+        isActive={mode.type === 'PAN'}
+      />
+      <IconButton
+        name={isTwoD ? 'Add shape' : 'Add item'}
+        Icon={<AddIcon />}
+        onClick={openAddMenu}
+        isActive={mode.type === 'PLACE_ICON'}
+      />
+      {isPlan && <AlgorithmsToolButton />}
+      <IconButton
+        name="Connector"
+        Icon={<ConnectorIcon />}
+        onClick={() => {
+          uiStateStoreActions.setMode({
+            type: 'CONNECTOR',
+            id: null,
+            showCursor: true
+          });
+          uiStateStoreActions.setItemControls(null);
+        }}
+        isActive={mode.type === 'CONNECTOR'}
+      />
+      {!isTwoD && (
+        <>
+          <IconButton
+            name="Rectangle"
+            Icon={<CropSquareIcon />}
+            onClick={() => {
+              uiStateStoreActions.setMode({
+                type: 'RECTANGLE.DRAW',
+                showCursor: true,
+                id: null
+              });
+            }}
+            isActive={mode.type === 'RECTANGLE.DRAW'}
+          />
+          <IconButton
+            name="Text"
+            Icon={<TitleIcon />}
+            onClick={createTextBoxProxy}
+            isActive={mode.type === 'TEXTBOX'}
+          />
+        </>
+      )}
+    </Stack>
   );
+
+  if (embedded) {
+    return tools;
+  }
+
+  return <UiElement>{tools}</UiElement>;
 };

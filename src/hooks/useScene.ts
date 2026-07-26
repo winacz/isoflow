@@ -239,7 +239,8 @@ export const useScene = () => {
   const layoutViewItems = useCallback(
     (
       ids: string[],
-      mode: 'vertical' | 'horizontal' | 'grid'
+      mode: 'vertical' | 'horizontal' | 'grid',
+      pack: 'tight' | 'spaced' | 'wrap5' = 'spaced'
     ) => {
       const state = getState();
       const view = getItemByIdOrThrow(state.model.views, currentViewId).value;
@@ -253,7 +254,9 @@ export const useScene = () => {
         selectedItems,
         allItems: view.items ?? [],
         modelItems: state.model.items,
-        mode
+        mode,
+        pack,
+        snapStep: getGridSnapStep(gridStyle)
       });
 
       beginHistoryTransaction();
@@ -272,7 +275,8 @@ export const useScene = () => {
       endHistoryTransaction,
       getState,
       setState,
-      currentViewId
+      currentViewId,
+      gridStyle
     ]
   );
 

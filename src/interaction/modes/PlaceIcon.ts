@@ -1,5 +1,4 @@
-import { produce } from 'immer';
-import { ModeActions } from 'src/types';
+import { ModeActions, ModelItem } from 'src/types';
 import {
   generateId,
   getItemAtTile,
@@ -38,6 +37,36 @@ import {
   PATCH_PANEL_COLOR
 } from 'src/config';
 
+const placeDuplicateDraft = ({
+  draft,
+  tile,
+  parentId,
+  rackUnit,
+  scene
+}: {
+  draft: ModelItem;
+  tile: { x: number; y: number };
+  parentId?: string;
+  rackUnit?: number;
+  scene: Parameters<NonNullable<ModeActions['mouseup']>>[0]['scene'];
+}) => {
+  const modelItemId = draft.id || generateId();
+  scene.beginHistoryTransaction();
+  scene.createModelItem({
+    ...draft,
+    id: modelItemId
+  });
+  scene.createViewItem({
+    ...VIEW_ITEM_DEFAULTS,
+    id: modelItemId,
+    tile,
+    ...(parentId !== undefined && rackUnit !== undefined
+      ? { parentId, rackUnit }
+      : {})
+  });
+  scene.endHistoryTransaction();
+};
+
 export const PlaceIcon: ModeActions = {
   mousemove: () => {},
   mousedown: ({ uiState, scene, model, isRendererInteraction }) => {
@@ -69,9 +98,10 @@ export const PlaceIcon: ModeActions = {
     if (uiState.mode.type !== 'PLACE_ICON') return;
 
     const iconId = uiState.mode.id;
+    const draftModelItem = uiState.mode.draftModelItem ?? null;
 
     if (iconId !== null) {
-      const modelItemId = generateId();
+      const modelItemId = draftModelItem?.id ?? generateId();
       const shape =
         SHAPES_2D.find((item) => {
           return item.id === iconId;
@@ -82,7 +112,7 @@ export const PlaceIcon: ModeActions = {
       const isCabinet = iconId === SHAPE_2D_CABINET_ID;
       const isBlanking = iconId === SHAPE_2D_BLANKING_ID;
       const isPatchPanel = iconId === SHAPE_2D_PATCH_PANEL_ID;
-      const draftModel = {
+      const draftModel = draftModelItem ?? {
         icon: iconId,
         ...(isCabinet || isBlanking
           ? {
@@ -166,70 +196,81 @@ export const PlaceIcon: ModeActions = {
         return;
       }
 
-      const existingOfType = model.items.filter((item) => {
-        return item.icon === iconId;
-      }).length;
+      if (draftModelItem) {
+        placeDuplicateDraft({
+          draft: { ...draftModelItem, id: modelItemId },
+          tile,
+          parentId,
+          rackUnit,
+          scene
+        });
+      } else {
+        const existingOfType = model.items.filter((item) => {
+          return item.icon === iconId;
+        }).length;
 
-      let defaultName = shape?.name ?? 'Untitled';
+        let defaultName = shape?.name ?? 'Untitled';
 
-      if (iconId === SHAPE_2D_SWITCH_ID) {
-        defaultName = `SW-CORE-${String(existingOfType + 1).padStart(2, '0')}`;
-      } else if (iconId === SHAPE_2D_PC_ID) {
-        defaultName = `PC-${String(existingOfType + 1).padStart(2, '0')}`;
-      } else if (iconId === SHAPE_2D_CAMERA_V2_ID) {
-        defaultName = `CAM-V2-${String(existingOfType + 1).padStart(2, '0')}`;
-      } else if (iconId === SHAPE_2D_PRINTER_ID) {
-        defaultName = `PRN-${String(existingOfType + 1).padStart(2, '0')}`;
-      } else if (iconId === SHAPE_2D_VOIP_ID) {
-        defaultName = `TEL-${String(existingOfType + 1).padStart(2, '0')}`;
-      } else if (iconId === SHAPE_2D_SMARTPHONE_ID) {
-        defaultName = `MOB-${String(existingOfType + 1).padStart(2, '0')}`;
-      } else if (iconId === SHAPE_2D_IOT_ID) {
-        defaultName = `IOT-${String(existingOfType + 1).padStart(2, '0')}`;
-      } else if (iconId === SHAPE_2D_AP_ID) {
-        defaultName = `AP-${String(existingOfType + 1).padStart(2, '0')}`;
-      } else if (iconId === SHAPE_2D_NAS_ID) {
-        defaultName = `NAS-${String(existingOfType + 1).padStart(2, '0')}`;
-      } else if (iconId === SHAPE_2D_TABLET_ID) {
-        defaultName = `TERM-${String(existingOfType + 1).padStart(2, '0')}`;
-      } else if (isCabinet) {
-        defaultName = `SZAFA-${String(existingOfType + 1).padStart(2, '0')}`;
-      } else if (isBlanking) {
-        defaultName = 'ZAŚLEPKA';
-      } else if (isPatchPanel) {
-        defaultName = `PP-${String(existingOfType + 1).padStart(2, '0')}`;
+        if (iconId === SHAPE_2D_SWITCH_ID) {
+          defaultName = `SW-CORE-${String(existingOfType + 1).padStart(2, '0')}`;
+        } else if (iconId === SHAPE_2D_PC_ID) {
+          defaultName = `PC-${String(existingOfType + 1).padStart(2, '0')}`;
+        } else if (iconId === SHAPE_2D_CAMERA_V2_ID) {
+          defaultName = `CAM-V2-${String(existingOfType + 1).padStart(2, '0')}`;
+        } else if (iconId === SHAPE_2D_PRINTER_ID) {
+          defaultName = `PRN-${String(existingOfType + 1).padStart(2, '0')}`;
+        } else if (iconId === SHAPE_2D_VOIP_ID) {
+          defaultName = `TEL-${String(existingOfType + 1).padStart(2, '0')}`;
+        } else if (iconId === SHAPE_2D_SMARTPHONE_ID) {
+          defaultName = `MOB-${String(existingOfType + 1).padStart(2, '0')}`;
+        } else if (iconId === SHAPE_2D_IOT_ID) {
+          defaultName = `IOT-${String(existingOfType + 1).padStart(2, '0')}`;
+        } else if (iconId === SHAPE_2D_AP_ID) {
+          defaultName = `AP-${String(existingOfType + 1).padStart(2, '0')}`;
+        } else if (iconId === SHAPE_2D_NAS_ID) {
+          defaultName = `NAS-${String(existingOfType + 1).padStart(2, '0')}`;
+        } else if (iconId === SHAPE_2D_TABLET_ID) {
+          defaultName = `TERM-${String(existingOfType + 1).padStart(2, '0')}`;
+        } else if (isCabinet) {
+          defaultName = `SZAFA-${String(existingOfType + 1).padStart(2, '0')}`;
+        } else if (isBlanking) {
+          defaultName = 'ZAŚLEPKA';
+        } else if (isPatchPanel) {
+          defaultName = `PP-${String(existingOfType + 1).padStart(2, '0')}`;
+        }
+
+        scene.beginHistoryTransaction();
+        scene.createModelItem({
+          id: modelItemId,
+          name: defaultName,
+          icon: iconId,
+          ...(isCabinet ? { rackUnits: CABINET_DEFAULT_UNITS } : {}),
+          ...(isBlanking ? { rackUnits: BLANKING_DEFAULT_UNITS } : {}),
+          ...(isPatchPanel
+            ? {
+                portCount: PATCH_PANEL_DEFAULT_PORTS,
+                color: PATCH_PANEL_COLOR
+              }
+            : {})
+        });
+
+        scene.createViewItem({
+          ...VIEW_ITEM_DEFAULTS,
+          id: modelItemId,
+          tile,
+          ...(parentId !== undefined && rackUnit !== undefined
+            ? { parentId, rackUnit }
+            : {})
+        });
+        scene.endHistoryTransaction();
       }
-
-      scene.beginHistoryTransaction();
-      scene.createModelItem({
-        id: modelItemId,
-        name: defaultName,
-        icon: iconId,
-        ...(isCabinet ? { rackUnits: CABINET_DEFAULT_UNITS } : {}),
-        ...(isBlanking ? { rackUnits: BLANKING_DEFAULT_UNITS } : {}),
-        ...(isPatchPanel
-          ? {
-              portCount: PATCH_PANEL_DEFAULT_PORTS,
-              color: PATCH_PANEL_COLOR
-            }
-          : {})
-      });
-
-      scene.createViewItem({
-        ...VIEW_ITEM_DEFAULTS,
-        id: modelItemId,
-        tile,
-        ...(parentId !== undefined && rackUnit !== undefined
-          ? { parentId, rackUnit }
-          : {})
-      });
-      scene.endHistoryTransaction();
     }
 
-    uiState.actions.setMode(
-      produce(uiState.mode, (draft) => {
-        draft.id = null;
-      })
-    );
+    uiState.actions.setMode({
+      type: 'PLACE_ICON',
+      id: null,
+      showCursor: true,
+      draftModelItem: null
+    });
   }
 };

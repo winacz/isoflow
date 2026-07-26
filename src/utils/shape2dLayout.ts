@@ -53,6 +53,32 @@ export const isSwitchLikeIcon = (icon: string | undefined | null): boolean => {
 
 export type Shape2dLayoutMode = 'vertical' | 'horizontal' | 'grid';
 
+/** Repeated-click packing for horizontal / vertical layout. */
+export type Shape2dPackVariant = 'tight' | 'spaced' | 'wrap5';
+
+export const SHAPE_2D_PACK_VARIANTS: Shape2dPackVariant[] = [
+  'tight',
+  'spaced',
+  'wrap5'
+];
+
+export const SHAPE_2D_PACK_LABELS: Record<Shape2dPackVariant, string> = {
+  tight: 'przy sobie',
+  spaced: 'z odstępem',
+  wrap5: 'max 5 / rząd'
+};
+
+export const shape2dPackLabel = (
+  pack: Shape2dPackVariant,
+  mode: 'horizontal' | 'vertical'
+) => {
+  if (pack !== 'wrap5') return SHAPE_2D_PACK_LABELS[pack];
+  return mode === 'vertical' ? 'max 5 / kolumna' : 'max 5 / rząd';
+};
+
+/** Max items per row (horizontal) or column (vertical) when wrapping. */
+export const SHAPE_2D_PACK_WRAP_LIMIT = 5;
+
 type Footprint = {
   id: string;
   tile: Coords;
@@ -121,29 +147,83 @@ const computePackedTargets = (
   ordered: Footprint[],
   mode: Shape2dLayoutMode,
   origin: Coords,
-  gap: number
+  gap: number,
+  pack: Shape2dPackVariant = 'spaced',
+  snapStep: { x: number; y: number } = { x: 1, y: 1 }
 ): Record<string, Coords> => {
   const targets: Record<string, Coords> = {};
+  const start = snapTile2dToGrid(origin, snapStep);
+  const wrapLimit =
+    pack === 'wrap5' && (mode === 'horizontal' || mode === 'vertical')
+      ? SHAPE_2D_PACK_WRAP_LIMIT
+      : Number.POSITIVE_INFINITY;
 
   if (mode === 'vertical') {
-    let y = origin.y;
+    let x = start.x;
+    let y = start.y;
+    let col = 0;
+    let colMaxW = 0;
+
     ordered.forEach((item) => {
-      targets[item.id] = { x: origin.x, y };
-      y += item.height + gap;
+      if (col >= wrapLimit) {
+        x = snapTile2dToGrid(
+          { x: x + colMaxW + gap, y: start.y },
+          snapStep
+        ).x;
+        y = start.y;
+        col = 0;
+        colMaxW = 0;
+      }
+
+      const tile = snapTile2dToGrid({ x, y }, snapStep);
+      targets[item.id] = tile;
+      colMaxW = Math.max(colMaxW, item.width);
+      y = snapTile2dToGrid(
+        { x: tile.x, y: tile.y + item.height + gap },
+        snapStep
+      ).y;
+      // Keep at least height+gap advance even if snap collapses.
+      if (y < tile.y + item.height + gap) {
+        y = tile.y + item.height + gap;
+      }
+      col += 1;
     });
     return targets;
   }
 
   if (mode === 'horizontal') {
-    let x = origin.x;
+    let x = start.x;
+    let y = start.y;
+    let col = 0;
+    let rowMaxH = 0;
+
     ordered.forEach((item) => {
-      targets[item.id] = { x, y: origin.y };
-      x += item.width + gap;
+      if (col >= wrapLimit) {
+        y = snapTile2dToGrid(
+          { x: start.x, y: y + rowMaxH + gap },
+          snapStep
+        ).y;
+        x = start.x;
+        col = 0;
+        rowMaxH = 0;
+      }
+
+      const tile = snapTile2dToGrid({ x, y }, snapStep);
+      targets[item.id] = tile;
+      rowMaxH = Math.max(rowMaxH, item.height);
+      x = snapTile2dToGrid(
+        { x: tile.x + item.width + gap, y: tile.y },
+        snapStep
+      ).x;
+      if (x < tile.x + item.width + gap) {
+        x = tile.x + item.width + gap;
+      }
+      col += 1;
     });
     return targets;
   }
 
-  // grid
+  // grid — square-ish, always snapped
   const cols = chooseSquareGridCols(ordered.length);
   const colWidths: number[] = Array.from({ length: cols }, () => 0);
   const rowHeights: number[] = [];
@@ -156,23 +236,26 @@ const computePackedTargets = (
   });
 
   const colXs: number[] = [];
-  let xCursor = origin.x;
+  let xCursor = start.x;
   colWidths.forEach((width, index) => {
-    colXs[index] = xCursor;
-    xCursor += width + gap;
+    colXs[index] = snapTile2dToGrid({ x: xCursor, y: start.y }, snapStep).x;
+    xCursor = colXs[index] + width + gap;
   });
 
   const rowYs: number[] = [];
-  let yCursor = origin.y;
+  let yCursor = start.y;
   rowHeights.forEach((height, index) => {
-    rowYs[index] = yCursor;
-    yCursor += height + gap;
+    rowYs[index] = snapTile2dToGrid({ x: start.x, y: yCursor }, snapStep).y;
+    yCursor = rowYs[index] + height + gap;
   });
 
   ordered.forEach((item, index) => {
     const col = index % cols;
     const row = Math.floor(index / cols);
-    targets[item.id] = { x: colXs[col], y: rowYs[row] };
+    targets[item.id] = snapTile2dToGrid(
+      { x: colXs[col], y: rowYs[row] },
+      snapStep
+    );
   });
 
   return targets;
@@ -219,22 +302,31 @@ const placementsFree = ({
 
 /**
  * Compute new top-left tiles for selected 2D nodes.
- * Anchors at the selection bbox top-left; packs with ≥ gap between footprints.
+ * Anchors at the selection bbox top-left; packs with gap / wrap variants.
+ * All positions are snapped to `snapStep` (active grid).
  */
 export const layoutShape2dItems = ({
   selectedItems,
   allItems,
   modelItems,
   mode,
-  gap = SHAPE_2D_LAYOUT_GAP
+  pack = 'spaced',
+  gap,
+  snapStep = { x: 1, y: 1 }
 }: {
   selectedItems: ViewItem[];
   allItems: ViewItem[];
   modelItems: { id: string; icon?: string }[];
   mode: Shape2dLayoutMode;
+  pack?: Shape2dPackVariant;
   gap?: number;
+  snapStep?: { x: number; y: number };
 }): Record<string, Coords> => {
   if (selectedItems.length === 0) return {};
+
+  const effectiveGap =
+    gap ??
+    (pack === 'tight' ? 0 : SHAPE_2D_LAYOUT_GAP);
 
   const modelItemMap = new Map(modelItems.map(i => [i.id, i]));
   const footprints = selectedItems.map((item) => {
@@ -248,12 +340,22 @@ export const layoutShape2dItems = ({
         ? sortHorizontal(footprints)
         : sortHorizontal(footprints);
 
-  const origin = {
-    x: Math.min(...footprints.map((item) => item.tile.x)),
-    y: Math.min(...footprints.map((item) => item.tile.y))
-  };
+  const origin = snapTile2dToGrid(
+    {
+      x: Math.min(...footprints.map((item) => item.tile.x)),
+      y: Math.min(...footprints.map((item) => item.tile.y))
+    },
+    snapStep
+  );
 
-  let targets = computePackedTargets(ordered, mode, origin, gap);
+  let targets = computePackedTargets(
+    ordered,
+    mode,
+    origin,
+    effectiveGap,
+    mode === 'grid' ? 'spaced' : pack,
+    snapStep
+  );
   const excludeItemIds = footprints.map((item) => item.id);
 
   if (
@@ -270,13 +372,17 @@ export const layoutShape2dItems = ({
 
   // Nudge the whole group until free (or give up after a bounded search).
   const searchLimit = 40;
+  const stepX = Math.max(1, snapStep.x);
+  const stepY = Math.max(1, snapStep.y);
   for (let step = 1; step <= searchLimit; step += 1) {
+    const dx = step * stepX;
+    const dy = step * stepY;
     const candidates = [
-      offsetTargets(targets, step, 0),
-      offsetTargets(targets, 0, step),
-      offsetTargets(targets, step, step),
-      offsetTargets(targets, -step, 0),
-      offsetTargets(targets, 0, -step)
+      offsetTargets(targets, dx, 0),
+      offsetTargets(targets, 0, dy),
+      offsetTargets(targets, dx, dy),
+      offsetTargets(targets, -dx, 0),
+      offsetTargets(targets, 0, -dy)
     ];
 
     const found = candidates.find((candidate) => {

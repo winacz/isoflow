@@ -194,6 +194,20 @@ export const ConnectorRelationPanel = ({ connectorId }: Props) => {
                       ? ' · host'
                       : ''}
                 </Typography>
+                {endpoint.ip && (
+                  <Typography
+                    sx={{
+                      mt: 0.2,
+                      fontSize: 12,
+                      fontWeight: 600,
+                      color: 'text.primary',
+                      fontFamily:
+                        'ui-monospace, SFMono-Regular, Menlo, monospace'
+                    }}
+                  >
+                    IP {endpoint.ip}
+                  </Typography>
+                )}
               </Box>
             </Box>
           );

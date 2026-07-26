@@ -71,8 +71,15 @@ import {
   getMountedChildren,
   getCabinetSlotTile,
   collectOccupiedRackUnits,
-  isFullWidthRackItem
+  isFullWidthRackItem,
+  getVlanIpHint
 } from 'src/utils';
+import {
+  DeviceTypeIcon,
+  NODE_ICON_OPTIONS,
+  resolveDeviceTypeIconKind,
+  type NodeIconKind
+} from 'src/components/Icons/DeviceTypeIcon';
 import { useScene } from 'src/hooks/useScene';
 import { useViewItem } from 'src/hooks/useViewItem';
 import { useUiStateStore } from 'src/stores/uiStateStore';
@@ -80,7 +87,6 @@ import { useModelStore } from 'src/stores/modelStore';
 import { useModelItem } from 'src/hooks/useModelItem';
 import type { ModelItem } from 'src/types';
 import { ColorPicker } from 'src/components/ColorSelector/ColorPicker';
-import { DeviceTypeIcon } from 'src/components/Icons/DeviceTypeIcon';
 import { MarkdownEditor } from 'src/components/MarkdownEditor/MarkdownEditor';
 import { ControlsContainer } from '../components/ControlsContainer';
 import { DeleteButton } from '../components/DeleteButton';
@@ -127,9 +133,18 @@ const scrollSidebarTo = (el: HTMLElement | null | undefined) => {
 
   if (!parent) return;
 
+  // Leave room under any sticky bars still inside the scroll pane (e.g. tabs).
+  let stickyPad = 10;
+  parent.querySelectorAll<HTMLElement>('[data-item-controls-sticky]').forEach(
+    (sticky) => {
+      stickyPad = Math.max(stickyPad, sticky.offsetHeight + 8);
+    }
+  );
+
   const parentRect = parent.getBoundingClientRect();
   const elRect = el.getBoundingClientRect();
-  const nextTop = parent.scrollTop + (elRect.top - parentRect.top) - 8;
+  const nextTop =
+    parent.scrollTop + (elRect.top - parentRect.top) - stickyPad;
   parent.scrollTo({ top: Math.max(0, nextTop), behavior: 'smooth' });
 };
 
@@ -429,7 +444,7 @@ export const NodeControls2d = ({ id }: Props) => {
     return state.items;
   });
   const [portsOpen, setPortsOpen] = useState(false);
-  const [opisOpen, setOpisOpen] = useState(false);
+  const [personalizacjaOpen, setPersonalizacjaOpen] = useState(true);
   const [expandedPortId, setExpandedPortId] = useState<string | null>(
     focusedPortIds.length === 1 ? focusedPortIds[0] : null
   );
@@ -546,13 +561,18 @@ export const NodeControls2d = ({ id }: Props) => {
     !isPatchPanel &&
     isShape2dIcon(modelItem.icon);
   const canEditTemplate = isDeviceTemplateId(modelItem.icon);
-  const serverTemplate = useModelStore((state) => {
+  const deviceTemplate = useModelStore((state) => {
     if (!modelItem.icon) return null;
     return (
       (state.deviceTemplates ?? []).find((t) => t.id === modelItem.icon) ?? null
     );
   });
-  const isServerTemplate = serverTemplate?.kind === 'SERVER';
+  const isServerTemplate =
+    deviceTemplate?.kind === 'SERVER' || deviceTemplate?.kind === 'SERVER_V2';
+  const isDinSwitch =
+    isSwitch && deviceTemplate?.formFactor === 'DIN';
+  /** Management IP — DIN switches + endpoint / server nodes. */
+  const showIpField = isPc || isDinSwitch || isServerTemplate;
   const deviceColor = parseDeviceColor(modelItem.color);
   const [sidebarTab, setSidebarTab] = useState<'ports' | 'svi'>('ports');
   const svis = modelItem.svis ?? [];
@@ -566,6 +586,16 @@ export const NodeControls2d = ({ id }: Props) => {
     modelItem.description &&
       modelItem.description !== MARKDOWN_EMPTY_VALUE
   );
+
+  const vlanIpHint = useMemo(() => {
+    if (!isPc) return { kind: 'none' as const };
+    return getVlanIpHint({
+      itemId: viewItem.id,
+      modelItem,
+      modelItems,
+      connectors
+    });
+  }, [isPc, viewItem.id, modelItem, modelItems, connectors]);
 
   const portSummaries = useMemo(() => {
     return shapePorts.map((port, index) => {
@@ -641,7 +671,7 @@ export const NodeControls2d = ({ id }: Props) => {
       // Wait for accordion expand + details mount before scrolling.
       const timer = window.setTimeout(() => {
         scrollSidebarTo(portRefs.current[portId]);
-      }, 100);
+      }, 180);
       return () => {
         window.clearTimeout(timer);
       };
@@ -651,7 +681,7 @@ export const NodeControls2d = ({ id }: Props) => {
     setExpandedPortId(null);
     const timer = window.setTimeout(() => {
       scrollSidebarTo(multiPanelRef.current);
-    }, 50);
+    }, 80);
     return () => {
       window.clearTimeout(timer);
     };
@@ -834,87 +864,294 @@ export const NodeControls2d = ({ id }: Props) => {
   return (
     <ControlsContainer>
       <Box sx={{ px: 1.5, pt: 1.25, pb: 0.5 }}>
-        <Stack
-          direction="row"
-          spacing={1}
-          alignItems="flex-end"
-          justifyContent="space-between"
+        <Accordion
+          disableGutters
+          elevation={0}
+          expanded={personalizacjaOpen}
+          onChange={(_, expanded) => {
+            setPersonalizacjaOpen(expanded);
+          }}
+          sx={{
+            bgcolor: 'transparent',
+            '&:before': { display: 'none' }
+          }}
         >
-          <Box sx={{ flex: 1, minWidth: 0 }}>
+          <AccordionSummary
+            expandIcon={<ExpandMoreIcon sx={{ fontSize: 18 }} />}
+            sx={{
+              px: 0,
+              minHeight: 28,
+              '& .MuiAccordionSummary-content': { my: 0.25 }
+            }}
+          >
             <Typography
               sx={{
                 fontSize: 10,
-                fontWeight: 600,
-                letterSpacing: 0.6,
+                fontWeight: 700,
+                letterSpacing: 0.5,
                 color: 'text.secondary',
-                textTransform: 'uppercase',
-                mb: 0.5
+                textTransform: 'uppercase'
               }}
             >
-              Nazwa
+              Personalizacja
             </Typography>
-            <Stack direction="row" spacing={0.75} alignItems="center">
-              <DeviceTypeIcon
-                iconId={modelItem.icon}
-                sx={{ fontSize: 22, color: 'text.secondary', flexShrink: 0 }}
-              />
-              <TextField
-                fullWidth
-                size="small"
-                sx={fieldSx}
-                value={modelItem.name}
-                disabled={isPatchPanel}
-                onChange={(e) => {
-                  const text = e.target.value;
-                  if (modelItem.name !== text) {
-                    updateModelItem(viewItem.id, { name: text });
+          </AccordionSummary>
+          <AccordionDetails sx={{ px: 0, pt: 0.5, pb: 0.5 }}>
+            <Stack
+              direction="row"
+              spacing={1}
+              alignItems="flex-end"
+              justifyContent="space-between"
+            >
+              <Box sx={{ flex: 1, minWidth: 0 }}>
+                <Typography
+                  sx={{
+                    fontSize: 10,
+                    fontWeight: 600,
+                    letterSpacing: 0.6,
+                    color: 'text.secondary',
+                    textTransform: 'uppercase',
+                    mb: 0.5
+                  }}
+                >
+                  Nazwa
+                </Typography>
+                <Stack direction="row" spacing={0.75} alignItems="center">
+                  <DeviceTypeIcon
+                    iconId={modelItem.icon}
+                    sx={{ fontSize: 22, color: 'text.secondary', flexShrink: 0 }}
+                  />
+                  <TextField
+                    fullWidth
+                    size="small"
+                    sx={fieldSx}
+                    value={modelItem.name}
+                    disabled={isPatchPanel}
+                    onChange={(e) => {
+                      const text = e.target.value;
+                      if (modelItem.name !== text) {
+                        updateModelItem(viewItem.id, { name: text });
+                      }
+                    }}
+                  />
+                </Stack>
+              </Box>
+              {!isPatchPanel && (
+                <Box
+                  title={
+                    isCabinet
+                      ? 'Kolor szafy (tint + przezroczystość)'
+                      : isBlanking
+                        ? 'Kolor zaślepki (tint + przezroczystość)'
+                        : 'Kolor urządzenia (delikatny tint + przezroczystość)'
                   }
-                }}
-              />
+                  sx={{
+                    flexShrink: 0,
+                    pb: 0.25,
+                    display: 'flex',
+                    flexDirection: 'column',
+                    alignItems: 'center',
+                    gap: 0.25,
+                    minWidth: 72,
+                    '& .MuiFormControl-root': { m: 0 }
+                  }}
+                >
+                  <Typography
+                    sx={{
+                      fontSize: 10,
+                      fontWeight: 600,
+                      letterSpacing: 0.6,
+                      color: 'text.secondary',
+                      textTransform: 'uppercase',
+                      mb: 0.25
+                    }}
+                  >
+                    Kolor
+                  </Typography>
+                  <ColorPicker
+                    format="hex8"
+                    value={modelItem.color?.trim() || '#ffffff00'}
+                    onChange={(color) => {
+                      updateModelItem(viewItem.id, {
+                        color: normalizeDeviceColorInput(color)
+                      });
+                    }}
+                  />
+                  <Typography
+                    sx={{
+                      fontSize: 9,
+                      color: 'text.secondary',
+                      lineHeight: 1,
+                      userSelect: 'none'
+                    }}
+                  >
+                    {Math.round(deviceColor.alpha * 100)}%
+                  </Typography>
+                </Box>
+              )}
             </Stack>
-          </Box>
-          {!isPatchPanel && (
-          <Box
-            title={
-              isCabinet
-                ? 'Kolor szafy (tint + przezroczystość)'
-                : isBlanking
-                  ? 'Kolor zaślepki (tint + przezroczystość)'
-                  : 'Kolor urządzenia (delikatny tint + przezroczystość)'
-            }
-            sx={{
-              flexShrink: 0,
-              pb: 0.25,
-              display: 'flex',
-              flexDirection: 'column',
-              alignItems: 'center',
-              gap: 0.25,
-              minWidth: 72,
-              '& .MuiFormControl-root': { m: 0 }
-            }}
-          >
-            <ColorPicker
-              format="hex8"
-              value={modelItem.color?.trim() || '#ffffff00'}
-              onChange={(color) => {
-                updateModelItem(viewItem.id, {
-                  color: normalizeDeviceColorInput(color)
-                });
-              }}
-            />
-            <Typography
-              sx={{
-                fontSize: 9,
-                color: 'text.secondary',
-                lineHeight: 1,
-                userSelect: 'none'
-              }}
-            >
-              {Math.round(deviceColor.alpha * 100)}%
-            </Typography>
-          </Box>
-          )}
-        </Stack>
+
+            {!isPatchPanel && (
+              <Box sx={{ mt: 1.25 }}>
+                <Typography
+                  sx={{
+                    fontSize: 10,
+                    fontWeight: 600,
+                    letterSpacing: 0.4,
+                    color: 'text.secondary',
+                    textTransform: 'uppercase',
+                    mb: 0.25
+                  }}
+                >
+                  Przezroczystość koloru
+                </Typography>
+                <Slider
+                  size="small"
+                  min={0}
+                  max={100}
+                  value={Math.round(deviceColor.alpha * 100)}
+                  onChange={(_, value) => {
+                    const alpha =
+                      (Array.isArray(value) ? value[0] : value) / 100;
+                    updateModelItem(viewItem.id, {
+                      color: setDeviceColorAlpha(
+                        deviceColor.hex || '#94a3b8',
+                        alpha
+                      )
+                    });
+                  }}
+                  valueLabelDisplay="auto"
+                  valueLabelFormat={(v) => `${v}%`}
+                />
+              </Box>
+            )}
+
+            {!isPatchPanel && (
+              <Box sx={{ mt: 1.25 }}>
+                <Typography
+                  sx={{
+                    fontSize: 10,
+                    fontWeight: 600,
+                    letterSpacing: 0.4,
+                    color: 'text.secondary',
+                    textTransform: 'uppercase',
+                    mb: 0.5
+                  }}
+                >
+                  Opis{hasDescription ? '' : ' (pusty)'}
+                </Typography>
+                <MarkdownEditor
+                  value={modelItem.description}
+                  onChange={(text) => {
+                    if (modelItem.description !== text) {
+                      updateModelItem(viewItem.id, { description: text });
+                    }
+                  }}
+                />
+                {isPc && (
+                  <Typography
+                    sx={{
+                      mt: 0.75,
+                      fontSize: 11,
+                      color: 'text.secondary',
+                      lineHeight: 1.35
+                    }}
+                  >
+                    Na froncie Node: pierwsze 39 znaków (max. czcionka). Reszta
+                    w plakietce.
+                  </Typography>
+                )}
+                {isPc && (
+                  <FormControlLabel
+                    sx={{ mt: 1, ml: 0, mr: 0 }}
+                    control={
+                      <Switch
+                        size="small"
+                        checked={viewItem.showDescriptionLabel !== false}
+                        onChange={(e) => {
+                          updateViewItem(viewItem.id, {
+                            showDescriptionLabel: e.target.checked
+                          });
+                        }}
+                      />
+                    }
+                    label={
+                      <Typography
+                        sx={{ fontSize: 12.5, color: 'text.secondary' }}
+                      >
+                        Pokazuj plakietkę
+                      </Typography>
+                    }
+                  />
+                )}
+                {hasDescription && (
+                  <Box sx={{ mt: 1 }}>
+                    <Typography
+                      sx={{
+                        fontSize: 10,
+                        fontWeight: 600,
+                        letterSpacing: 0.4,
+                        color: 'text.secondary',
+                        textTransform: 'uppercase',
+                        mb: 0.5
+                      }}
+                    >
+                      Wielkość opisu
+                    </Typography>
+                    <Slider
+                      size="small"
+                      marks
+                      step={0.5}
+                      min={3}
+                      max={10}
+                      value={Math.min(10, Math.max(3, viewItem.labelScale ?? 3))}
+                      onChange={(_, value) => {
+                        const labelScale = Array.isArray(value)
+                          ? value[0]
+                          : value;
+                        updateViewItem(viewItem.id, { labelScale });
+                      }}
+                      valueLabelDisplay="auto"
+                      valueLabelFormat={(v) => `${v}×`}
+                    />
+                    <Typography
+                      sx={{
+                        fontSize: 10,
+                        fontWeight: 600,
+                        letterSpacing: 0.4,
+                        color: 'text.secondary',
+                        textTransform: 'uppercase',
+                        mb: 0.5,
+                        mt: 1
+                      }}
+                    >
+                      Długość linii
+                    </Typography>
+                    <Slider
+                      size="small"
+                      marks
+                      step={20}
+                      min={60}
+                      max={320}
+                      value={viewItem.labelHeight ?? 140}
+                      onChange={(_, value) => {
+                        const labelHeight = Array.isArray(value)
+                          ? value[0]
+                          : value;
+                        updateViewItem(viewItem.id, {
+                          labelHeight,
+                          labelOffset: undefined
+                        });
+                      }}
+                      valueLabelDisplay="auto"
+                    />
+                  </Box>
+                )}
+              </Box>
+            )}
+          </AccordionDetails>
+        </Accordion>
+
         {isPc && (
           <FormControlLabel
             sx={{ mt: 1, ml: 0, mr: 0 }}
@@ -935,6 +1172,151 @@ export const NodeControls2d = ({ id }: Props) => {
               </Typography>
             }
           />
+        )}
+        {isPc && (
+          <Box sx={{ mt: 1.25 }}>
+            <Typography
+              sx={{
+                fontSize: 10,
+                fontWeight: 600,
+                letterSpacing: 0.6,
+                color: 'text.secondary',
+                textTransform: 'uppercase',
+                mb: 0.75
+              }}
+            >
+              Ikona
+            </Typography>
+            <Box
+              sx={{
+                display: 'grid',
+                gridTemplateColumns: 'repeat(auto-fill, minmax(44px, 1fr))',
+                gap: 0.75
+              }}
+            >
+              {(() => {
+                const fromShape = resolveDeviceTypeIconKind(modelItem.icon);
+                const activeKind: NodeIconKind =
+                  modelItem.nodeIcon ??
+                  (NODE_ICON_OPTIONS.some((o) => o.kind === fromShape)
+                    ? (fromShape as NodeIconKind)
+                    : 'pc');
+                return NODE_ICON_OPTIONS.map((opt) => {
+                  const selected = activeKind === opt.kind;
+                  return (
+                    <Box
+                      key={opt.kind}
+                      component="button"
+                      type="button"
+                      title={opt.label}
+                      onClick={() => {
+                        updateModelItem(viewItem.id, { nodeIcon: opt.kind });
+                      }}
+                      sx={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        width: '100%',
+                        aspectRatio: '1',
+                        p: 0,
+                        m: 0,
+                        cursor: 'pointer',
+                        borderRadius: 1,
+                        border: '1.5px solid',
+                        borderColor: selected ? 'primary.main' : 'divider',
+                        bgcolor: selected
+                          ? 'action.selected'
+                          : 'background.paper',
+                        color: selected ? 'primary.main' : 'text.secondary',
+                        transition:
+                          'border-color 0.12s ease, background 0.12s ease',
+                        '&:hover': {
+                          borderColor: 'primary.main',
+                          bgcolor: 'action.hover'
+                        }
+                      }}
+                    >
+                      <DeviceTypeIcon kind={opt.kind} sx={{ fontSize: 22 }} />
+                    </Box>
+                  );
+                });
+              })()}
+            </Box>
+          </Box>
+        )}
+        {showIpField && (
+          <Box sx={{ mt: 1.25 }}>
+            <Stack
+              direction="row"
+              alignItems="center"
+              justifyContent="space-between"
+              sx={{ mb: 0.5 }}
+            >
+              <Typography
+                sx={{
+                  fontSize: 10,
+                  fontWeight: 600,
+                  letterSpacing: 0.6,
+                  color: 'text.secondary',
+                  textTransform: 'uppercase'
+                }}
+              >
+                IP
+              </Typography>
+              <FormControlLabel
+                sx={{ m: 0, ml: 1 }}
+                control={
+                  <Switch
+                    size="small"
+                    checked={Boolean(modelItem.dhcp)}
+                    onChange={(e) => {
+                      updateModelItem(viewItem.id, {
+                        dhcp: e.target.checked || undefined
+                      });
+                    }}
+                  />
+                }
+                label={
+                  <Typography sx={{ fontSize: 12, color: 'text.secondary' }}>
+                    DHCP
+                  </Typography>
+                }
+              />
+            </Stack>
+            <TextField
+              fullWidth
+              size="small"
+              sx={fieldSx}
+              placeholder={
+                vlanIpHint.kind === 'suggestion'
+                  ? vlanIpHint.placeholder
+                  : 'np. 192.168.1.10/24'
+              }
+              value={modelItem.ip ?? ''}
+              disabled={Boolean(modelItem.dhcp)}
+              onChange={(e) => {
+                const text = e.target.value;
+                updateModelItem(viewItem.id, {
+                  ip: text.trim() ? text : undefined
+                });
+              }}
+              helperText={
+                modelItem.dhcp
+                  ? undefined
+                  : vlanIpHint.kind === 'suggestion'
+                    ? `Podpowiedź z VLAN: ${vlanIpHint.placeholder}`
+                    : vlanIpHint.kind === 'ambiguous'
+                      ? 'Nie jasna konfiguracja IP'
+                      : undefined
+              }
+              FormHelperTextProps={{
+                sx:
+                  vlanIpHint.kind === 'ambiguous'
+                    ? { color: 'warning.main', fontWeight: 600 }
+                    : undefined
+              }}
+            />
+          </Box>
         )}
         {isPatchPanel && !isPatchPanelActive && (
           <Alert severity="info" sx={{ mt: 1.25, py: 0, fontSize: 12 }}>
@@ -1140,173 +1522,46 @@ export const NodeControls2d = ({ id }: Props) => {
             </Typography>
           </Box>
         )}
-        {!isPatchPanel && (
-        <Box sx={{ mt: 1 }}>
-          <Typography
-            sx={{
-              fontSize: 10,
-              fontWeight: 600,
-              letterSpacing: 0.4,
-              color: 'text.secondary',
-              textTransform: 'uppercase',
-              mb: 0.25
-            }}
-          >
-            Przezroczystość koloru
-          </Typography>
-          <Slider
-            size="small"
-            min={0}
-            max={100}
-            value={Math.round(deviceColor.alpha * 100)}
-            onChange={(_, value) => {
-              const alpha = (Array.isArray(value) ? value[0] : value) / 100;
-              updateModelItem(viewItem.id, {
-                color: setDeviceColorAlpha(
-                  deviceColor.hex || '#94a3b8',
-                  alpha
-                )
-              });
-            }}
-            valueLabelDisplay="auto"
-            valueLabelFormat={(v) => `${v}%`}
-          />
-        </Box>
-        )}
-        {!isPatchPanel && (
-        <Box sx={{ mt: 1.25 }}>
-          <Accordion
-            disableGutters
-            elevation={0}
-            expanded={opisOpen}
-            onChange={(_, expanded) => {
-              setOpisOpen(expanded);
-            }}
-            sx={{
-              bgcolor: 'transparent',
-              '&:before': { display: 'none' }
-            }}
-          >
-            <AccordionSummary
-              expandIcon={<ExpandMoreIcon sx={{ fontSize: 18 }} />}
-              sx={{
-                px: 0,
-                minHeight: 28,
-                '& .MuiAccordionSummary-content': { my: 0.25 }
-              }}
-            >
-              <Typography
-                sx={{
-                  fontSize: 10,
-                  fontWeight: 600,
-                  letterSpacing: 0.4,
-                  color: 'text.secondary',
-                  textTransform: 'uppercase'
-                }}
-              >
-                Opis{hasDescription ? '' : ' (pusty)'}
-              </Typography>
-            </AccordionSummary>
-            <AccordionDetails sx={{ px: 0, pt: 0, pb: 0.5 }}>
-              <MarkdownEditor
-                value={modelItem.description}
-                onChange={(text) => {
-                  if (modelItem.description !== text) {
-                    updateModelItem(viewItem.id, { description: text });
-                  }
-                }}
-              />
-              {hasDescription && (
-                <Box sx={{ mt: 1 }}>
-                  <Typography
-                    sx={{
-                      fontSize: 10,
-                      fontWeight: 600,
-                      letterSpacing: 0.4,
-                      color: 'text.secondary',
-                      textTransform: 'uppercase',
-                      mb: 0.5
-                    }}
-                  >
-                    Wielkość opisu
-                  </Typography>
-                  <Slider
-                    size="small"
-                    marks
-                    step={0.5}
-                    min={3}
-                    max={10}
-                    value={Math.min(10, Math.max(3, viewItem.labelScale ?? 3))}
-                    onChange={(_, value) => {
-                      const labelScale = Array.isArray(value) ? value[0] : value;
-                      updateViewItem(viewItem.id, { labelScale });
-                    }}
-                    valueLabelDisplay="auto"
-                    valueLabelFormat={(v) => `${v}×`}
-                  />
-                  <Typography
-                    sx={{
-                      fontSize: 10,
-                      fontWeight: 600,
-                      letterSpacing: 0.4,
-                      color: 'text.secondary',
-                      textTransform: 'uppercase',
-                      mb: 0.5,
-                      mt: 1
-                    }}
-                  >
-                    Długość linii
-                  </Typography>
-                  <Slider
-                    size="small"
-                    marks
-                    step={20}
-                    min={60}
-                    max={320}
-                    value={viewItem.labelHeight ?? 140}
-                    onChange={(_, value) => {
-                      const labelHeight = Array.isArray(value) ? value[0] : value;
-                      updateViewItem(viewItem.id, {
-                        labelHeight,
-                        labelOffset: undefined
-                      });
-                    }}
-                    valueLabelDisplay="auto"
-                  />
-                </Box>
-              )}
-            </AccordionDetails>
-          </Accordion>
-        </Box>
-        )}
       </Box>
 
       {!isCabinet && !isBlanking && !isPatchPanel && (
       <Box sx={{ px: 1.5, pt: 0.5, pb: 1 }}>
         {isSwitch ? (
           <>
-            <Tabs
-              value={sidebarTab}
-              onChange={(_, value: 'ports' | 'svi') => {
-                setSidebarTab(value);
-              }}
+            <Box
+              data-item-controls-sticky
               sx={{
-                minHeight: 32,
-                mb: 0.5,
-                '& .MuiTab-root': {
-                  minHeight: 32,
-                  py: 0,
-                  px: 1,
-                  fontSize: 11,
-                  fontWeight: 700,
-                  letterSpacing: 0.4,
-                  textTransform: 'uppercase'
-                }
+                position: 'sticky',
+                top: 0,
+                zIndex: 2,
+                bgcolor: 'background.paper',
+                borderBottom: '1px solid',
+                borderColor: 'divider',
+                mb: 0.5
               }}
             >
-              <Tab value="ports" label={`Porty (${shapePorts.length})`} />
-              <Tab value="svi" label={`SVI (${svis.length})`} />
-            </Tabs>
+              <Tabs
+                value={sidebarTab}
+                onChange={(_, value: 'ports' | 'svi') => {
+                  setSidebarTab(value);
+                }}
+                sx={{
+                  minHeight: 32,
+                  '& .MuiTab-root': {
+                    minHeight: 32,
+                    py: 0,
+                    px: 1,
+                    fontSize: 11,
+                    fontWeight: 700,
+                    letterSpacing: 0.4,
+                    textTransform: 'uppercase'
+                  }
+                }}
+              >
+                <Tab value="ports" label={`Porty (${shapePorts.length})`} />
+                <Tab value="svi" label={`SVI (${svis.length})`} />
+              </Tabs>
+            </Box>
 
             {sidebarTab === 'ports' && (
               <>

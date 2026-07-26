@@ -33,5 +33,7 @@ export * from './plan2dv2';
 export * from './projectTabs';
 export * from './htmlExportHover';
 export * from './offscreenPlanRenderer';
+export * from './cloneModelItem';
+export * from './vlanIpHint';
 export * from './exportAsHtml';
 export * from './exportAsPdf';

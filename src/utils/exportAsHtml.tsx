@@ -405,7 +405,9 @@ ${styles}
         const info = cableInfo[cableId];
         if (!info) { hideInfoPanel(); return; }
         const endpointRows = (info.endpoints || []).map((e) => {
-          return '<div class="endpoint">' + esc(e.itemName) + ' — ' + esc(e.portLabel) + '</div>';
+          return '<div class="endpoint">' + esc(e.itemName) + ' — ' + esc(e.portLabel) +
+            (e.ip ? '<div style="margin-top:2px;font-weight:600">IP ' + esc(e.ip) + '</div>' : '') +
+            '</div>';
         }).join('');
         showInfoPanel(
           '<h4>' + esc(info.vlanLabel) + (info.linkMode === 'mismatch' ? ' (niezgodność trunk/access)' : '') + '</h4>' + endpointRows

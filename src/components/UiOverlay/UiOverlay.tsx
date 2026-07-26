@@ -1,5 +1,7 @@
 import React, { useCallback, useMemo, useRef } from 'react';
-import { Box, useTheme } from '@mui/material';
+import { Box, IconButton, Typography, useTheme } from '@mui/material';
+import ChevronLeftIcon from '@mui/icons-material/ChevronLeft';
+import ChevronRightIcon from '@mui/icons-material/ChevronRight';
 import { EditorModeEnum } from 'src/types';
 import { UiElement } from 'src/components/UiElement/UiElement';
 import { SceneLayer } from 'src/components/SceneLayer/SceneLayer';
@@ -15,10 +17,26 @@ import { ContextMenuManager } from 'src/components/ContextMenu/ContextMenuManage
 import { ViewModeTabs } from 'src/components/ViewModeTabs/ViewModeTabs';
 import { PortPipOverlay } from 'src/components/PortPipOverlay/PortPipOverlay';
 import { PortPipHoverController } from 'src/components/PortPipOverlay/PortPipHoverController';
+import { Shape2dPortHoverController } from 'src/components/PortPipOverlay/Shape2dPortHoverController';
+import { PortLoupeOverlay } from 'src/components/PortPipOverlay/PortLoupeOverlay';
 import { SviHoverController } from 'src/components/UiOverlay/SviHoverController';
 import { WorkshopView } from 'src/components/Workshop/WorkshopView';
 import { ExportImageDialog } from '../ExportImageDialog/ExportImageDialog';
+import { useScene } from 'src/hooks/useScene';
 import { isPlanProjection } from 'src/utils';
+
+const findConnectorIdForPort = (
+  connectors: { id: string; anchors: { ref: { item?: string; port?: string } }[] }[],
+  itemId: string,
+  portId: string
+): string | null => {
+  const hit = connectors.find((connector) => {
+    return connector.anchors.some((anchor) => {
+      return anchor.ref.item === itemId && anchor.ref.port === portId;
+    });
+  });
+  return hit?.id ?? null;
+};
 
 const ToolsEnum = {
   MAIN_MENU: 'MAIN_MENU',
@@ -81,6 +99,9 @@ export const UiOverlay = () => {
   const selectedItemIds = useUiStateStore((state) => {
     return state.selectedItemIds;
   });
+  const focusedPortIds = useUiStateStore((state) => {
+    return state.focusedPortIds;
+  });
   const projectionMode = useUiStateStore((state) => {
     return state.projectionMode;
   });
@@ -96,21 +117,70 @@ export const UiOverlay = () => {
   const isWorkshopOpen = useUiStateStore((state) => {
     return state.isWorkshopOpen;
   });
+  const isRightSidebarOpen = useUiStateStore((state) => {
+    return state.isRightSidebarOpen;
+  });
+  const { connectors } = useScene();
   const { size: rendererSize } = useResizeObserver(rendererEl);
   const isTwoD = isPlanProjection(projectionMode);
   const isClassic2d = projectionMode === 'TWO_D';
-  const showItemControls =
+  const hasItemControlsContent =
     Boolean(itemControls) || (isTwoD && selectedItemIds.length >= 2);
-  const selectedConnectorId =
-    itemControls?.type === 'CONNECTOR' ? itemControls.id : null;
+  /** Cable relation HUD: selected cable, or cable attached to a focused port. */
+  const selectedConnectorId = useMemo(() => {
+    if (itemControls?.type === 'CONNECTOR') {
+      return itemControls.id;
+    }
+    if (mode.type === 'CONNECTOR') {
+      return mode.id;
+    }
+    if (
+      isClassic2d &&
+      itemControls?.type === 'ITEM' &&
+      focusedPortIds.length > 0
+    ) {
+      for (const portId of focusedPortIds) {
+        const connectorId = findConnectorIdForPort(
+          connectors,
+          itemControls.id,
+          portId
+        );
+        if (connectorId) return connectorId;
+      }
+    }
+    return null;
+  }, [
+    itemControls,
+    mode,
+    isClassic2d,
+    focusedPortIds,
+    connectors
+  ]);
+
   // Room for device creator radios + port previews (~22% width).
   const itemControlsWidth = isTwoD
     ? Math.min(340, Math.max(290, Math.round(rendererSize.width * 0.22)))
     : 280;
 
+  /** Plan mode: persistent full-height right dock (content may be empty). */
+  const showPlanSidebarChrome =
+    isTwoD &&
+    availableTools.includes('ITEM_CONTROLS') &&
+    !isWorkshopOpen;
+  const planSidebarExpanded = showPlanSidebarChrome && isRightSidebarOpen;
+
+  /** Iso mode: floating panel only when there is content. */
+  const showIsoItemControls =
+    !isTwoD &&
+    availableTools.includes('ITEM_CONTROLS') &&
+    hasItemControlsContent &&
+    !isWorkshopOpen;
+
   return (
     <>
       <PortPipHoverController />
+      <Shape2dPortHoverController />
+      <PortLoupeOverlay />
       <PortPipOverlay />
       <SviHoverController />
       {isWorkshopOpen && <WorkshopView />}
@@ -124,7 +194,149 @@ export const UiOverlay = () => {
           zIndex: 20
         }}
       >
-        {availableTools.includes('ITEM_CONTROLS') && showItemControls && !isWorkshopOpen && (
+        {/* Plan (2D): persistent full-height right sidebar */}
+        {showPlanSidebarChrome && (
+          <>
+            {planSidebarExpanded ? (
+              <UiElement
+                sx={{
+                  position: 'absolute',
+                  width: `${itemControlsWidth}px`,
+                  height: `${rendererSize.height}px`,
+                  maxHeight: `${rendererSize.height}px`,
+                  overflow: 'hidden',
+                  borderRadius: 0,
+                  boxShadow: '-2px 0 12px rgba(15,23,42,0.08)',
+                  display: 'flex',
+                  flexDirection: 'column'
+                }}
+                style={{
+                  left: rendererSize.width - itemControlsWidth,
+                  top: 0
+                }}
+              >
+                {/* Tools stay fixed — not inside the scrolling context */}
+                <Box
+                  sx={{
+                    flexShrink: 0,
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 0.5,
+                    px: 0.75,
+                    py: 0.75,
+                    bgcolor: 'background.paper'
+                  }}
+                >
+                  <Box sx={{ flex: 1, minWidth: 0 }}>
+                    {availableTools.includes('TOOL_MENU') && (
+                      <ToolMenu embedded />
+                    )}
+                  </Box>
+                  <IconButton
+                    size="small"
+                    aria-label="Ukryj panel boczny"
+                    title="Ukryj panel boczny"
+                    onClick={() => {
+                      uiStateActions.setRightSidebarOpen(false);
+                    }}
+                    sx={{ color: 'text.secondary', flexShrink: 0 }}
+                  >
+                    <ChevronRightIcon fontSize="small" />
+                  </IconButton>
+                </Box>
+                <Box
+                  aria-hidden
+                  sx={{
+                    flexShrink: 0,
+                    height: 3,
+                    bgcolor: 'grey.800',
+                    opacity: 0.85
+                  }}
+                />
+                {/* Only this pane scrolls — port scroll-into-view targets it */}
+                <Box
+                  data-item-controls-scroll
+                  sx={{
+                    flex: 1,
+                    minHeight: 0,
+                    width: '100%',
+                    overflowY: 'auto',
+                    overscrollBehavior: 'contain',
+                    '&::-webkit-scrollbar': {
+                      display: 'none'
+                    }
+                  }}
+                >
+                  {hasItemControlsContent ? (
+                    <ItemControlsManager />
+                  ) : (
+                    <Box sx={{ px: 2, py: 2.5 }}>
+                      <Typography
+                        sx={{
+                          fontSize: 12,
+                          fontWeight: 700,
+                          letterSpacing: 0.5,
+                          color: 'text.secondary',
+                          textTransform: 'uppercase',
+                          mb: 0.75
+                        }}
+                      >
+                        Kontekst
+                      </Typography>
+                      <Typography
+                        sx={{
+                          fontSize: 13,
+                          color: 'text.secondary',
+                          lineHeight: 1.45
+                        }}
+                      >
+                        Wybierz urządzenie na planie albo naciśnij{' '}
+                        <Box component="span" sx={{ fontWeight: 700 }}>
+                          +
+                        </Box>{' '}
+                        aby dodać nowe.
+                      </Typography>
+                    </Box>
+                  )}
+                </Box>
+              </UiElement>
+            ) : (
+              <Box
+                sx={{
+                  position: 'absolute',
+                  zIndex: 21,
+                  display: 'flex',
+                  flexDirection: 'column',
+                  alignItems: 'flex-end',
+                  gap: 1
+                }}
+                style={{
+                  left: rendererSize.width - appPadding.x,
+                  top: appPadding.y,
+                  transform: 'translateX(-100%)'
+                }}
+              >
+                {availableTools.includes('TOOL_MENU') && <ToolMenu />}
+                <UiElement sx={{ p: 0.25 }}>
+                  <IconButton
+                    size="small"
+                    aria-label="Pokaż panel boczny"
+                    title="Pokaż panel boczny"
+                    onClick={() => {
+                      uiStateActions.setRightSidebarOpen(true);
+                    }}
+                    sx={{ color: 'text.secondary' }}
+                  >
+                    <ChevronLeftIcon fontSize="small" />
+                  </IconButton>
+                </UiElement>
+              </Box>
+            )}
+          </>
+        )}
+
+        {/* Iso: floating item controls (left) — only when content exists */}
+        {showIsoItemControls && (
           <UiElement
             data-item-controls-scroll
             sx={{
@@ -137,9 +349,7 @@ export const UiOverlay = () => {
               }
             }}
             style={{
-              left: isTwoD
-                ? rendererSize.width - appPadding.x - itemControlsWidth
-                : appPadding.x,
+              left: appPadding.x,
               top: appPadding.y * 2 + spacing(2),
               maxHeight: rendererSize.height - appPadding.y * 6
             }}
@@ -148,34 +358,36 @@ export const UiOverlay = () => {
           </UiElement>
         )}
 
-        {availableTools.includes('TOOL_MENU') && !isWorkshopOpen && (
-          <Box
-            sx={{
-              position: 'absolute',
-              transform: 'translateX(-100%)'
-            }}
-            style={{
-              left:
-                rendererSize.width -
-                appPadding.x -
-                (isTwoD && showItemControls
-                  ? itemControlsWidth + spacing(1)
-                  : 0),
-              top: appPadding.y
-            }}
-          >
-            <ToolMenu />
-          </Box>
-        )}
+        {/* Iso / non-plan: floating tool menu (plan tools live in the sidebar) */}
+        {availableTools.includes('TOOL_MENU') &&
+          !isWorkshopOpen &&
+          !isTwoD && (
+            <Box
+              sx={{
+                position: 'absolute',
+                transform: 'translateX(-100%)'
+              }}
+              style={{
+                left: rendererSize.width - appPadding.x,
+                top: appPadding.y
+              }}
+            >
+              <ToolMenu />
+            </Box>
+          )}
 
         {availableTools.includes('ZOOM_CONTROLS') && !isWorkshopOpen && (
           <Box
             sx={{
               position: 'absolute',
-              transformOrigin: 'bottom left'
+              display: 'flex',
+              flexDirection: 'row',
+              alignItems: 'flex-end',
+              gap: 1,
+              transform: 'translateY(-100%)'
             }}
             style={{
-              top: rendererSize.height - appPadding.y * 2,
+              top: rendererSize.height - appPadding.y,
               left: appPadding.x
             }}
           >
@@ -194,7 +406,7 @@ export const UiOverlay = () => {
               }}
               style={{
                 left: appPadding.x,
-                top: rendererSize.height - appPadding.y * 2 - spacing(22)
+                top: rendererSize.height - appPadding.y * 2 - spacing(28)
               }}
             >
               <ConnectorRelationPanel connectorId={selectedConnectorId} />
@@ -237,7 +449,11 @@ export const UiOverlay = () => {
 
       {mode.type === 'PLACE_ICON' && mode.id && (
         <SceneLayer disableAnimation>
-          <DragAndDrop iconId={mode.id} tile={mouse.position.tile} />
+          <DragAndDrop
+            iconId={mode.id}
+            tile={mouse.position.tile}
+            draftModelItem={mode.draftModelItem}
+          />
         </SceneLayer>
       )}
 

@@ -37,6 +37,9 @@ export const Cursor = () => {
   const mode = useUiStateStore((state) => {
     return state.mode;
   });
+  const shape2dPortHover = useUiStateStore((state) => {
+    return state.shape2dPortHover;
+  });
   const scene = useScene();
   const modelItems = useModelStore((state) => {
     return state.items;
@@ -67,6 +70,7 @@ export const Cursor = () => {
       scene,
       modelItems,
       maxDistance: SHAPE_2D_PORT_SNAP_DISTANCE,
+      stickyHover: shape2dPortHover,
       isPortAvailable: (hit) => {
         return !isShape2dPortUnavailable({
           itemId: hit.itemId,
@@ -85,7 +89,8 @@ export const Cursor = () => {
     tile,
     scene,
     modelItems,
-    mode
+    mode,
+    shape2dPortHover
   ]);
 
   const displayTile = snappedPort?.worldTile ?? tile;

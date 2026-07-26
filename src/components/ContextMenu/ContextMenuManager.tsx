@@ -11,7 +11,8 @@ import {
   lockWaypointAtTile,
   unlockWaypointAtTile,
   stripToEndpointAnchors,
-  isPlanProjection
+  isPlanProjection,
+  cloneModelItemForDuplicate
 } from 'src/utils';
 import { useScene } from 'src/hooks/useScene';
 import { useModelStore } from 'src/stores/modelStore';
@@ -91,6 +92,32 @@ export const ContextMenuManager = ({ anchorEl }: Props) => {
       }
 
       return [
+        {
+          label: 'Duplikuj',
+          onClick: () => {
+            try {
+              const modelItem = modelItems.find((item) => {
+                return item.id === itemId;
+              });
+              if (!modelItem?.icon) {
+                onClose();
+                return;
+              }
+              const draft = cloneModelItemForDuplicate(modelItem);
+              uiStateActions.setMode({
+                type: 'PLACE_ICON',
+                id: modelItem.icon,
+                showCursor: true,
+                draftModelItem: draft
+              });
+              uiStateActions.setItemControls(null);
+              uiStateActions.setSelectedItemIds([]);
+            } catch {
+              // ignore
+            }
+            onClose();
+          }
+        },
         {
           label:
             linkedConnectors.length > 0

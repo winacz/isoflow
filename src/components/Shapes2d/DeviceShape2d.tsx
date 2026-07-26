@@ -16,11 +16,15 @@ import {
   getShape2dSize,
   getShape2dPorts
 } from 'src/config';
-import { getPortStatusColor, getDeviceTemplateLayout, parseDeviceColor, SHAPE_2D_PORT_VISUAL_SIZE_TILES } from 'src/utils';
+import { getPortStatusColor, getDeviceTemplateLayout, parseDeviceColor, toDeviceColorHex8, SHAPE_2D_PORT_VISUAL_SIZE_TILES } from 'src/utils';
 import type { ModelItem } from 'src/types';
 import type { DeviceTemplateLayout } from 'src/utils/deviceTemplateLayout';
 import { Rj45Port } from 'src/components/Shapes2d/Rj45Port';
-import { DeviceTypeIcon } from 'src/components/Icons/DeviceTypeIcon';
+import {
+  DeviceTypeIcon,
+  resolveDeviceTypeIconKind,
+  type NodeIconKind
+} from 'src/components/Icons/DeviceTypeIcon';
 
 interface Props {
   itemId?: string;
@@ -57,6 +61,12 @@ interface Props {
   layoutOverride?: DeviceTemplateLayout;
   /** Chassis fill color (hex). */
   color?: string;
+  /** Management / host IP (DIN switches, endpoint nodes). */
+  ip?: string;
+  /** Endpoint Node face icon (overrides shape-derived icon). */
+  nodeIcon?: NodeIconKind | null;
+  /** Markdown / plain description shown under IP on Node face. */
+  description?: string;
   /**
    * Drop shadow under free-standing devices.
    * Off for devices mounted inside a cabinet.
@@ -68,6 +78,8 @@ interface Props {
   poweredByPoe?: boolean;
   /** poweredByPoe but not linked to a PoE OUT port — yellow warning. */
   poePowerWarning?: boolean;
+  /** Port currently under the cursor (hover zoom). */
+  hoveredPortId?: string | null;
 }
 
 /**
@@ -93,10 +105,14 @@ export const DeviceShape2d = ({
   centered = true,
   layoutOverride,
   color = '#ffffff',
+  ip,
+  nodeIcon = null,
+  description,
   showShadow = true,
   vlanBorderColor = null,
   poweredByPoe = false,
-  poePowerWarning = false
+  poePowerWarning = false,
+  hoveredPortId = null
 }: Props) => {
   const templateLayout = layoutOverride ?? getDeviceTemplateLayout(shapeId);
   const footprint =
@@ -135,7 +151,19 @@ export const DeviceShape2d = ({
   const isAp = shapeId === SHAPE_2D_AP_ID;
   const isNas = shapeId === SHAPE_2D_NAS_ID;
   const isTablet = shapeId === SHAPE_2D_TABLET_ID;
-  const isPc = shapeId === SHAPE_2D_PC_ID || isCamera || isCameraV2 || isPrinter || isVoip || isSmartphone || isIot || isAp || isNas || isTablet;
+  const isPc =
+    shapeId === SHAPE_2D_PC_ID ||
+    isCamera ||
+    isCameraV2 ||
+    isPrinter ||
+    isVoip ||
+    isSmartphone ||
+    isIot ||
+    isAp ||
+    isNas ||
+    isTablet;
+  /** Legacy mid-body artwork (camera lens etc.) — Node face uses IP/desc instead. */
+  const showStationArtwork = false;
   /** Compact numbers on switch faces; PC/stations also compact so labels fit above the bottom jack. */
   const compactPortLabels = true;
   const portTileSize = cellSize * SHAPE_2D_PORT_VISUAL_SIZE_TILES;
@@ -148,15 +176,143 @@ export const DeviceShape2d = ({
   const earRadius = Math.max(4, Math.round(earW * 0.28));
   const earMaskUid = useId().replace(/:/g, '');
   const chassisTint = parseDeviceColor(color);
-  /** Header band ≈ top third of the chassis (name + icon + divider). */
-  const headerBandH = pxHeight / 3;
-  // Rack 1U: keep labels inside the band. Free devices keep larger chrome.
-  const headerIconSize = isRack
-    ? Math.max(16, Math.min(26, Math.round(headerBandH * 0.4)))
-    : Math.max(36, Math.round(headerBandH * 0.45));
-  const headerNameSize = isRack
-    ? Math.max(11, Math.min(15, Math.round(headerBandH * 0.26)))
-    : Math.max(18, Math.round(headerBandH * 0.28));
+  /**
+   * Node: header 30% / IP+desc 30% / RJ45 rest.
+   * Switch / rack: header ≈ top third.
+   */
+  const headerBandH = isPc ? pxHeight * 0.3 : pxHeight / 3;
+  const midBandH = isPc ? pxHeight * 0.3 : 0;
+  const nodeFaceIconKind: NodeIconKind = (() => {
+    if (nodeIcon) return nodeIcon;
+    const fromShape = resolveDeviceTypeIconKind(shapeId);
+    if (
+      fromShape === 'pc' ||
+      fromShape === 'camera' ||
+      fromShape === 'cameraV2' ||
+      fromShape === 'printer' ||
+      fromShape === 'voip' ||
+      fromShape === 'smartphone' ||
+      fromShape === 'iot' ||
+      fromShape === 'ap' ||
+      fromShape === 'nas' ||
+      fromShape === 'tablet' ||
+      fromShape === 'other'
+    ) {
+      return fromShape;
+    }
+    return 'pc';
+  })();
+  const plainDescription = useMemo(() => {
+    if (!description?.trim() || description === '<p><br></p>') return '';
+    return description
+      .replace(/<[^>]+>/g, ' ')
+      .replace(/[#*_`>~\[\]]/g, '')
+      .replace(/\s+/g, ' ')
+      .trim();
+  }, [description]);
+  const headerIconSize = isPc
+    ? Math.max(22, Math.round(headerBandH * 0.88))
+    : isRack
+      ? Math.max(18, Math.round(headerBandH * 0.72))
+      : Math.max(36, Math.round(headerBandH * 0.45));
+  /** ~10 bold sans glyphs fit on one line, then wrap. */
+  const headerNameSize = (() => {
+    if (!isPc) {
+      return isRack
+        ? Math.max(16, Math.round(headerBandH * 0.78))
+        : Math.max(18, Math.round(headerBandH * 0.28));
+    }
+    const headerInnerW = pxWidth - tileW * 0.7;
+    const padX = Math.max(4, tileW * 0.15) * 2;
+    const gap = Math.max(6, Math.round(tileW * 0.18));
+    const py = Math.max(4, Math.round(headerBandH * 0.06));
+    const iconBox = Math.max(1, headerBandH - py * 2);
+    const titleW = Math.max(24, headerInnerW - padX - iconBox - gap);
+    // Average bold sans glyph ≈ 0.58em → 10 chars ≈ 5.8em of width.
+    return Math.max(10, Math.round(titleW / 5.8));
+  })();
+  /**
+   * Worst-case IPv4 CIDR width: 255.255.255.255/32 (18 monospace glyphs).
+   * Font is sized so that address never ellipsizes.
+   */
+  const NODE_IP_WORST_CHARS = 18;
+  /**
+   * On-face description budget — longer text continues on the floating plakietka.
+   * Example capacity: "sdfasdfasdfasdfasdfasdfasdfasdfasdsdf" (39).
+   */
+  const NODE_DESC_FACE_MAX_CHARS = 39;
+  const faceDescription = plainDescription.slice(0, NODE_DESC_FACE_MAX_CHARS);
+  const nodeMidLayout = (() => {
+    if (!isPc) {
+      return {
+        ipFontSize: 12,
+        descFontSize: 11,
+        midPadX: 6,
+        midPadTop: 4,
+        midPadBottom: 4,
+        gap: 4
+      };
+    }
+    const midPadX = Math.max(4, tileW * 0.12);
+    // Flush under the header divider — minimal top padding.
+    const midPadTop = Math.max(2, Math.round(tileH * 0.08));
+    const midPadBottom = Math.max(3, Math.round(midBandH * 0.04));
+    const gap = Math.max(2, Math.round(midBandH * 0.04));
+    const ipPadX = Math.max(8, Math.round(tileW * 0.22));
+    // Full-bleed label across the whole Node width.
+    const ipTextW = Math.max(24, pxWidth - ipPadX * 2);
+    // Monospace digit advance ≈ 0.62em.
+    const ipFontSize = Math.max(8, Math.floor(ipTextW / (NODE_IP_WORST_CHARS * 0.62)));
+    const ipPadY = Math.max(4, Math.round(ipFontSize * 0.32));
+    const ipBoxH = ipFontSize * 1.15 + ipPadY * 2;
+    const contentH = Math.max(24, midBandH - midPadTop - midPadBottom);
+    const descH = Math.max(16, contentH - ipBoxH - gap);
+    const descW = Math.max(32, pxWidth - midPadX * 2);
+    const chars = Math.max(1, faceDescription.length || NODE_DESC_FACE_MAX_CHARS);
+    const charW = 0.52;
+    const lineHFactor = 1.08;
+    // Largest font that still fits when wrapping to fill the description box.
+    let descFontSize = 8;
+    const maxLines = Math.max(1, Math.floor(descH / 10));
+    for (let lines = 1; lines <= maxLines; lines += 1) {
+      const cpl = Math.max(1, Math.ceil(chars / lines));
+      const fsFromW = descW / (cpl * charW);
+      const fsFromH = descH / (lines * lineHFactor);
+      const fs = Math.floor(Math.min(fsFromW, fsFromH));
+      if (fs > descFontSize) descFontSize = fs;
+    }
+    descFontSize = Math.max(10, Math.min(descFontSize, Math.floor(descH / 1.05)));
+    return {
+      ipFontSize,
+      descFontSize,
+      midPadX,
+      midPadTop,
+      midPadBottom,
+      gap,
+      ipPadX,
+      ipPadY,
+      descH,
+      descW
+    };
+  })();
+  /** Full-width IP label: node color, less transparent than chassis tint. */
+  const nodeIpLabelStyle = (() => {
+    const baseHex =
+      chassisTint.alpha > 0.02 ? chassisTint.hex : '#94a3b8';
+    const labelAlpha =
+      chassisTint.alpha > 0.02
+        ? Math.min(0.88, Math.max(0.58, chassisTint.alpha + 0.35))
+        : 0.62;
+    const bg = toDeviceColorHex8(baseHex, labelAlpha);
+    // Rough luminance for contrast (sRGB).
+    const h = baseHex.replace('#', '');
+    const r = parseInt(h.slice(0, 2), 16) / 255;
+    const g = parseInt(h.slice(2, 4), 16) / 255;
+    const b = parseInt(h.slice(4, 6), 16) / 255;
+    const lum = 0.2126 * r + 0.7152 * g + 0.0722 * b;
+    const textColor = lum < 0.45 ? '#f8fafc' : '#0f172a';
+    return { bg, textColor };
+  })();
   const chassisRadius = Math.max(2, Math.round(cellSize * 0.12));
 
   const ports = useMemo(() => {
@@ -428,7 +584,11 @@ export const DeviceShape2d = ({
           position: 'absolute',
           inset: 0,
           bgcolor: '#ffffff',
-          border: `${chassisBorderWidth}px solid ${chassisBorderColor}`,
+          // Node face content (IP label) paints above this box — border is drawn
+          // as a separate overlay so it sits on top of the label.
+          border: isPc
+            ? 'none'
+            : `${chassisBorderWidth}px solid ${chassisBorderColor}`,
           borderRadius: isRack
             ? `0`
             : chassisRadius,
@@ -453,7 +613,7 @@ export const DeviceShape2d = ({
         )}
 
         {/* Camera V2 Lens Graphic */}
-        {isCameraV2 && (
+        {showStationArtwork && isCameraV2 && (
           <Box
             sx={{
               position: 'absolute',
@@ -564,7 +724,7 @@ export const DeviceShape2d = ({
         )}
 
         {/* Drukarka (Printer) Graphic */}
-        {isPrinter && (
+        {showStationArtwork && isPrinter && (
           <Box
             sx={{
               position: 'absolute',
@@ -616,7 +776,7 @@ export const DeviceShape2d = ({
         )}
 
         {/* Telefon VoIP Graphic */}
-        {isVoip && (
+        {showStationArtwork && isVoip && (
           <Box
             sx={{
               position: 'absolute',
@@ -677,7 +837,7 @@ export const DeviceShape2d = ({
         )}
 
         {/* Smartfon Graphic */}
-        {isSmartphone && (
+        {showStationArtwork && isSmartphone && (
           <Box
             sx={{
               position: 'absolute',
@@ -731,7 +891,7 @@ export const DeviceShape2d = ({
         )}
 
         {/* Urządzenie IoT Graphic */}
-        {isIot && (
+        {showStationArtwork && isIot && (
           <Box
             sx={{
               position: 'absolute',
@@ -782,7 +942,7 @@ export const DeviceShape2d = ({
         )}
 
         {/* Access Point Graphic */}
-        {isAp && (
+        {showStationArtwork && isAp && (
           <Box
             sx={{
               position: 'absolute',
@@ -822,7 +982,7 @@ export const DeviceShape2d = ({
         )}
 
         {/* Magazyn NAS Graphic */}
-        {isNas && (
+        {showStationArtwork && isNas && (
           <Box
             sx={{
               position: 'absolute',
@@ -865,7 +1025,7 @@ export const DeviceShape2d = ({
         )}
 
         {/* Terminal / Tablet Graphic */}
-        {isTablet && (
+        {showStationArtwork && isTablet && (
           <Box
             sx={{
               position: 'absolute',
@@ -1008,6 +1168,245 @@ export const DeviceShape2d = ({
             </Box>
           );
         })}
+      {isPc ? (
+        <>
+          {/* PoE warning — top-right corner, above title */}
+          {poePowerWarning && (
+            <Box
+              title="Urządzenie zasilane PoE nie jest podłączone do portu PoE Out"
+              sx={{
+                position: 'absolute',
+                top: Math.max(3, Math.round(tileH * 0.12)),
+                right: Math.max(3, Math.round(tileW * 0.12)),
+                width: Math.max(18, Math.round(headerBandH * 0.42)),
+                height: Math.max(18, Math.round(headerBandH * 0.42)),
+                zIndex: 10,
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                pointerEvents: 'auto',
+                cursor: 'help'
+              }}
+            >
+              <Box
+                component="svg"
+                viewBox="0 0 16 14"
+                sx={{ width: '100%', height: '100%', display: 'block' }}
+              >
+                <path
+                  d="M8 1.2L14.8 13H1.2L8 1.2z"
+                  fill="#facc15"
+                  stroke="#ca8a04"
+                  strokeWidth={0.9}
+                  strokeLinejoin="round"
+                />
+                <path
+                  d="M8 5v4.2"
+                  stroke="#78350f"
+                  strokeWidth={1.3}
+                  strokeLinecap="round"
+                />
+                <circle cx={8} cy={11} r={0.7} fill="#78350f" />
+              </Box>
+            </Box>
+          )}
+
+          {/* Node header — 30%: icon (full height) + title (~10 chars/line, then wrap) */}
+          <Box
+            sx={{
+              position: 'absolute',
+              left: tileW * 0.35,
+              top: 0,
+              width: pxWidth - tileW * 0.7,
+              height: headerBandH,
+              display: 'flex',
+              flexDirection: 'row',
+              alignItems: 'stretch',
+              gap: `${Math.max(6, Math.round(tileW * 0.18))}px`,
+              px: `${Math.max(4, tileW * 0.15)}px`,
+              py: `${Math.max(4, Math.round(headerBandH * 0.06))}px`,
+              boxSizing: 'border-box',
+              zIndex: 1,
+              overflow: 'hidden'
+            }}
+          >
+            <Box
+              sx={{
+                height: '100%',
+                aspectRatio: '1',
+                flexShrink: 0,
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center'
+              }}
+            >
+              <DeviceTypeIcon
+                kind={nodeFaceIconKind}
+                sx={{
+                  fontSize: headerIconSize,
+                  width: '100%',
+                  height: '100%',
+                  color: '#334155'
+                }}
+              />
+            </Box>
+            <Box
+              sx={{
+                minWidth: 0,
+                flex: '1 1 auto',
+                height: '100%',
+                display: 'flex',
+                alignItems: 'center',
+                overflow: 'hidden'
+              }}
+            >
+              <Typography
+                sx={{
+                  color: '#1f2937',
+                  fontSize: headerNameSize,
+                  fontWeight: 700,
+                  letterSpacing: 0.15,
+                  lineHeight: 1.05,
+                  userSelect: 'none',
+                  width: '100%',
+                  overflow: 'hidden',
+                  whiteSpace: 'normal',
+                  wordBreak: 'break-word',
+                  overflowWrap: 'anywhere',
+                  hyphens: 'auto'
+                }}
+              >
+                {name}
+              </Typography>
+            </Box>
+          </Box>
+
+          {/* Node body — 30%: full-width IP label + description (no divider) */}
+          <Box
+            sx={{
+              position: 'absolute',
+              left: 0,
+              top: headerBandH,
+              width: pxWidth,
+              height: midBandH,
+              display: 'flex',
+              flexDirection: 'column',
+              alignItems: 'stretch',
+              justifyContent: 'flex-start',
+              gap: `${nodeMidLayout.gap}px`,
+              pt: `${nodeMidLayout.midPadTop}px`,
+              pb: `${nodeMidLayout.midPadBottom}px`,
+              boxSizing: 'border-box',
+              zIndex: 1,
+              overflow: 'hidden'
+            }}
+          >
+            {/* IP label — full Node width, node color + glass */}
+            <Box
+              sx={{
+                alignSelf: 'stretch',
+                width: '100%',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                px: `${nodeMidLayout.ipPadX ?? 8}px`,
+                py: `${nodeMidLayout.ipPadY ?? 4}px`,
+                borderRadius: 0,
+                bgcolor: nodeIpLabelStyle.bg,
+                borderTop: '1px solid rgba(255, 255, 255, 0.4)',
+                borderBottom: '1px solid rgba(15, 23, 42, 0.12)',
+                boxShadow:
+                  'inset 0 1px 0 rgba(255,255,255,0.45), inset 0 -1px 0 rgba(15,23,42,0.1)',
+                backdropFilter: 'blur(8px) saturate(1.25)',
+                WebkitBackdropFilter: 'blur(8px) saturate(1.25)',
+                backgroundImage:
+                  'linear-gradient(180deg, rgba(255,255,255,0.28) 0%, rgba(255,255,255,0.04) 55%, rgba(0,0,0,0.06) 100%)',
+                flexShrink: 0
+              }}
+            >
+              <Typography
+                sx={{
+                  color: nodeIpLabelStyle.textColor,
+                  fontSize: nodeMidLayout.ipFontSize,
+                  fontWeight: 800,
+                  letterSpacing: 0.2,
+                  lineHeight: 1.15,
+                  fontFamily:
+                    'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace',
+                  userSelect: 'none',
+                  textAlign: 'center',
+                  whiteSpace: 'nowrap',
+                  overflow: 'visible',
+                  maxWidth: '100%',
+                  textShadow:
+                    nodeIpLabelStyle.textColor === '#f8fafc'
+                      ? '0 1px 2px rgba(0,0,0,0.35)'
+                      : '0 1px 0 rgba(255,255,255,0.35)'
+                }}
+              >
+                {ip?.trim() || '—'}
+              </Typography>
+            </Box>
+            {faceDescription ? (
+              <Box
+                sx={{
+                  flex: '1 1 auto',
+                  minHeight: 0,
+                  width: '100%',
+                  px: `${nodeMidLayout.midPadX}px`,
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  overflow: 'hidden'
+                }}
+              >
+                <Typography
+                  sx={{
+                    color: '#334155',
+                    fontSize: nodeMidLayout.descFontSize,
+                    fontWeight: 700,
+                    lineHeight: 1.08,
+                    letterSpacing: 0.1,
+                    userSelect: 'none',
+                    width: '100%',
+                    height: '100%',
+                    maxHeight: '100%',
+                    overflow: 'hidden',
+                    whiteSpace: 'normal',
+                    wordBreak: 'break-all',
+                    overflowWrap: 'anywhere',
+                    textAlign: 'center',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    hyphens: 'auto'
+                  }}
+                >
+                  {faceDescription}
+                </Typography>
+              </Box>
+            ) : null}
+          </Box>
+
+          {/* Chassis edge above face content (IP label etc.) */}
+          <Box
+            aria-hidden
+            sx={{
+              position: 'absolute',
+              inset: 0,
+              border: `${chassisBorderWidth}px solid ${chassisBorderColor}`,
+              borderRadius: chassisRadius,
+              boxSizing: 'border-box',
+              pointerEvents: 'none',
+              zIndex: 9,
+              boxShadow: vlanBorderColor
+                ? `0 0 0 1px ${chassisBorderColor}55`
+                : undefined
+            }}
+          />
+        </>
+      ) : (
+        <>
       <Box
         sx={{
           position: 'absolute',
@@ -1119,7 +1518,7 @@ export const DeviceShape2d = ({
                 fontSize: headerNameSize,
                 fontWeight: 700,
                 letterSpacing: 0.2,
-                lineHeight: 1.15,
+                lineHeight: isRack ? 1 : 1.15,
                 userSelect: 'none',
                 whiteSpace: 'nowrap',
                 overflow: 'hidden',
@@ -1131,7 +1530,7 @@ export const DeviceShape2d = ({
               {name}
             </Typography>
           </Box>
-          {subtitle && (
+          {subtitle && !isRack && (
             <Typography
               sx={{
                 color: '#6b7280',
@@ -1148,8 +1547,87 @@ export const DeviceShape2d = ({
               {subtitle}
             </Typography>
           )}
+          {Boolean(ip?.trim()) && !isRack && (
+            <Typography
+              sx={{
+                color: '#334155',
+                fontSize: Math.max(11, Math.round(headerBandH * 0.14)),
+                fontWeight: 700,
+                lineHeight: 1.15,
+                userSelect: 'none',
+                whiteSpace: 'nowrap',
+                overflow: 'hidden',
+                textOverflow: 'ellipsis',
+                maxWidth: '100%',
+                fontFamily:
+                  'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace'
+              }}
+            >
+              <Box
+                component="span"
+                sx={{
+                  color: '#94a3b8',
+                  fontWeight: 800,
+                  letterSpacing: 0.8,
+                  mr: 0.75,
+                  fontFamily:
+                    'ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif'
+                }}
+              >
+                IP
+              </Box>
+              {ip!.trim()}
+            </Typography>
+          )}
         </Box>
       </Box>
+
+      {/* IP on rack face — right side of header (title is oversized) */}
+      {Boolean(ip?.trim()) && isRack && (
+        <Box
+          sx={{
+            position: 'absolute',
+            top: 0,
+            right: tileW * 0.5,
+            height: headerBandH,
+            display: 'flex',
+            flexDirection: 'row',
+            alignItems: 'center',
+            zIndex: 4,
+            pointerEvents: 'none',
+            maxWidth: '42%',
+            pr: `${Math.max(4, Math.round(tileW * 0.12))}px`,
+            overflow: 'hidden'
+          }}
+        >
+          <Typography
+            sx={{
+              color: '#94a3b8',
+              fontSize: Math.max(10, Math.round(headerBandH * 0.18)),
+              fontWeight: 800,
+              letterSpacing: 1,
+              mr: 1,
+              flexShrink: 0
+            }}
+          >
+            IP
+          </Typography>
+          <Typography
+            sx={{
+              color: '#0f172a',
+              fontSize: Math.max(11, Math.round(headerBandH * 0.22)),
+              fontWeight: 700,
+              fontFamily:
+                'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace',
+              whiteSpace: 'nowrap',
+              overflow: 'hidden',
+              textOverflow: 'ellipsis'
+            }}
+          >
+            {ip!.trim()}
+          </Typography>
+        </Box>
+      )}
 
       {/* Horizontal divider under header */}
       <Box
@@ -1163,21 +1641,7 @@ export const DeviceShape2d = ({
           zIndex: 1
         }}
       />
-
-      {/* Horizontal divider above bottom ports (for stations/PCs) */}
-      {isPc && (
-        <Box
-          sx={{
-            position: 'absolute',
-            left: tileW * 0.5,
-            // Sit just above the port number (port near bottom, label above jack).
-            bottom: Math.round(tileH * 2.05),
-            width: pxWidth - tileW,
-            height: Math.max(1, Math.round(tileH * 0.06)),
-            bgcolor: '#c5cdd8',
-            zIndex: 1
-          }}
-        />
+        </>
       )}
 
       {/* SVI section — sits in top-right of header, own pointer-events layer */}
@@ -1354,9 +1818,11 @@ export const DeviceShape2d = ({
               zIndex:
                 attentionPortId === port.id
                   ? 6
-                  : peerHighlightSet?.has(port.id)
-                    ? 4
-                    : 2
+                  : hoveredPortId === port.id
+                    ? 7
+                    : peerHighlightSet?.has(port.id)
+                      ? 4
+                      : 2
             }}
           >
             <Rj45Port
@@ -1379,6 +1845,7 @@ export const DeviceShape2d = ({
               poe={isPc ? null : port.poe ?? null}
               poweredByPoe={isPc ? poweredByPoe : false}
               labelPosition="above"
+              isHovered={hoveredPortId === port.id}
             />
           </Box>
         );

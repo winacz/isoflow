@@ -7,7 +7,8 @@ import { SHAPE_2D_CABINET_ID } from 'src/config';
 import {
   getPortPeerItemIds,
   isPatchPanelItem,
-  expandConnectorIdsThroughPatchPanels
+  expandConnectorIdsThroughPatchPanels,
+  isPlanProjection
 } from 'src/utils';
 import { Node } from './Node/Node';
 
@@ -79,7 +80,7 @@ export const Nodes = React.memo(({ nodes }: Props) => {
   }, [modelItems]);
 
   const highlightedNodeIds = useMemo(() => {
-    if (projectionMode !== 'TWO_D') {
+    if (!isPlanProjection(projectionMode)) {
       return null;
     }
 

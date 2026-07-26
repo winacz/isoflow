@@ -44,7 +44,8 @@ export const useIcon = (
   attentionToken?: number | null,
   vlanBorderColor?: string | null,
   poweredByPoe?: boolean,
-  poePowerWarning?: boolean
+  poePowerWarning?: boolean,
+  hoveredPortId?: string | null
 ) => {
   const [hasLoaded, setHasLoaded] = React.useState(false);
   const icons = useModelStore((state) => {
@@ -167,6 +168,14 @@ export const useIcon = (
       }
 
       const template = deviceTemplates?.find(t => t.id === icon.id);
+      const modelItemForIcon = itemId
+        ? modelItems.find((candidate) => candidate.id === itemId)
+        : undefined;
+      const itemIp = modelItemForIcon?.dhcp
+        ? 'DHCP'
+        : modelItemForIcon?.ip;
+      const itemNodeIcon = modelItemForIcon?.nodeIcon ?? null;
+      const itemDescription = modelItemForIcon?.description;
 
       if (template?.kind === 'SERVER_V2') {
         const layout = layoutDeviceTemplate(template);
@@ -177,6 +186,7 @@ export const useIcon = (
             shapeId={icon.id}
             itemId={itemId}
             name={name || icon.name}
+            ip={itemIp}
             ports={ports}
             svis={svis}
             connectedPortIds={connectedPortIds}
@@ -202,6 +212,7 @@ export const useIcon = (
             size={layout.size}
             layoutPorts={layout.ports}
             name={name || icon.name}
+            ip={itemIp}
             connectedPortIds={connectedPortIds}
             focusedPortIds={focusedPortIds}
             peerHighlightPortIds={peerHighlightPortIds}
@@ -221,6 +232,9 @@ export const useIcon = (
           name={name || icon.name}
           ports={ports}
           svis={svis}
+          ip={itemIp}
+          nodeIcon={itemNodeIcon}
+          description={itemDescription}
           connectedPortIds={connectedPortIds}
           mismatchPortIds={mismatchPortIds}
           focusedPortIds={focusedPortIds}
@@ -233,6 +247,7 @@ export const useIcon = (
           vlanBorderColor={vlanBorderColor}
           poweredByPoe={poweredByPoe}
           poePowerWarning={poePowerWarning}
+          hoveredPortId={hoveredPortId}
         />
       );
     }
@@ -272,6 +287,7 @@ export const useIcon = (
     vlanBorderColor,
     poweredByPoe,
     poePowerWarning,
+    hoveredPortId,
     deviceTemplates
   ]);
 
