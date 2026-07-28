@@ -6,7 +6,8 @@ import {
   MARKDOWN_EMPTY_VALUE,
   TILE_SIZE_2D,
   getModelItemSize,
-  isShape2dIcon
+  isShape2dIcon,
+  clampNodeLabelScale
 } from 'src/config';
 import {
   getTilePosition,
@@ -303,9 +304,7 @@ export const Node = React.memo(({
       ? (shapeSize.height * TILE_SIZE_2D) / 2
       : PROJECTED_TILE_SIZE.height / 2;
 
-  const labelScale = isPlanShape
-    ? Math.min(10, Math.max(3, node.labelScale ?? 3))
-    : 1;
+  const labelScale = isPlanShape ? clampNodeLabelScale(node.labelScale) : 1;
   const labelMaxWidth = isPlanShape
     ? Math.round(140 * labelScale)
     : 250;

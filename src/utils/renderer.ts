@@ -46,6 +46,10 @@ import {
   getItemByIdOrThrow
 } from 'src/utils';
 import { isPlanProjection } from './projection';
+import {
+  axisAlignedLineTiles,
+  buildDiagonalAwareTiles
+} from './pathOptions';
 import { useScene } from 'src/hooks/useScene';
 
 interface ScreenToIso {
@@ -1140,6 +1144,68 @@ export const getConnectorPath = ({
 };
 
 /**
+ * Algorithm cables: polyline through ports + bend waypoints.
+ * Axis-aligned legs are filled tile-by-tile; diagonal legs use smooth
+ * 45°+stub (never an orthogonal staircase zigzag).
+ */
+export const materializeAlgorithmConnectorPath = ({
+  anchors,
+  view,
+  modelItems
+}: {
+  anchors: ConnectorAnchor[];
+  view: View;
+  modelItems?: { id: string; icon?: string }[];
+}): {
+  tiles: Coords[];
+  rectangle: Rect;
+} => {
+  if (anchors.length < 2) {
+    throw new Error(
+      `Connector needs at least two anchors (receieved: ${anchors.length})`
+    );
+  }
+
+  const anchorPosition = anchors.map((anchor) => {
+    return getAnchorTile(anchor, view, modelItems);
+  });
+
+  const searchArea = getBoundingBox(anchorPosition, CONNECTOR_SEARCH_OFFSET);
+  const sorted = sortByPosition(searchArea);
+  const rectangle = {
+    from: { x: sorted.highX, y: sorted.highY },
+    to: { x: sorted.lowX, y: sorted.lowY }
+  };
+
+  const toPathLocal = (global: Coords): Coords => {
+    return normalisePositionFromOrigin({
+      position: global,
+      origin: rectangle.from
+    });
+  };
+
+  let globalTiles: Coords[] = [];
+  for (let i = 1; i < anchorPosition.length; i += 1) {
+    const from = anchorPosition[i - 1];
+    const to = anchorPosition[i];
+    const segment =
+      from.x === to.x || from.y === to.y
+        ? axisAlignedLineTiles(from, to)
+        : buildDiagonalAwareTiles(from, to);
+    globalTiles =
+      globalTiles.length === 0
+        ? segment
+        : [...globalTiles, ...segment.slice(1)];
+  }
+
+  const tiles = globalTiles.map((position) => {
+    return toPathLocal(position);
+  });
+
+  return { tiles, rectangle };
+};
+
+/**
  * Drag-time path: only the consecutive anchor tiles (no A* / no L-fill).
  * Cheap O(anchors) preview — call getConnectorPath on mouseup for the real route.
  */
@@ -1645,8 +1711,8 @@ export const getTextWidth = (text: string, fontProps: FontProps) => {
 export const getTextBoxDimensions = (textBox: TextBox): Size => {
   const width = getTextWidth(textBox.content, {
     fontSize: textBox.fontSize ?? TEXTBOX_DEFAULTS.fontSize,
-    fontFamily: DEFAULT_FONT_FAMILY,
-    fontWeight: TEXTBOX_FONT_WEIGHT
+    fontFamily: textBox.fontFamily ?? TEXTBOX_DEFAULTS.fontFamily,
+    fontWeight: textBox.fontWeight ?? TEXTBOX_DEFAULTS.fontWeight
   });
   const height = 1;
 

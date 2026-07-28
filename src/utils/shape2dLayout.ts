@@ -1746,19 +1746,25 @@ const pathUsesBusyEdge = (path: Coords[], used: Set<string>) => {
 
 /** Orthogonal L/U fill between two tiles (inclusive). */
 const orthoFill = (from: Coords, to: Coords, horizontalFirst: boolean) => {
-  const tiles: Coords[] = [{ ...from }];
-  let x = from.x;
-  let y = from.y;
+  const a = { x: Math.round(from.x), y: Math.round(from.y) };
+  const b = { x: Math.round(to.x), y: Math.round(to.y) };
+  const tiles: Coords[] = [{ ...a }];
+  let x = a.x;
+  let y = a.y;
+  const maxSteps = Math.abs(b.x - a.x) + Math.abs(b.y - a.y) + 4;
+  let guard = 0;
 
   const runX = () => {
-    while (x !== to.x) {
-      x += Math.sign(to.x - x);
+    while (guard < maxSteps && x !== b.x) {
+      guard += 1;
+      x += Math.sign(b.x - x);
       tiles.push({ x, y });
     }
   };
   const runY = () => {
-    while (y !== to.y) {
-      y += Math.sign(to.y - y);
+    while (guard < maxSteps && y !== b.y) {
+      guard += 1;
+      y += Math.sign(b.y - y);
       tiles.push({ x, y });
     }
   };
@@ -2028,7 +2034,18 @@ export const diagonalFanShape2dRoutes = ({
   connectors.forEach((connector) => {
     if (rerouteIds.has(connector.id)) return;
     const poly = connectorAnchorPolyline(connector, itemById, iconById);
-    markPathEdges(poly, usedEdges);
+    // Old zigzag cables can have hundreds of tile WPs — only reserve
+    // their major corridor (endpoints + a few bends), not every step.
+    if (poly.length <= 8) {
+      markPathEdges(poly, usedEdges);
+      return;
+    }
+    const bends = pathBendWaypoints(poly);
+    const slim =
+      bends.length <= 4
+        ? [poly[0], ...bends, poly[poly.length - 1]]
+        : [poly[0], bends[0], bends[bends.length - 1], poly[poly.length - 1]];
+    markPathEdges(slim, usedEdges);
   });
 
   groups.forEach((group, hubId) => {
@@ -2103,10 +2120,11 @@ export const diagonalFanShape2dRoutes = ({
 
       const path: Coords[] = [{ ...start }];
       let cur = { ...start };
+      const maxSteps = 2000;
 
       // Diagonal toward (leaf column, lane row).
       let guard = 0;
-      while (guard < 800 && cur.x !== end.x && cur.y !== laneY) {
+      while (guard < maxSteps && cur.x !== end.x && cur.y !== laneY) {
         guard += 1;
         cur = {
           x: cur.x + Math.sign(end.x - cur.x),
@@ -2115,17 +2133,20 @@ export const diagonalFanShape2dRoutes = ({
         path.push({ ...cur });
       }
       // Straighten onto the lane row.
-      while (cur.y !== laneY) {
+      while (guard < maxSteps && cur.y !== laneY) {
+        guard += 1;
         cur = { x: cur.x, y: cur.y + Math.sign(laneY - cur.y) };
         path.push({ ...cur });
       }
       // Horizontal magistrala along the lane row to the leaf column.
-      while (cur.x !== end.x) {
+      while (guard < maxSteps && cur.x !== end.x) {
+        guard += 1;
         cur = { x: cur.x + Math.sign(end.x - cur.x), y: cur.y };
         path.push({ ...cur });
       }
       // Short stub into the leaf port (none for lane 0).
-      while (cur.y !== end.y) {
+      while (guard < maxSteps && cur.y !== end.y) {
+        guard += 1;
         cur = { x: cur.x, y: cur.y + Math.sign(end.y - cur.y) };
         path.push({ ...cur });
       }
@@ -2585,34 +2606,33 @@ export const channelRoute = ({ selectedItems, allItems, modelItems, connectors }
   };
 
   const buildLaneRoute = (start: Coords, end: Coords, laneIndex: number, maxLanes: number): Coords[] => {
-    // Determine vertical direction from start to end
-    const dirY = end.y >= start.y ? 1 : -1;
-    // Lane Y is assigned sequentially away from the destination node port 
-    const laneY = end.y + (dirY * (laneIndex + 1));
-    
-    const path: Coords[] = [{...start}];
-    let cur = {...start};
-    
-    // Go vertical to lane
+    const from = { x: Math.round(start.x), y: Math.round(start.y) };
+    const to = { x: Math.round(end.x), y: Math.round(end.y) };
+    const dirY = to.y >= from.y ? 1 : -1;
+    const laneY = to.y + dirY * (laneIndex + 1);
+
+    const path: Coords[] = [{ ...from }];
+    let cur = { ...from };
+    const maxSteps =
+      Math.abs(to.x - from.x) + Math.abs(to.y - from.y) + Math.abs(laneY - from.y) + 8;
     let guard = 0;
-    while (cur.y !== laneY && guard < 800) {
-       cur.y += Math.sign(laneY - cur.y);
-       path.push({...cur});
-       guard++;
+
+    while (guard < maxSteps && cur.y !== laneY) {
+      guard += 1;
+      cur = { x: cur.x, y: cur.y + Math.sign(laneY - cur.y) };
+      path.push({ ...cur });
     }
-    
-    // Go horizontal to destination column
-    while (cur.x !== end.x && guard < 800) {
-       cur.x += Math.sign(end.x - cur.x);
-       path.push({...cur});
-       guard++;
+
+    while (guard < maxSteps && cur.x !== to.x) {
+      guard += 1;
+      cur = { x: cur.x + Math.sign(to.x - cur.x), y: cur.y };
+      path.push({ ...cur });
     }
-    
-    // Go vertical to destination port
-    while (cur.y !== end.y && guard < 800) {
-       cur.y += Math.sign(end.y - cur.y);
-       path.push({...cur});
-       guard++;
+
+    while (guard < maxSteps && cur.y !== to.y) {
+      guard += 1;
+      cur = { x: cur.x, y: cur.y + Math.sign(to.y - cur.y) };
+      path.push({ ...cur });
     }
 
     return cleanRouteTiles(path);
@@ -2647,3 +2667,1725 @@ export const channelRoute = ({ selectedItems, allItems, modelItems, connectors }
 
   return routes;
 };
+
+/** Stub past node outline before the shared elbow (must be ≥2 for compact). */
+export const SL3_STUB_LENGTH = 2;
+/** Clearance between leaf cluster / shared bus and the hub. */
+const SL3_APPROACH_GAP = 3;
+
+type Sp3Cable = {
+  connectorId: string;
+  leafFirst: boolean;
+  leafId: string;
+  hubId: string;
+  leafPort: Coords;
+  hubPort: Coords;
+  leafPortSide: 'TOP' | 'BOTTOM' | 'LEFT' | 'RIGHT';
+  hubPortSide: 'TOP' | 'BOTTOM' | 'LEFT' | 'RIGHT';
+};
+
+type Sl3Compass = 'NW' | 'NE' | 'SW' | 'SE' | 'N' | 'S' | 'W' | 'E';
+
+type Sl3ExitAxis = 'LEFT' | 'RIGHT' | 'UP' | 'DOWN';
+
+/**
+ * Routing plan from leaf cluster toward the hub ("Cel").
+ * Example: hub NW → exit LEFT → NW diagonal → enter ports from BOTTOM.
+ */
+type Sl3Plan = {
+  dir: Sl3Compass;
+  exitAxis: Sl3ExitAxis;
+  /** Shared first bend is a vertical bus (same X) or horizontal (same Y). */
+  firstBend: 'X' | 'Y';
+  diagSx: -1 | 0 | 1;
+  diagSy: -1 | 0 | 1;
+  /**
+   * Geometric face to approach the hub from so the last stub can dive
+   * straight into ports (TOP / BOTTOM / LEFT / RIGHT).
+   */
+  approachFace: 'TOP' | 'BOTTOM' | 'LEFT' | 'RIGHT';
+};
+
+type Sl3Cable = Sp3Cable;
+
+const portSideOf = (
+  icon: string | undefined,
+  portId: string | undefined
+): 'TOP' | 'BOTTOM' | 'LEFT' | 'RIGHT' => {
+  const port = getShape2dPorts(icon ?? '').find((candidate) => {
+    return candidate.id === portId;
+  });
+  return port?.side ?? 'BOTTOM';
+};
+
+const outsidePort = (
+  port: Coords,
+  side: 'TOP' | 'BOTTOM' | 'LEFT' | 'RIGHT',
+  distance: number
+): Coords => {
+  switch (side) {
+    case 'TOP':
+      return { x: port.x, y: port.y - distance };
+    case 'LEFT':
+      return { x: port.x - distance, y: port.y };
+    case 'RIGHT':
+      return { x: port.x + distance, y: port.y };
+    case 'BOTTOM':
+    default:
+      return { x: port.x, y: port.y + distance };
+  }
+};
+
+/** Where is the hub relative to the leaf cluster midpoint? */
+const resolveSl3Plan = (
+  hubCenter: Coords,
+  leafMid: Coords,
+  deadZone = 2
+): Sl3Plan => {
+  const dx = hubCenter.x - leafMid.x;
+  const dy = hubCenter.y - leafMid.y;
+  const east = dx > deadZone;
+  const west = dx < -deadZone;
+  const south = dy > deadZone;
+  const north = dy < -deadZone;
+
+  // Hub NW of leaves: exit left, NW run, approach hub from below.
+  if (west && north) {
+    return {
+      dir: 'NW',
+      exitAxis: 'LEFT',
+      firstBend: 'X',
+      diagSx: -1,
+      diagSy: -1,
+      approachFace: 'BOTTOM'
+    };
+  }
+  if (east && north) {
+    return {
+      dir: 'NE',
+      exitAxis: 'RIGHT',
+      firstBend: 'X',
+      diagSx: 1,
+      diagSy: -1,
+      approachFace: 'BOTTOM'
+    };
+  }
+  if (west && south) {
+    return {
+      dir: 'SW',
+      exitAxis: 'LEFT',
+      firstBend: 'X',
+      diagSx: -1,
+      diagSy: 1,
+      approachFace: 'TOP'
+    };
+  }
+  if (east && south) {
+    return {
+      dir: 'SE',
+      exitAxis: 'RIGHT',
+      firstBend: 'X',
+      diagSx: 1,
+      diagSy: 1,
+      approachFace: 'TOP'
+    };
+  }
+  if (north) {
+    return {
+      dir: 'N',
+      exitAxis: 'UP',
+      firstBend: 'Y',
+      diagSx: 0,
+      diagSy: -1,
+      approachFace: 'BOTTOM'
+    };
+  }
+  if (south) {
+    return {
+      dir: 'S',
+      exitAxis: 'DOWN',
+      firstBend: 'Y',
+      diagSx: 0,
+      diagSy: 1,
+      approachFace: 'TOP'
+    };
+  }
+  if (west) {
+    return {
+      dir: 'W',
+      exitAxis: 'LEFT',
+      firstBend: 'X',
+      diagSx: -1,
+      diagSy: 0,
+      approachFace: 'RIGHT'
+    };
+  }
+  return {
+    dir: 'E',
+    exitAxis: 'RIGHT',
+    firstBend: 'X',
+    diagSx: 1,
+    diagSy: 0,
+    approachFace: 'LEFT'
+  };
+};
+
+const collectSl3Cables = ({
+  selectedItems,
+  allItems,
+  modelItems,
+  connectors
+}: {
+  selectedItems: ViewItem[];
+  allItems: ViewItem[];
+  modelItems: { id: string; icon?: string }[];
+  connectors: TidyConnector[];
+}): Sl3Cable[] => {
+  const selectedIds = new Set(selectedItems.map((item) => item.id));
+  const itemById = new Map(allItems.map((item) => [item.id, item] as const));
+  const iconById = new Map(
+    modelItems.map((item) => [item.id, item.icon] as const)
+  );
+  const isSwitch = (id: string) => isSwitchLikeIcon(iconById.get(id));
+  const cables: Sp3Cable[] = [];
+
+  connectors.forEach((connector) => {
+    const ends = connector.anchors.filter((anchor) => Boolean(anchor.ref.item));
+    if (ends.length < 2) return;
+
+    const first = ends[0];
+    const last = ends[ends.length - 1];
+    if (!first.ref.item || !last.ref.item) return;
+    if (first.ref.item === last.ref.item) return;
+
+    const a = first.ref.item;
+    const b = last.ref.item;
+    const aSel = selectedIds.has(a);
+    const bSel = selectedIds.has(b);
+    if (!aSel && !bSel) return;
+
+    let hubId: string;
+    let leafId: string;
+    let hubAnchor = first;
+    let leafAnchor = last;
+    let leafFirst = false;
+
+    if (isSwitch(a) !== isSwitch(b)) {
+      if (isSwitch(a)) {
+        hubId = a;
+        leafId = b;
+        hubAnchor = first;
+        leafAnchor = last;
+        leafFirst = false;
+      } else {
+        hubId = b;
+        leafId = a;
+        hubAnchor = last;
+        leafAnchor = first;
+        leafFirst = true;
+      }
+    } else if (aSel && bSel) {
+      hubId = a;
+      leafId = b;
+      hubAnchor = first;
+      leafAnchor = last;
+      leafFirst = false;
+    } else if (aSel !== bSel) {
+      if (aSel) {
+        leafId = a;
+        hubId = b;
+        leafAnchor = first;
+        hubAnchor = last;
+        leafFirst = true;
+      } else {
+        leafId = b;
+        hubId = a;
+        leafAnchor = last;
+        hubAnchor = first;
+        leafFirst = false;
+      }
+    } else {
+      return;
+    }
+
+    const leafItem = itemById.get(leafId);
+    const hubItem = itemById.get(hubId);
+    if (!leafItem || !hubItem) return;
+
+    const leafPortDef = getShape2dPorts(iconById.get(leafId) ?? '').find(
+      (candidate) => candidate.id === leafAnchor.ref.port
+    );
+    const hubPortDef = getShape2dPorts(iconById.get(hubId) ?? '').find(
+      (candidate) => candidate.id === hubAnchor.ref.port
+    );
+
+    const leafPort = leafPortDef
+      ? {
+          x: leafItem.tile.x + leafPortDef.tile.x,
+          y: leafItem.tile.y + leafPortDef.tile.y
+        }
+      : { x: leafItem.tile.x, y: leafItem.tile.y };
+    const hubPort = hubPortDef
+      ? {
+          x: hubItem.tile.x + hubPortDef.tile.x,
+          y: hubItem.tile.y + hubPortDef.tile.y
+        }
+      : { x: hubItem.tile.x, y: hubItem.tile.y };
+
+    cables.push({
+      connectorId: connector.id,
+      leafFirst,
+      leafId,
+      hubId,
+      leafPort,
+      hubPort,
+      leafPortSide:
+        leafPortDef?.side ??
+        portSideOf(iconById.get(leafId), leafAnchor.ref.port),
+      hubPortSide:
+        hubPortDef?.side ?? portSideOf(iconById.get(hubId), hubAnchor.ref.port)
+    });
+  });
+
+  return cables;
+};
+
+const countSl3PortCrossings = (cables: Sp3Cable[]): number => {
+  let crosses = 0;
+  for (let i = 0; i < cables.length; i += 1) {
+    for (let j = i + 1; j < cables.length; j += 1) {
+      if (
+        segmentsIntersect(
+          cables[i].leafPort,
+          cables[i].hubPort,
+          cables[j].leafPort,
+          cables[j].hubPort
+        )
+      ) {
+        crosses += 1;
+      }
+    }
+  }
+  return crosses;
+};
+
+/** Sort so parallel shared-bend routes do not cross into ports. */
+const sortSl3CablesForPlan = (
+  cables: Sp3Cable[],
+  plan: Sl3Plan
+): Sp3Cable[] => {
+  return [...cables].sort((a, b) => {
+    if (plan.approachFace === 'TOP' || plan.approachFace === 'BOTTOM') {
+      if (a.hubPort.x !== b.hubPort.x) return a.hubPort.x - b.hubPort.x;
+      if (a.hubPort.y !== b.hubPort.y) return a.hubPort.y - b.hubPort.y;
+    } else {
+      if (a.hubPort.y !== b.hubPort.y) return a.hubPort.y - b.hubPort.y;
+      if (a.hubPort.x !== b.hubPort.x) return a.hubPort.x - b.hubPort.x;
+    }
+    if (plan.firstBend === 'X') {
+      if (a.leafPort.y !== b.leafPort.y) return a.leafPort.y - b.leafPort.y;
+      return a.leafPort.x - b.leafPort.x;
+    }
+    if (a.leafPort.x !== b.leafPort.x) return a.leafPort.x - b.leafPort.x;
+    return a.leafPort.y - b.leafPort.y;
+  });
+};
+
+/**
+ * Smart Layout 3 — place leaves opposite the hub so plan-based routes
+ * (shared bends, no overlap) stay planar. Hub stays fixed.
+ */
+export const smartPlaceNodesSl3 = ({
+  selectedItems,
+  allItems,
+  modelItems,
+  connectors,
+  gridStep = { x: 1, y: 1 }
+}: {
+  selectedItems: ViewItem[];
+  allItems: ViewItem[];
+  modelItems: { id: string; icon?: string }[];
+  connectors: TidyConnector[];
+  gridStep?: { x: number; y: number };
+}): Record<string, Coords> => {
+  if (selectedItems.length < 2) return {};
+
+  const sx = Math.max(1, gridStep.x);
+  const sy = Math.max(1, gridStep.y);
+  const selectedMap = new Map(selectedItems.map((item) => [item.id, item]));
+  const iconById = new Map(
+    modelItems.map((item) => [item.id, item.icon] as const)
+  );
+  const result: Record<string, Coords> = {};
+
+  const cables = collectSl3Cables({
+    selectedItems,
+    allItems,
+    modelItems,
+    connectors
+  });
+  if (cables.length === 0) return {};
+
+  const byHub = new Map<string, Sp3Cable[]>();
+  cables.forEach((cable) => {
+    const list = byHub.get(cable.hubId) ?? [];
+    list.push(cable);
+    byHub.set(cable.hubId, list);
+  });
+
+  const placedLeaves = new Set<string>();
+
+  byHub.forEach((group, hubId) => {
+    const hubItem =
+      selectedMap.get(hubId) ?? allItems.find((i) => i.id === hubId);
+    if (!hubItem) return;
+
+    const unique: Sp3Cable[] = [];
+    const seenLeaf = new Set<string>();
+    group.forEach((cable) => {
+      if (!selectedMap.has(cable.leafId)) return;
+      if (seenLeaf.has(cable.leafId)) return;
+      seenLeaf.add(cable.leafId);
+      unique.push(cable);
+    });
+    if (unique.length === 0) return;
+
+    const hubSize = getShape2dSize(iconById.get(hubId) ?? '') ?? {
+      width: 1,
+      height: 1
+    };
+    const hubCenter = {
+      x: hubItem.tile.x + hubSize.width / 2,
+      y: hubItem.tile.y + hubSize.height / 2
+    };
+
+    let leafCx = 0;
+    let leafCy = 0;
+    unique.forEach((cable) => {
+      const leaf = selectedMap.get(cable.leafId)!;
+      const fp = getFootprint(leaf, modelItems);
+      leafCx += fp.tile.x + fp.width / 2;
+      leafCy += fp.tile.y + fp.height / 2;
+    });
+    leafCx /= unique.length;
+    leafCy /= unique.length;
+
+    const plan = resolveSl3Plan(hubCenter, { x: leafCx, y: leafCy });
+    const ordered = sortSl3CablesForPlan(unique, plan);
+
+    const footprints = ordered.map((cable) => {
+      return getFootprint(selectedMap.get(cable.leafId)!, modelItems);
+    });
+
+    const corridor =
+      SL3_STUB_LENGTH + SL3_APPROACH_GAP + Math.max(2, ordered.length);
+    const gap = SHAPE_2D_LAYOUT_GAP;
+    const stackAlongY =
+      plan.exitAxis === 'LEFT' || plan.exitAxis === 'RIGHT';
+    const maxW = Math.max(...footprints.map((fp) => fp.width));
+    const maxH = Math.max(...footprints.map((fp) => fp.height));
+    const stackSpan = stackAlongY
+      ? footprints.reduce(
+          (sum, fp, i) => sum + fp.height + (i > 0 ? gap : 0),
+          0
+        )
+      : footprints.reduce(
+          (sum, fp, i) => sum + fp.width + (i > 0 ? gap : 0),
+          0
+        );
+
+    // Place leaves opposite Cel so exit runs toward the hub.
+    let originX = hubCenter.x - (stackAlongY ? maxW / 2 : stackSpan / 2);
+    let originY = hubCenter.y - (stackAlongY ? stackSpan / 2 : maxH / 2);
+
+    if (plan.dir === 'NW' || plan.dir === 'SW' || plan.dir === 'W') {
+      // Hub west of leaves → leaves sit to the east of hub.
+      originX = hubItem.tile.x + hubSize.width + corridor;
+    } else if (plan.dir === 'NE' || plan.dir === 'SE' || plan.dir === 'E') {
+      originX = hubItem.tile.x - corridor - maxW;
+    }
+    if (plan.dir === 'NW' || plan.dir === 'NE' || plan.dir === 'N') {
+      // Hub north of leaves → leaves sit south of hub.
+      originY = hubItem.tile.y + hubSize.height + corridor;
+    } else if (plan.dir === 'SW' || plan.dir === 'SE' || plan.dir === 'S') {
+      originY = hubItem.tile.y - corridor - (stackAlongY ? stackSpan : maxH);
+    }
+
+    originX = snapTile2dToGrid({ x: originX, y: originY }, { x: sx, y: sy }).x;
+    originY = snapTile2dToGrid({ x: originX, y: originY }, { x: sx, y: sy }).y;
+
+    const tryOffsets = [0, -4, 4, -8, 8, -12, 12];
+    let bestTargets: Record<string, Coords> | null = null;
+    let bestCross = Number.POSITIVE_INFINITY;
+
+    for (const off of tryOffsets) {
+      const targets: Record<string, Coords> = {};
+      if (stackAlongY) {
+        let y = originY + off * sy;
+        ordered.forEach((cable, index) => {
+          const fp = footprints[index];
+          const tile = snapTile2dToGrid({ x: originX, y }, { x: sx, y: sy });
+          targets[cable.leafId] = tile;
+          y = ceilToStep(tile.y + fp.height + gap, sy);
+        });
+      } else {
+        let x = originX + off * sx;
+        ordered.forEach((cable, index) => {
+          const fp = footprints[index];
+          const tile = snapTile2dToGrid({ x, y: originY }, { x: sx, y: sy });
+          targets[cable.leafId] = tile;
+          x = ceilToStep(tile.x + fp.width + gap, sx);
+        });
+      }
+
+      const projected: Sp3Cable[] = ordered.map((cable) => {
+        const leafTile = targets[cable.leafId];
+        const leafItem = selectedMap.get(cable.leafId)!;
+        const dx = leafTile.x - leafItem.tile.x;
+        const dy = leafTile.y - leafItem.tile.y;
+        return {
+          ...cable,
+          leafPort: {
+            x: cable.leafPort.x + dx,
+            y: cable.leafPort.y + dy
+          }
+        };
+      });
+      const crosses = countSl3PortCrossings(projected);
+      if (crosses < bestCross) {
+        bestCross = crosses;
+        bestTargets = targets;
+        if (crosses === 0) break;
+      }
+    }
+
+    if (bestTargets) {
+      Object.entries(bestTargets).forEach(([id, tile]) => {
+        if (placedLeaves.has(id)) return;
+        placedLeaves.add(id);
+        result[id] = tile;
+      });
+    }
+
+    if (selectedMap.has(hubId) && !result[hubId]) {
+      result[hubId] = { ...hubItem.tile };
+    }
+  });
+
+  return result;
+};
+
+/**
+ * Sparse mid-waypoints for one SL3 cable:
+ * exit → shared bend → compass run → shared front → orthogonal into port.
+ */
+const buildSl3CableRoute = ({
+  cable,
+  plan,
+  laneIndex,
+  leafFp,
+  sharedBus,
+  sharedFront
+}: {
+  cable: Sp3Cable;
+  plan: Sl3Plan;
+  laneIndex: number;
+  leafFp: Footprint;
+  sharedBus: number;
+  sharedFront: number;
+}): Coords[] => {
+  let exit: Coords;
+  if (plan.exitAxis === 'LEFT') {
+    exit = {
+      x: Math.min(leafFp.tile.x, cable.leafPort.x) - SL3_STUB_LENGTH,
+      y: cable.leafPort.y
+    };
+  } else if (plan.exitAxis === 'RIGHT') {
+    exit = {
+      x:
+        Math.max(leafFp.tile.x + leafFp.width - 1, cable.leafPort.x) +
+        SL3_STUB_LENGTH,
+      y: cable.leafPort.y
+    };
+  } else if (plan.exitAxis === 'UP') {
+    exit = {
+      x: cable.leafPort.x,
+      y: Math.min(leafFp.tile.y, cable.leafPort.y) - SL3_STUB_LENGTH
+    };
+  } else {
+    exit = {
+      x: cable.leafPort.x,
+      y:
+        Math.max(leafFp.tile.y + leafFp.height - 1, cable.leafPort.y) +
+        SL3_STUB_LENGTH
+    };
+  }
+
+  // Parallel lanes on the bus — never stack on the same tiles.
+  if (plan.firstBend === 'X') {
+    exit = { x: exit.x, y: exit.y + laneIndex };
+  } else {
+    exit = { x: exit.x + laneIndex, y: exit.y };
+  }
+
+  const bend1 =
+    plan.firstBend === 'X'
+      ? { x: sharedBus, y: exit.y }
+      : { x: exit.x, y: sharedBus };
+
+  // Final stub matches the real port side so entry is orthogonal into the jack.
+  const entrySide = cable.hubPortSide;
+  const approach = outsidePort(cable.hubPort, entrySide, SL3_STUB_LENGTH);
+  const frontIsY = entrySide === 'TOP' || entrySide === 'BOTTOM';
+
+  let frontCoord = sharedFront;
+  if (entrySide === 'TOP') {
+    frontCoord = Math.min(sharedFront, cable.hubPort.y - SL3_STUB_LENGTH);
+  } else if (entrySide === 'BOTTOM') {
+    frontCoord = Math.max(sharedFront, cable.hubPort.y + SL3_STUB_LENGTH);
+  } else if (entrySide === 'LEFT') {
+    frontCoord = Math.min(sharedFront, cable.hubPort.x - SL3_STUB_LENGTH);
+  } else {
+    frontCoord = Math.max(sharedFront, cable.hubPort.x + SL3_STUB_LENGTH);
+  }
+
+  let diagCorner: Coords;
+  let onFront: Coords;
+
+  if (frontIsY) {
+    const targetY = frontCoord;
+    const dxNeeded = approach.x - bend1.x;
+    const dyNeeded = targetY - bend1.y;
+    const diag =
+      plan.diagSx !== 0 && plan.diagSy !== 0
+        ? Math.max(
+            2,
+            Math.min(Math.abs(dxNeeded) || 2, Math.abs(dyNeeded) || 2)
+          )
+        : Math.max(2, Math.abs(dyNeeded) || Math.abs(dxNeeded) || 2);
+
+    if (plan.diagSx !== 0 && plan.diagSy !== 0) {
+      // True 45° toward Cel, then snap onto the shared front (aligned elbows).
+      diagCorner = {
+        x: bend1.x + plan.diagSx * (diag + laneIndex),
+        y: targetY
+      };
+    } else if (plan.diagSy !== 0) {
+      diagCorner = { x: bend1.x + laneIndex, y: targetY };
+    } else {
+      diagCorner = {
+        x: bend1.x + (plan.diagSx || 1) * (diag + laneIndex),
+        y: targetY
+      };
+    }
+    onFront = { x: approach.x, y: targetY };
+  } else {
+    const targetX = frontCoord;
+    const dxNeeded = targetX - bend1.x;
+    const dyNeeded = approach.y - bend1.y;
+    const diag =
+      plan.diagSx !== 0 && plan.diagSy !== 0
+        ? Math.max(
+            2,
+            Math.min(Math.abs(dxNeeded) || 2, Math.abs(dyNeeded) || 2)
+          )
+        : Math.max(2, Math.abs(dxNeeded) || Math.abs(dyNeeded) || 2);
+
+    if (plan.diagSx !== 0 && plan.diagSy !== 0) {
+      diagCorner = {
+        x: targetX,
+        y: bend1.y + plan.diagSy * (diag + laneIndex)
+      };
+    } else if (plan.diagSx !== 0) {
+      diagCorner = { x: targetX, y: bend1.y + laneIndex };
+    } else {
+      diagCorner = {
+        x: targetX,
+        y: bend1.y + (plan.diagSy || 1) * (diag + laneIndex)
+      };
+    }
+    onFront = { x: targetX, y: approach.y };
+  }
+
+  return cleanRouteTiles([exit, bend1, diagCorner, onFront, approach]);
+};
+
+/**
+ * Smart Layout 3 routes — Cel location drives exit, diagonal and port entry.
+ * Cables share bend lines, stay on parallel lanes, enter ports orthogonally.
+ */
+export const sharedBendShape2dRoutes = ({
+  selectedItems,
+  allItems,
+  modelItems,
+  connectors
+}: {
+  selectedItems: ViewItem[];
+  allItems: ViewItem[];
+  modelItems: { id: string; icon?: string }[];
+  connectors: TidyConnector[];
+}): Record<string, Coords[]> => {
+  const itemById = new Map(allItems.map((item) => [item.id, item] as const));
+  const iconById = new Map(
+    modelItems.map((item) => [item.id, item.icon] as const)
+  );
+
+  const cables = collectSl3Cables({
+    selectedItems,
+    allItems,
+    modelItems,
+    connectors
+  });
+  if (cables.length === 0) return {};
+
+  const groups = new Map<string, Sp3Cable[]>();
+  cables.forEach((cable) => {
+    const list = groups.get(cable.hubId) ?? [];
+    list.push(cable);
+    groups.set(cable.hubId, list);
+  });
+
+  const routes: Record<string, Coords[]> = {};
+  const usedPoints = new Set<string>();
+
+  const occupy = (tiles: Coords[]) => {
+    tiles.forEach((tile) => {
+      usedPoints.add(`${tile.x},${tile.y}`);
+    });
+  };
+
+  const pathHitsUsed = (tiles: Coords[]) => {
+    return tiles.some((tile, index) => {
+      if (index === 0 || index === tiles.length - 1) return false;
+      return usedPoints.has(`${tile.x},${tile.y}`);
+    });
+  };
+
+  groups.forEach((group, hubId) => {
+    const hubItem = itemById.get(hubId);
+    if (!hubItem) return;
+
+    const hubSize = getShape2dSize(iconById.get(hubId) ?? '') ?? {
+      width: 1,
+      height: 1
+    };
+    const hubCenter = {
+      x: hubItem.tile.x + hubSize.width / 2,
+      y: hubItem.tile.y + hubSize.height / 2
+    };
+
+    const leafFootprints = group.map((cable) => {
+      const leaf = itemById.get(cable.leafId);
+      return leaf
+        ? getFootprint(leaf, modelItems)
+        : {
+            id: cable.leafId,
+            tile: { x: cable.leafPort.x, y: cable.leafPort.y },
+            width: 1,
+            height: 1
+          };
+    });
+
+    const bboxMinX = Math.min(...leafFootprints.map((f) => f.tile.x));
+    const bboxMaxX = Math.max(
+      ...leafFootprints.map((f) => f.tile.x + f.width - 1)
+    );
+    const bboxMinY = Math.min(...leafFootprints.map((f) => f.tile.y));
+    const bboxMaxY = Math.max(
+      ...leafFootprints.map((f) => f.tile.y + f.height - 1)
+    );
+    const leafMid = {
+      x: (bboxMinX + bboxMaxX) / 2,
+      y: (bboxMinY + bboxMaxY) / 2
+    };
+
+    const plan = resolveSl3Plan(hubCenter, leafMid);
+    const ordered = sortSl3CablesForPlan(group, plan);
+
+    let sharedBus: number;
+    if (plan.firstBend === 'X') {
+      sharedBus =
+        plan.exitAxis === 'LEFT'
+          ? bboxMinX - SL3_STUB_LENGTH
+          : bboxMaxX + SL3_STUB_LENGTH;
+    } else {
+      sharedBus =
+        plan.exitAxis === 'UP'
+          ? bboxMinY - SL3_STUB_LENGTH
+          : bboxMaxY + SL3_STUB_LENGTH;
+    }
+
+    // Shared approach fronts per hub face — elbows align, then dive into ports.
+    const frontBottom =
+      Math.max(
+        hubItem.tile.y + hubSize.height - 1,
+        ...ordered.map((c) => c.hubPort.y)
+      ) + SL3_STUB_LENGTH;
+    const frontTop =
+      Math.min(hubItem.tile.y, ...ordered.map((c) => c.hubPort.y)) -
+      SL3_STUB_LENGTH;
+    const frontLeft =
+      Math.min(hubItem.tile.x, ...ordered.map((c) => c.hubPort.x)) -
+      SL3_STUB_LENGTH;
+    const frontRight =
+      Math.max(
+        hubItem.tile.x + hubSize.width - 1,
+        ...ordered.map((c) => c.hubPort.x)
+      ) + SL3_STUB_LENGTH;
+
+    const frontForSide = (
+      side: 'TOP' | 'BOTTOM' | 'LEFT' | 'RIGHT'
+    ): number => {
+      if (side === 'BOTTOM') {
+        let y = frontBottom;
+        // Stay north of the leaf cluster when Cel is above the leaves.
+        if (plan.diagSy < 0) y = Math.min(y, bboxMinY - SL3_APPROACH_GAP);
+        return y;
+      }
+      if (side === 'TOP') {
+        let y = frontTop;
+        if (plan.diagSy > 0) y = Math.max(y, bboxMaxY + SL3_APPROACH_GAP);
+        return y;
+      }
+      if (side === 'LEFT') {
+        let x = frontLeft;
+        if (plan.diagSx < 0) x = Math.min(x, bboxMinX - SL3_APPROACH_GAP);
+        return x;
+      }
+      let x = frontRight;
+      if (plan.diagSx > 0) x = Math.max(x, bboxMaxX + SL3_APPROACH_GAP);
+      return x;
+    };
+
+    // Default geometric front from Cel plan (used when port side matches).
+    let sharedFront = frontForSide(plan.approachFace);
+
+    ordered.forEach((cable, orderIndex) => {
+      const leafFp =
+        leafFootprints.find((f) => f.id === cable.leafId) ?? leafFootprints[0];
+
+      // Enter from the port's own side so the last stub is orthogonal into it.
+      // Prefer plan.approachFace when the port faces that way; otherwise port side.
+      const entryFace =
+        cable.hubPortSide === plan.approachFace
+          ? plan.approachFace
+          : cable.hubPortSide;
+      sharedFront = frontForSide(entryFace);
+
+      let mid = buildSl3CableRoute({
+        cable,
+        plan,
+        laneIndex: orderIndex,
+        leafFp,
+        sharedBus,
+        sharedFront
+      });
+
+      if (pathHitsUsed(mid)) {
+        for (let extra = 1; extra <= ordered.length + 3; extra += 1) {
+          const candidate = buildSl3CableRoute({
+            cable,
+            plan,
+            laneIndex: orderIndex + extra,
+            leafFp,
+            sharedBus,
+            sharedFront
+          });
+          if (!pathHitsUsed(candidate)) {
+            mid = candidate;
+            break;
+          }
+        }
+      }
+
+      occupy(mid);
+      routes[cable.connectorId] = cable.leafFirst ? mid : [...mid].reverse();
+    });
+  });
+
+  return routes;
+};
+
+/** SL4 stub before horizontal bus / final dive into port. */
+export const SL4_STUB_LENGTH = 2;
+/** Parallel lane spacing — keep cables close but not stacked. */
+const SL4_LANE_GAP = 1;
+
+type Sl4Cable = Sp3Cable;
+
+/** Collinear segments whose interiors overlap (nakładanie na tej samej linii). */
+const segmentsCollinearOverlap = (
+  a1: Coords,
+  a2: Coords,
+  b1: Coords,
+  b2: Coords
+): boolean => {
+  if (orientation(a1, a2, b1) !== 0 || orientation(a1, a2, b2) !== 0) {
+    return false;
+  }
+  const dx = Math.abs(a2.x - a1.x);
+  const dy = Math.abs(a2.y - a1.y);
+  if (dx >= dy) {
+    const aMin = Math.min(a1.x, a2.x);
+    const aMax = Math.max(a1.x, a2.x);
+    const bMin = Math.min(b1.x, b2.x);
+    const bMax = Math.max(b1.x, b2.x);
+    return Math.min(aMax, bMax) - Math.max(aMin, bMin) > 0.5;
+  }
+  const aMin = Math.min(a1.y, a2.y);
+  const aMax = Math.max(a1.y, a2.y);
+  const bMin = Math.min(b1.y, b2.y);
+  const bMax = Math.max(b1.y, b2.y);
+  return Math.min(aMax, bMax) - Math.max(aMin, bMin) > 0.5;
+};
+
+/**
+ * Step 1 of SL4: score straight RJ45→RJ45 links only (no pathfinding).
+ * Prefer zero overlaps, then zero crossings.
+ */
+const scoreSl4StraightLinks = (
+  cables: { leafPort: Coords; hubPort: Coords; leafId: string; hubId: string }[]
+): { overlaps: number; crossings: number; score: number } => {
+  let overlaps = 0;
+  let crossings = 0;
+
+  for (let i = 0; i < cables.length; i += 1) {
+    for (let j = i + 1; j < cables.length; j += 1) {
+      const a1 = cables[i].leafPort;
+      const a2 = cables[i].hubPort;
+      const b1 = cables[j].leafPort;
+      const b2 = cables[j].hubPort;
+
+      const shareEndpoint =
+        (a1.x === b1.x && a1.y === b1.y) ||
+        (a1.x === b2.x && a1.y === b2.y) ||
+        (a2.x === b1.x && a2.y === b1.y) ||
+        (a2.x === b2.x && a2.y === b2.y) ||
+        cables[i].leafId === cables[j].leafId ||
+        cables[i].hubId === cables[j].hubId;
+
+      if (segmentsCollinearOverlap(a1, a2, b1, b2)) {
+        overlaps += 1;
+        continue;
+      }
+      if (shareEndpoint) continue;
+      if (segmentsIntersect(a1, a2, b1, b2)) {
+        crossings += 1;
+      }
+    }
+  }
+
+  return {
+    overlaps,
+    crossings,
+    score: overlaps * 100000 + crossings * 1000
+  };
+};
+
+type Sl4Dir = 'SE' | 'SW' | 'NE' | 'NW' | 'E' | 'W' | 'S' | 'N';
+
+/** Where is the hub (Cel) relative to the leaf cluster? */
+const resolveSl4Dir = (hubCenter: Coords, leafMid: Coords): Sl4Dir => {
+  const dx = hubCenter.x - leafMid.x;
+  const dy = hubCenter.y - leafMid.y;
+  const dead = 2;
+  const east = dx > dead;
+  const west = dx < -dead;
+  const south = dy > dead;
+  const north = dy < -dead;
+  if (east && south) return 'SE';
+  if (west && south) return 'SW';
+  if (east && north) return 'NE';
+  if (west && north) return 'NW';
+  if (east) return 'E';
+  if (west) return 'W';
+  if (south) return 'S';
+  return 'N';
+};
+
+/**
+ * Smart Layout 4 — rearrange leaves using only straight port↔port scores
+ * (overlaps first, then crossings). Hub stays put; same-size slots are
+ * reassigned, then a light pack opposite Cel.
+ */
+export const smartPlaceNodesSl4 = ({
+  selectedItems,
+  allItems,
+  modelItems,
+  connectors,
+  gridStep = { x: 1, y: 1 }
+}: {
+  selectedItems: ViewItem[];
+  allItems: ViewItem[];
+  modelItems: { id: string; icon?: string }[];
+  connectors: TidyConnector[];
+  gridStep?: { x: number; y: number };
+}): Record<string, Coords> => {
+  if (selectedItems.length < 2) return {};
+
+  const sx = Math.max(1, gridStep.x);
+  const sy = Math.max(1, gridStep.y);
+  const selectedMap = new Map(selectedItems.map((item) => [item.id, item]));
+  const iconById = new Map(
+    modelItems.map((item) => [item.id, item.icon] as const)
+  );
+  const result: Record<string, Coords> = {};
+
+  const cables = collectSl3Cables({
+    selectedItems,
+    allItems,
+    modelItems,
+    connectors
+  }) as Sl4Cable[];
+  if (cables.length === 0) return {};
+
+  const byHub = new Map<string, Sl4Cable[]>();
+  cables.forEach((cable) => {
+    const list = byHub.get(cable.hubId) ?? [];
+    list.push(cable);
+    byHub.set(cable.hubId, list);
+  });
+
+  const placedLeaves = new Set<string>();
+
+  byHub.forEach((group, hubId) => {
+    const hubItem =
+      selectedMap.get(hubId) ?? allItems.find((i) => i.id === hubId);
+    if (!hubItem) return;
+
+    const unique: Sl4Cable[] = [];
+    const seenLeaf = new Set<string>();
+    group.forEach((cable) => {
+      if (!selectedMap.has(cable.leafId)) return;
+      if (seenLeaf.has(cable.leafId)) return;
+      seenLeaf.add(cable.leafId);
+      unique.push(cable);
+    });
+    if (unique.length === 0) return;
+
+    const hubSize = getShape2dSize(iconById.get(hubId) ?? '') ?? {
+      width: 1,
+      height: 1
+    };
+    const hubCenter = {
+      x: hubItem.tile.x + hubSize.width / 2,
+      y: hubItem.tile.y + hubSize.height / 2
+    };
+
+    // --- Step 2a: permute existing same-size slots by straight-link score ---
+    const sizeKey = (id: string) => {
+      const s = getShape2dSize(iconById.get(id) ?? '') ?? { width: 1, height: 1 };
+      return `${s.width}x${s.height}`;
+    };
+
+    const slotGroups = new Map<string, { leafId: string; slot: Coords; cable: Sl4Cable }[]>();
+    unique.forEach((cable) => {
+      const key = sizeKey(cable.leafId);
+      const leaf = selectedMap.get(cable.leafId)!;
+      const list = slotGroups.get(key) ?? [];
+      list.push({ leafId: cable.leafId, slot: { ...leaf.tile }, cable });
+      slotGroups.set(key, list);
+    });
+
+    const tileByLeaf = new Map<string, Coords>();
+    unique.forEach((cable) => {
+      tileByLeaf.set(cable.leafId, { ...selectedMap.get(cable.leafId)!.tile });
+    });
+
+    const projectCables = (): Sl4Cable[] => {
+      return unique.map((cable) => {
+        const tile = tileByLeaf.get(cable.leafId)!;
+        const old = selectedMap.get(cable.leafId)!.tile;
+        return {
+          ...cable,
+          leafPort: {
+            x: cable.leafPort.x + (tile.x - old.x),
+            y: cable.leafPort.y + (tile.y - old.y)
+          }
+        };
+      });
+    };
+
+    slotGroups.forEach((members) => {
+      if (members.length < 2) return;
+
+      // Order slots spatially; assign leaves by hub-port order as a strong start.
+      const slots = members
+        .map((m) => m.slot)
+        .sort((a, b) => (a.y !== b.y ? a.y - b.y : a.x - b.x));
+      const byPort = [...members].sort((a, b) => {
+        if (a.cable.hubPort.x !== b.cable.hubPort.x) {
+          return a.cable.hubPort.x - b.cable.hubPort.x;
+        }
+        return a.cable.hubPort.y - b.cable.hubPort.y;
+      });
+
+      byPort.forEach((m, index) => {
+        tileByLeaf.set(m.leafId, { ...slots[index] });
+      });
+
+      // 2-opt swaps to cut remaining overlaps/crossings (straight links only).
+      let best = scoreSl4StraightLinks(projectCables()).score;
+      let improved = true;
+      let guard = 0;
+      const ids = byPort.map((m) => m.leafId);
+      while (improved && guard < 60) {
+        improved = false;
+        guard += 1;
+        for (let i = 0; i < ids.length; i += 1) {
+          for (let j = i + 1; j < ids.length; j += 1) {
+            const a = ids[i];
+            const b = ids[j];
+            const ta = tileByLeaf.get(a)!;
+            const tb = tileByLeaf.get(b)!;
+            tileByLeaf.set(a, tb);
+            tileByLeaf.set(b, ta);
+            const next = scoreSl4StraightLinks(projectCables()).score;
+            if (next < best) {
+              best = next;
+              improved = true;
+            } else {
+              tileByLeaf.set(a, ta);
+              tileByLeaf.set(b, tb);
+            }
+          }
+        }
+      }
+    });
+
+    // --- Step 2b: pack opposite Cel so horizontal→diagonal→down has room ---
+    const projected = projectCables();
+    let leafCx = 0;
+    let leafCy = 0;
+    projected.forEach((cable) => {
+      leafCx += cable.leafPort.x;
+      leafCy += cable.leafPort.y;
+    });
+    leafCx /= projected.length;
+    leafCy /= projected.length;
+    const dir = resolveSl4Dir(hubCenter, { x: leafCx, y: leafCy });
+
+    const ordered = [...projected].sort((a, b) => {
+      if (a.hubPort.x !== b.hubPort.x) return a.hubPort.x - b.hubPort.x;
+      return a.hubPort.y - b.hubPort.y;
+    });
+
+    const footprints = ordered.map((cable) => {
+      const tile = tileByLeaf.get(cable.leafId)!;
+      const fp = getFootprint(selectedMap.get(cable.leafId)!, modelItems);
+      return { ...fp, tile: { ...tile } };
+    });
+
+    const gap = SHAPE_2D_LAYOUT_GAP;
+    const corridor = SL4_STUB_LENGTH + 4 + ordered.length;
+    const maxW = Math.max(...footprints.map((f) => f.width));
+    const stackH = footprints.reduce(
+      (sum, fp, i) => sum + fp.height + (i > 0 ? gap : 0),
+      0
+    );
+
+    // Nodes left-top of Cel (hub SE): stack west of hub, exit will go right.
+    let originX = hubItem.tile.x - corridor - maxW;
+    let originY = hubItem.tile.y - Math.floor(stackH / 2);
+    if (dir === 'SE' || dir === 'E' || dir === 'NE') {
+      originX = hubItem.tile.x - corridor - maxW;
+    } else if (dir === 'SW' || dir === 'W' || dir === 'NW') {
+      originX = hubItem.tile.x + hubSize.width + corridor;
+    }
+    if (dir === 'SE' || dir === 'SW' || dir === 'S') {
+      originY = hubItem.tile.y - corridor - stackH;
+    } else if (dir === 'NE' || dir === 'NW' || dir === 'N') {
+      originY = hubItem.tile.y + hubSize.height + corridor;
+    }
+
+    // For "nodes left-top of target" hub is SE of leaves → leaves NW of hub.
+    if (dir === 'SE') {
+      originX = hubItem.tile.x - corridor - maxW;
+      originY = hubItem.tile.y - corridor - stackH;
+    }
+
+    // Snapshot after slot permute (before pack).
+    const afterPermute: Record<string, Coords> = {};
+    ordered.forEach((cable) => {
+      afterPermute[cable.leafId] = { ...tileByLeaf.get(cable.leafId)! };
+    });
+    const permuteScore = scoreSl4StraightLinks(projectCables()).score;
+
+    originX = snapTile2dToGrid({ x: originX, y: originY }, { x: sx, y: sy }).x;
+    originY = snapTile2dToGrid({ x: originX, y: originY }, { x: sx, y: sy }).y;
+
+    let y = originY;
+    const packed: Record<string, Coords> = {};
+    ordered.forEach((cable, index) => {
+      const fp = footprints[index];
+      const tile = snapTile2dToGrid({ x: originX, y }, { x: sx, y: sy });
+      packed[cable.leafId] = tile;
+      y = ceilToStep(tile.y + fp.height + gap, sy);
+    });
+
+    ordered.forEach((cable) => {
+      tileByLeaf.set(cable.leafId, packed[cable.leafId]);
+    });
+    const packedScore = scoreSl4StraightLinks(projectCables()).score;
+    const chosen = packedScore <= permuteScore ? packed : afterPermute;
+
+    Object.entries(chosen).forEach(([id, tile]) => {
+      if (placedLeaves.has(id)) return;
+      placedLeaves.add(id);
+      result[id] = tile;
+    });
+
+    if (selectedMap.has(hubId) && !result[hubId]) {
+      result[hubId] = { ...hubItem.tile };
+    }
+  });
+
+  return result;
+};
+
+/**
+ * Build SL4 mid-waypoints for nodes left-top of Cel (hub SE):
+ * right (or down+right) → horizontal to shared turn → diagonal → down into port.
+ * Mirrored for other compass directions. Lanes stay tight (SL4_LANE_GAP).
+ */
+const buildSl4CableRoute = ({
+  cable,
+  dir,
+  laneIndex,
+  leafFp,
+  turnCoord,
+  closestY
+}: {
+  cable: Sl4Cable;
+  dir: Sl4Dir;
+  laneIndex: number;
+  leafFp: Footprint;
+  /** Shared turn column (X) or row (Y) where horizontals become diagonals. */
+  turnCoord: number;
+  /** Y (or X) of the leaf closest to Cel — reference for the shared horizontal. */
+  closestY: number;
+}): Coords[] => {
+  const approachAbove = {
+    x: cable.hubPort.x,
+    y: cable.hubPort.y - SL4_STUB_LENGTH
+  };
+  const approachBelow = {
+    x: cable.hubPort.x,
+    y: cable.hubPort.y + SL4_STUB_LENGTH
+  };
+  const approachLeft = {
+    x: cable.hubPort.x - SL4_STUB_LENGTH,
+    y: cable.hubPort.y
+  };
+  const approachRight = {
+    x: cable.hubPort.x + SL4_STUB_LENGTH,
+    y: cable.hubPort.y
+  };
+
+  // Prefer diving into the port along its face; fall back to geometric approach.
+  let approach: Coords;
+  if (cable.hubPortSide === 'TOP') approach = approachAbove;
+  else if (cable.hubPortSide === 'BOTTOM') approach = approachBelow;
+  else if (cable.hubPortSide === 'LEFT') approach = approachLeft;
+  else if (cable.hubPortSide === 'RIGHT') approach = approachRight;
+  else if (dir === 'SE' || dir === 'SW' || dir === 'S') approach = approachAbove;
+  else if (dir === 'NE' || dir === 'NW' || dir === 'N') approach = approachBelow;
+  else if (dir === 'E') approach = approachLeft;
+  else approach = approachRight;
+
+  const lane = laneIndex * SL4_LANE_GAP;
+
+  // --- Nodes left-top of Cel (hub to the SE): exit right, horizontal, diagonal, down ---
+  if (dir === 'SE' || dir === 'E') {
+    // If lanes would stack, drop slightly from RJ45 then go right.
+    const exitStub =
+      lane === 0
+        ? {
+            x:
+              Math.max(leafFp.tile.x + leafFp.width - 1, cable.leafPort.x) +
+              SL4_STUB_LENGTH,
+            y: cable.leafPort.y
+          }
+        : {
+            x:
+              Math.max(leafFp.tile.x + leafFp.width - 1, cable.leafPort.x) +
+              SL4_STUB_LENGTH,
+            y: cable.leafPort.y + lane
+          };
+    const downFirst =
+      lane > 0
+        ? { x: cable.leafPort.x, y: cable.leafPort.y + lane }
+        : null;
+
+    const onBus = { x: turnCoord, y: exitStub.y };
+    // Diagonal toward port column / approach, then vertical into port.
+    const diagEnd = {
+      x: approach.x,
+      y: onBus.y + Math.max(Math.abs(approach.x - onBus.x), 1)
+    };
+    // Snap diagonal end onto/above approach so final leg is straight down (or up).
+    const beforeDive =
+      approach.y >= onBus.y
+        ? { x: approach.x, y: Math.min(diagEnd.y, approach.y) }
+        : { x: approach.x, y: Math.max(onBus.y - Math.abs(approach.x - onBus.x), approach.y) };
+
+    const mid = downFirst
+      ? cleanRouteTiles([downFirst, exitStub, onBus, beforeDive, approach])
+      : cleanRouteTiles([exitStub, onBus, beforeDive, approach]);
+    return mid;
+  }
+
+  if (dir === 'SW' || dir === 'W') {
+    const exitStub = {
+      x: Math.min(leafFp.tile.x, cable.leafPort.x) - SL4_STUB_LENGTH,
+      y: cable.leafPort.y + lane
+    };
+    const downFirst =
+      lane > 0 ? { x: cable.leafPort.x, y: cable.leafPort.y + lane } : null;
+    const onBus = { x: turnCoord, y: exitStub.y };
+    const beforeDive = {
+      x: approach.x,
+      y:
+        approach.y >= onBus.y
+          ? Math.min(onBus.y + Math.abs(onBus.x - approach.x), approach.y)
+          : Math.max(onBus.y - Math.abs(onBus.x - approach.x), approach.y)
+    };
+    return downFirst
+      ? cleanRouteTiles([downFirst, exitStub, onBus, beforeDive, approach])
+      : cleanRouteTiles([exitStub, onBus, beforeDive, approach]);
+  }
+
+  if (dir === 'NE' || dir === 'N') {
+    // Exit right/left toward Cel, horizontal, diagonal, down/up into port.
+    const exitRight = dir === 'NE';
+    const exitStub = {
+      x: exitRight
+        ? Math.max(leafFp.tile.x + leafFp.width - 1, cable.leafPort.x) +
+          SL4_STUB_LENGTH
+        : cable.leafPort.x + lane,
+      y: exitRight
+        ? cable.leafPort.y + lane
+        : Math.min(leafFp.tile.y, cable.leafPort.y) - SL4_STUB_LENGTH
+    };
+    if (dir === 'N') {
+      const onBus = { x: exitStub.x, y: turnCoord };
+      const beforeDive = { x: approach.x, y: turnCoord };
+      return cleanRouteTiles([exitStub, onBus, beforeDive, approach]);
+    }
+    const onBus = { x: turnCoord, y: exitStub.y };
+    const beforeDive = {
+      x: approach.x,
+      y: Math.max(onBus.y - Math.abs(approach.x - onBus.x), approach.y)
+    };
+    return cleanRouteTiles([exitStub, onBus, beforeDive, approach]);
+  }
+
+  // NW / S fallback — keep cables close with shared turn.
+  const exitStub = {
+    x: Math.min(leafFp.tile.x, cable.leafPort.x) - SL4_STUB_LENGTH,
+    y: cable.leafPort.y + lane
+  };
+  const onBus = { x: turnCoord, y: exitStub.y };
+  const beforeDive = {
+    x: approach.x,
+    y: Math.max(onBus.y - Math.abs(approach.x - onBus.x), approach.y)
+  };
+  void closestY;
+  return cleanRouteTiles([exitStub, onBus, beforeDive, approach]);
+};
+
+/**
+ * Smart Layout 4 routes — tight diagonal bundle into ports.
+ * Prefers diagonal approach; horizontals share a turn line set by the
+ * leaf nearest Cel (e.g. NW leaves: right → horizontal → diagonal → down).
+ */
+export const diagonalBundleShape2dRoutes = ({
+  selectedItems,
+  allItems,
+  modelItems,
+  connectors
+}: {
+  selectedItems: ViewItem[];
+  allItems: ViewItem[];
+  modelItems: { id: string; icon?: string }[];
+  connectors: TidyConnector[];
+}): Record<string, Coords[]> => {
+  const itemById = new Map(allItems.map((item) => [item.id, item] as const));
+
+  const cables = collectSl3Cables({
+    selectedItems,
+    allItems,
+    modelItems,
+    connectors
+  }) as Sl4Cable[];
+  if (cables.length === 0) return {};
+
+  const groups = new Map<string, Sl4Cable[]>();
+  cables.forEach((cable) => {
+    const list = groups.get(cable.hubId) ?? [];
+    list.push(cable);
+    groups.set(cable.hubId, list);
+  });
+
+  const routes: Record<string, Coords[]> = {};
+  const used = new Set<string>();
+  const occupy = (tiles: Coords[]) => {
+    tiles.forEach((t) => used.add(`${t.x},${t.y}`));
+  };
+  const hits = (tiles: Coords[]) =>
+    tiles.some((t, i) => {
+      if (i === 0 || i === tiles.length - 1) return false;
+      return used.has(`${t.x},${t.y}`);
+    });
+
+  groups.forEach((group, hubId) => {
+    const hubItem = itemById.get(hubId);
+    if (!hubItem) return;
+
+    const leafFootprints = group.map((cable) => {
+      const leaf = itemById.get(cable.leafId);
+      return leaf
+        ? getFootprint(leaf, modelItems)
+        : {
+            id: cable.leafId,
+            tile: { x: cable.leafPort.x, y: cable.leafPort.y },
+            width: 1,
+            height: 1
+          };
+    });
+
+    const bboxMinX = Math.min(...leafFootprints.map((f) => f.tile.x));
+    const bboxMaxX = Math.max(
+      ...leafFootprints.map((f) => f.tile.x + f.width - 1)
+    );
+    const bboxMinY = Math.min(...leafFootprints.map((f) => f.tile.y));
+    const bboxMaxY = Math.max(
+      ...leafFootprints.map((f) => f.tile.y + f.height - 1)
+    );
+    const leafMid = {
+      x: (bboxMinX + bboxMaxX) / 2,
+      y: (bboxMinY + bboxMaxY) / 2
+    };
+
+    const hubSize = getShape2dSize(
+      (modelItems.find((m) => m.id === hubId) || {}).icon ?? ''
+    ) ?? { width: 1, height: 1 };
+    const hubCenter = {
+      x: hubItem.tile.x + hubSize.width / 2,
+      y: hubItem.tile.y + hubSize.height / 2
+    };
+    const dir = resolveSl4Dir(hubCenter, leafMid);
+
+    // Leaf nearest Cel — its horizontal decides the shared turn line.
+    let closest = group[0];
+    let closestDist = Number.POSITIVE_INFINITY;
+    group.forEach((cable) => {
+      const d =
+        Math.abs(cable.leafPort.x - cable.hubPort.x) +
+        Math.abs(cable.leafPort.y - cable.hubPort.y);
+      if (d < closestDist) {
+        closestDist = d;
+        closest = cable;
+      }
+    });
+
+    // Order for tight parallel lanes (by Y then hub port X).
+    const ordered = [...group].sort((a, b) => {
+      if (a.leafPort.y !== b.leafPort.y) return a.leafPort.y - b.leafPort.y;
+      if (a.hubPort.x !== b.hubPort.x) return a.hubPort.x - b.hubPort.x;
+      return a.leafPort.x - b.leafPort.x;
+    });
+
+    // Shared turn: horizontal until closest leaf can diagonal then dive to port.
+    const closestApproachY =
+      closest.hubPortSide === 'BOTTOM'
+        ? closest.hubPort.y + SL4_STUB_LENGTH
+        : closest.hubPort.y - SL4_STUB_LENGTH;
+    const closestExitY = closest.leafPort.y;
+    const dy = Math.abs(closestApproachY - closestExitY);
+    // 45° diagonal needs |dx| ≈ dy before the vertical dive.
+    let turnCoord: number;
+    if (dir === 'SE' || dir === 'E' || dir === 'NE') {
+      const ideal = closest.hubPort.x - Math.max(dy, 2);
+      turnCoord = Math.max(bboxMaxX + SL4_STUB_LENGTH, ideal);
+    } else if (dir === 'SW' || dir === 'W' || dir === 'NW') {
+      const ideal = closest.hubPort.x + Math.max(dy, 2);
+      turnCoord = Math.min(bboxMinX - SL4_STUB_LENGTH, ideal);
+    } else if (dir === 'S') {
+      turnCoord = Math.max(bboxMaxY + SL4_STUB_LENGTH, closest.hubPort.y - Math.max(dy, 2));
+    } else {
+      turnCoord = Math.min(bboxMinY - SL4_STUB_LENGTH, closest.hubPort.y + Math.max(dy, 2));
+    }
+
+    ordered.forEach((cable, orderIndex) => {
+      const leafFp =
+        leafFootprints.find((f) => f.id === cable.leafId) ?? leafFootprints[0];
+
+      let mid = buildSl4CableRoute({
+        cable,
+        dir,
+        laneIndex: orderIndex,
+        leafFp,
+        turnCoord,
+        closestY: closestExitY
+      });
+
+      if (hits(mid)) {
+        for (let extra = 1; extra <= ordered.length + 4; extra += 1) {
+          const candidate = buildSl4CableRoute({
+            cable,
+            dir,
+            laneIndex: orderIndex + extra,
+            leafFp,
+            turnCoord,
+            closestY: closestExitY
+          });
+          if (!hits(candidate)) {
+            mid = candidate;
+            break;
+          }
+        }
+      }
+
+      occupy(mid);
+      routes[cable.connectorId] = cable.leafFirst ? mid : [...mid].reverse();
+    });
+  });
+
+  return routes;
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
+// CLAUDE SORT
+// Phase 1: greedy leaf-swap to minimize straight-line crossings.
+// Phase 2: bundle routing — short stub → shared trunk axis → individual
+//           dive into hub port. Lines run close together (wiązka) and only
+//           fan out at the switch.
+// ─────────────────────────────────────────────────────────────────────────────
+
+const CS_STUB = 3; // tiles extruded from leaf port before joining trunk
+const CS_GAP  = 1; // spacing between parallel lanes in the trunk
+
+/** Count straight-segment crossings for a set of cables (port-to-port). */
+const countStraightCrossingsCS = (cables: Sp3Cable[]): number => {
+  let n = 0;
+  for (let i = 0; i < cables.length; i++) {
+    for (let j = i + 1; j < cables.length; j++) {
+      const ai = cables[i];
+      const aj = cables[j];
+      // Shared endpoint — never a real crossing.
+      if (
+        ai.leafId === aj.leafId ||
+        ai.hubId  === aj.hubId  ||
+        (ai.leafPort.x === aj.leafPort.x && ai.leafPort.y === aj.leafPort.y) ||
+        (ai.hubPort.x  === aj.hubPort.x  && ai.hubPort.y  === aj.hubPort.y)
+      ) continue;
+      if (segmentsIntersect(ai.leafPort, ai.hubPort, aj.leafPort, aj.hubPort)) n++;
+    }
+  }
+  return n;
+};
+
+/**
+ * Claude Sort Phase 1 — greedy pairwise swap of same-footprint leaf nodes
+ * to minimise straight-line cable crossings. Hub stays fixed.
+ * Returns a map of itemId → new tile for nodes that moved.
+ */
+export const claudeSortSwapLeaves = ({
+  selectedItems,
+  allItems,
+  modelItems,
+  connectors,
+  gridStep = { x: 1, y: 1 }
+}: {
+  selectedItems: ViewItem[];
+  allItems: ViewItem[];
+  modelItems: { id: string; icon?: string }[];
+  connectors: TidyConnector[];
+  gridStep?: { x: number; y: number };
+}): Record<string, Coords> => {
+  if (selectedItems.length < 2) return {};
+
+  const cables = collectSl3Cables({ selectedItems, allItems, modelItems, connectors });
+  if (cables.length === 0) return {};
+
+  const groups = new Map<string, Sp3Cable[]>();
+  cables.forEach((c) => {
+    const arr = groups.get(c.hubId) ?? [];
+    arr.push(c);
+    groups.set(c.hubId, arr);
+  });
+
+  const sizeOf = new Map<string, { w: number; h: number }>();
+  selectedItems.forEach((item) => {
+    const model = modelItems.find((m) => m.id === item.id);
+    const sz = getShape2dSize(model?.icon ?? '') ?? { width: 1, height: 1 };
+    sizeOf.set(item.id, { w: sz.width, h: sz.height });
+  });
+
+  const itemById = new Map(allItems.map((i) => [i.id, i]));
+  const positionOverrides = new Map<string, Coords>();
+
+  groups.forEach((group) => {
+    const leaves = group.map((c) => c.leafId);
+    if (leaves.length < 2) return;
+
+    const tileOf = new Map<string, Coords>();
+    leaves.forEach((id) => {
+      const item = itemById.get(id);
+      if (item) tileOf.set(id, { ...item.tile });
+    });
+
+    const rebuildCables = (tm: Map<string, Coords>): Sp3Cable[] =>
+      group.map((c) => {
+        const lt = tm.get(c.leafId) ?? c.leafPort;
+        const orig = itemById.get(c.leafId)?.tile;
+        const offX = orig ? c.leafPort.x - orig.x : 0;
+        const offY = orig ? c.leafPort.y - orig.y : 0;
+        return { ...c, leafPort: { x: lt.x + offX, y: lt.y + offY } };
+      });
+
+    let bestScore = countStraightCrossingsCS(rebuildCables(tileOf));
+    let improved = true;
+    while (improved) {
+      improved = false;
+      for (let i = 0; i < leaves.length; i++) {
+        for (let j = i + 1; j < leaves.length; j++) {
+          const idA = leaves[i];
+          const idB = leaves[j];
+          const szA = sizeOf.get(idA);
+          const szB = sizeOf.get(idB);
+          if (!szA || !szB || szA.w !== szB.w || szA.h !== szB.h) continue;
+
+          const tA = tileOf.get(idA)!;
+          const tB = tileOf.get(idB)!;
+          tileOf.set(idA, tB);
+          tileOf.set(idB, tA);
+          const score = countStraightCrossingsCS(rebuildCables(tileOf));
+          if (score < bestScore) {
+            bestScore = score;
+            improved = true;
+          } else {
+            tileOf.set(idA, tA);
+            tileOf.set(idB, tB);
+          }
+        }
+      }
+    }
+
+    const sx = Math.max(1, gridStep.x);
+    const sy = Math.max(1, gridStep.y);
+    leaves.forEach((id) => {
+      const orig = itemById.get(id)?.tile;
+      const next = tileOf.get(id);
+      if (!next || !orig || (next.x === orig.x && next.y === orig.y)) return;
+      positionOverrides.set(id, {
+        x: Math.round(next.x / sx) * sx,
+        y: Math.round(next.y / sy) * sy
+      });
+    });
+  });
+
+  const result: Record<string, Coords> = {};
+  positionOverrides.forEach((tile, id) => { result[id] = tile; });
+  return result;
+};
+
+/**
+ * Claude Sort Phase 2 — bundle routing.
+ *
+ * Each cable: leaf-port → short orthogonal stub → shared trunk axis
+ * (wiązka) → individual dive into hub port.
+ * Cables run parallel in the trunk (CS_GAP apart), ordered by hub-port
+ * coordinate so the final fan-out into ports stays crossing-free.
+ */
+export const claudeSortBundleRoutes = ({
+  selectedItems,
+  allItems,
+  modelItems,
+  connectors
+}: {
+  selectedItems: ViewItem[];
+  allItems: ViewItem[];
+  modelItems: { id: string; icon?: string }[];
+  connectors: TidyConnector[];
+}): Record<string, Coords[]> => {
+  const cables = collectSl3Cables({ selectedItems, allItems, modelItems, connectors });
+  const routes: Record<string, Coords[]> = {};
+  if (cables.length === 0) return routes;
+
+  const groups = new Map<string, Sp3Cable[]>();
+  cables.forEach((c) => {
+    const arr = groups.get(c.hubId) ?? [];
+    arr.push(c);
+    groups.set(c.hubId, arr);
+  });
+
+  groups.forEach((group) => {
+    if (group.length === 0) return;
+
+    // Centroid of leaf ports
+    const cx = group.reduce((s, c) => s + c.leafPort.x, 0) / group.length;
+    const cy = group.reduce((s, c) => s + c.leafPort.y, 0) / group.length;
+
+    // Representative hub port (use average for groups that share a switch)
+    const hx = group.reduce((s, c) => s + c.hubPort.x, 0) / group.length;
+    const hy = group.reduce((s, c) => s + c.hubPort.y, 0) / group.length;
+
+    const dx = hx - cx;
+    const dy = hy - cy;
+    const horizontal = Math.abs(dx) >= Math.abs(dy);
+
+    // Trunk position: midpoint between cluster and hub
+    let trunkCoord: number;
+    if (horizontal) {
+      trunkCoord = Math.round(cx + dx * 0.5);
+    } else {
+      trunkCoord = Math.round(cy + dy * 0.5);
+    }
+
+    // Order cables by hub-port to avoid crossing in the final dive
+    const ordered = [...group].sort((a, b) =>
+      horizontal ? a.hubPort.y - b.hubPort.y : a.hubPort.x - b.hubPort.x
+    );
+
+    const count = ordered.length;
+
+    ordered.forEach((cable, laneIdx) => {
+      const laneOff = (laneIdx - Math.floor((count - 1) / 2)) * CS_GAP;
+
+      // Stub: exit leaf port orthogonally toward hub
+      let stubPt: Coords;
+      if (horizontal) {
+        const stubDir = dx >= 0 ? 1 : -1;
+        stubPt = { x: cable.leafPort.x + stubDir * CS_STUB, y: cable.leafPort.y + laneOff };
+      } else {
+        const stubDir = dy >= 0 ? 1 : -1;
+        stubPt = { x: cable.leafPort.x + laneOff, y: cable.leafPort.y + stubDir * CS_STUB };
+      }
+
+      // On-trunk waypoint
+      const trunkPt: Coords = horizontal
+        ? { x: trunkCoord, y: stubPt.y }
+        : { x: stubPt.x, y: trunkCoord };
+
+      // Elbow before hub-port dive
+      const beforeDive: Coords = horizontal
+        ? { x: trunkCoord, y: cable.hubPort.y }
+        : { x: cable.hubPort.x, y: trunkCoord };
+
+      const route = cleanRouteTiles([
+        cable.leafPort,
+        stubPt,
+        trunkPt,
+        beforeDive,
+        cable.hubPort
+      ]);
+
+      routes[cable.connectorId] = cable.leafFirst ? route : [...route].reverse();
+    });
+  });
+
+  return routes;
+};
+

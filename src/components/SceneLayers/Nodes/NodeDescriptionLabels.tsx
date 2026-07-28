@@ -4,7 +4,8 @@ import {
   MARKDOWN_EMPTY_VALUE,
   TILE_SIZE_2D,
   getModelItemSize,
-  isShape2dIcon
+  isShape2dIcon,
+  clampNodeLabelScale
 } from 'src/config';
 import { getShape2dCenterPosition, isPlanProjection } from 'src/utils';
 import { ViewItem } from 'src/types';
@@ -122,7 +123,7 @@ export const NodeDescriptionLabels = ({ nodes }: Props) => {
       const labelAnchorBottom = shapeSize
         ? (shapeSize.height * TILE_SIZE_2D) / 2
         : TILE_SIZE_2D / 2;
-      const labelScale = Math.min(10, Math.max(3, node.labelScale ?? 3));
+      const labelScale = clampNodeLabelScale(node.labelScale);
       const labelStemHeight = node.labelHeight ?? 140;
       const stemOffset =
         liveOffsets[node.id] ??

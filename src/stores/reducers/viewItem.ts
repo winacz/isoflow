@@ -10,8 +10,17 @@ import { State, ViewReducerContext } from './types';
 import * as reducers from './view';
 import { syncConnector } from './connector';
 
+export type UpdateViewItemPayload = {
+  id: string;
+  /**
+   * Batch layouts (Test / Porządkuj): only move the tile; caller applies
+   * cable routes once afterwards. Avoids O(cables) sync per node.
+   */
+  skipConnectorSync?: boolean;
+} & Partial<ViewItem>;
+
 export const updateViewItem = (
-  { id, ...updates }: { id: string } & Partial<ViewItem>,
+  { id, skipConnectorSync, ...updates }: UpdateViewItemPayload,
   { viewId, state }: ViewReducerContext
 ): State => {
   const newState = produce(state, (draft) => {
@@ -24,7 +33,7 @@ export const updateViewItem = (
     const newItem = { ...viewItem.value, ...updates };
     items[viewItem.index] = newItem;
 
-    if (updates.tile) {
+    if (updates.tile && !skipConnectorSync) {
       const connectorsToUpdate = getConnectorsByViewItem(
         viewItem.value.id,
         view.value.connectors ?? []

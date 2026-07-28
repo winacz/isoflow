@@ -17,165 +17,43 @@ interface Props {
 
 const FONT =
   'ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif';
-
-const GAP_X = 28;
-const GAP_Y = 40;
-const MAX_COLUMNS = 3;
-const START_X = 28;
-const START_Y = 56;
-const VM_MIN_W = 220;
-const VM_HEADER_H = 28;
-const VM_BODY_MIN = 36;
-/** Bottom quarter reserved for virtual RJ45 NICs. */
-const NIC_ZONE_RATIO = 0.25;
-const NIC_ZONE_MIN = 52;
-const NET_H = 44;
-/** Min height for host physical-NIC band (bottom quarter). */
-const HOST_PNIC_ZONE_MIN = 72;
-/** Vertical corridor between VMs and physical ports (bridges / NAT live here). */
-const MID_GAP = 36;
-/** Clearance around mid-layer blocks when routing cables around them. */
-const ROUTE_PAD = 12;
-
-type Obstacle = { x: number; y: number; width: number; height: number };
-
-const xCrossesObstacle = (
-  x: number,
-  y0: number,
-  y1: number,
-  obstacles: Obstacle[]
-) => {
-  const top = Math.min(y0, y1);
-  const bot = Math.max(y0, y1);
-  return obstacles.some((o) => {
-    if (x < o.x - 1 || x > o.x + o.width + 1) return false;
-    return !(bot < o.y || top > o.y + o.height);
-  });
-};
-
-/** Prefer a vertical channel that does not cut through mid-layer cards. */
-const findClearChannelX = (
-  preferred: number[],
-  obstacles: Obstacle[],
-  y0: number,
-  y1: number,
-  minX: number,
-  maxX: number
-) => {
-  for (const x of preferred) {
-    if (
-      x >= minX &&
-      x <= maxX &&
-      !xCrossesObstacle(x, y0, y1, obstacles)
-    ) {
-      return x;
-    }
-  }
-  // Gaps between obstacles (sorted by x)
-  const sorted = [...obstacles].sort((a, b) => a.x - b.x);
-  const candidates: number[] = [minX, maxX];
-  for (let i = 0; i < sorted.length - 1; i += 1) {
-    const left = sorted[i].x + sorted[i].width;
-    const right = sorted[i + 1].x;
-    if (right - left > ROUTE_PAD * 2) {
-      candidates.push((left + right) / 2);
-    }
-  }
-  if (sorted.length > 0) {
-    candidates.push(sorted[0].x - ROUTE_PAD);
-    candidates.push(sorted[sorted.length - 1].x + sorted[sorted.length - 1].width + ROUTE_PAD);
-  }
-  for (const x of candidates) {
-    const clamped = Math.max(minX, Math.min(maxX, x));
-    if (!xCrossesObstacle(clamped, y0, y1, obstacles)) return clamped;
-  }
-  return preferred[0] ?? minX;
-};
+const MONO = 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace';
 
 /**
- * Orthogonal cable that stays clear of mid-layer bridge/NAT cards.
- * Prefer a clean vertical drop; otherwise go around via a free channel.
+ * Universal data-driven SVG layout engine metrics.
+ * All coordinates are derived from counts — never hardcoded per diagram.
  */
-const routeCable = (
-  x1: number,
-  y1: number,
-  x2: number,
-  y2: number,
-  obstacles: Obstacle[],
-  bounds: { minX: number; maxX: number }
-) => {
-  const goingDown = y2 >= y1;
-  if (obstacles.length === 0 || Math.abs(x1 - x2) < 2) {
-    if (!xCrossesObstacle(x1, y1, y2, obstacles)) {
-      return `M ${x1} ${y1} L ${x1} ${y2}`;
-    }
-  }
+const PAD = 24;
+const HEADER_H = 72;
+const Y_COMPUTE_START = PAD + HEADER_H;
 
-  // Direct vertical at x1 then horizontal, if clear
-  if (!xCrossesObstacle(x1, y1, y2, obstacles)) {
-    return `M ${x1} ${y1} L ${x1} ${y2} L ${x2} ${y2}`;
-  }
-  if (!xCrossesObstacle(x2, y1, y2, obstacles)) {
-    return `M ${x1} ${y1} L ${x2} ${y1} L ${x2} ${y2}`;
-  }
+const MAX_COLS = 4;
+const NODE_W = 240;
+const NODE_H = 72;
+const NODE_GAP_X = 20;
+const NODE_GAP_Y = 18;
 
-  const bandTop = Math.min(...obstacles.map((o) => o.y)) - ROUTE_PAD;
-  const bandBot = Math.max(...obstacles.map((o) => o.y + o.height)) + ROUTE_PAD;
-  const approachY = goingDown
-    ? Math.min(bandTop, (y1 + y2) / 2)
-    : Math.max(bandBot, (y1 + y2) / 2);
-  const exitY = goingDown
-    ? Math.max(bandBot, approachY + 1)
-    : Math.min(bandTop, approachY - 1);
+const ZONE_GAP = 160;
+/** Horizontal bus sits in the open corridor under Zone 1 (not on card edges). */
+const BUS_CORRIDOR = 72;
 
-  const channel = findClearChannelX(
-    [x1, x2, (x1 + x2) / 2],
-    obstacles,
-    approachY,
-    exitY,
-    bounds.minX,
-    bounds.maxX
-  );
+const NAT_H = 48;
+const BRIDGE_H = 56;
+const LOGIC_GAP_X = 16;
+const NAT_BRIDGE_GAP = 100;
 
-  return [
-    `M ${x1} ${y1}`,
-    `L ${x1} ${approachY}`,
-    `L ${channel} ${approachY}`,
-    `L ${channel} ${exitY}`,
-    `L ${x2} ${exitY}`,
-    `L ${x2} ${y2}`
-  ].join(' ');
-};
-
-/** Horizontal elbow between two mid-layer nets (NAT ↔ bridge). */
-const routeSideLink = (
-  x1: number,
-  y1: number,
-  x2: number,
-  y2: number
-) => {
-  if (Math.abs(y1 - y2) < 2) {
-    return `M ${x1} ${y1} L ${x2} ${y2}`;
-  }
-  const midX = (x1 + x2) / 2;
-  return `M ${x1} ${y1} L ${midX} ${y1} L ${midX} ${y2} L ${x2} ${y2}`;
-};
-
-const PortDot = ({
-  cx,
-  cy,
-  fill
-}: {
-  cx: number;
-  cy: number;
-  fill: string;
-}) => (
-  <circle cx={cx} cy={cy} r={4.5} fill={fill} stroke="#fff" strokeWidth={1.5} />
-);
+const PNIC_H = 92;
+const PNIC_GAP = 12;
+/** Gap Zone 2 → Zone 3 so hardware never feels clipped against logic. */
+const HARDWARE_GAP = 150;
+const BOTTOM_MARGIN = 150;
+const BYPASS_MARGIN = 28;
 
 type NetRef =
   | { kind: 'passthrough'; target?: string }
   | { kind: 'bridge' | 'nat'; networkId: string; net: ServerV2LogicalNetwork };
+
+type Pt = { x: number; y: number };
 
 const truncate = (value: string, max: number) => {
   if (value.length <= max) return value;
@@ -207,48 +85,95 @@ const resolveVnicNet = (
   return { kind: type, networkId: net.id, net };
 };
 
-/** How many VMs attach to each logical network id. */
-const countNetworkUsage = (model: UnifiedNetworkModel): Map<string, number> => {
-  const counts = new Map<string, number>();
-  model.computeNodes.forEach((vm) => {
-    const seen = new Set<string>();
-    vm.vNICs.forEach((vnic) => {
-      const ref = resolveVnicNet(vnic, model.logicalNetworks);
-      if (ref.kind === 'passthrough') return;
-      if (seen.has(ref.networkId)) return;
-      seen.add(ref.networkId);
-      counts.set(ref.networkId, (counts.get(ref.networkId) || 0) + 1);
-    });
-  });
-  return counts;
+const isLxc = (vm: ServerV2ComputeNode) =>
+  String(vm.type || '').toLowerCase() === 'lxc';
+
+const isNatNet = (net: ServerV2LogicalNetwork) =>
+  String(net.type).toLowerCase() === 'nat';
+
+const wireColor = (opts: {
+  kind: 'trunk' | 'passthrough' | 'nat' | 'hw' | 'access';
+  vlan?: string;
+}) => {
+  if (opts.kind === 'trunk') return '#dc2626';
+  if (opts.kind === 'passthrough') return '#9333ea';
+  if (opts.kind === 'nat') return '#d97706';
+  if (opts.kind === 'hw') return '#10b981';
+  const v = String(opts.vlan || '').trim();
+  if (v === '100') return '#2563eb';
+  if (v === '200') return '#0284c7';
+  if (v === '30') return '#059669';
+  if (v === '40') return '#d97706';
+  if (v === '70') return '#7c3aed';
+  let h = 0;
+  for (let i = 0; i < v.length; i += 1) h = (h * 31 + v.charCodeAt(i)) | 0;
+  const palette = ['#2563eb', '#0284c7', '#059669', '#7c3aed', '#db2777', '#0891b2'];
+  return palette[Math.abs(h) % palette.length];
 };
 
-/** Shared = used by 2+ VMs → drawn below. Local = only this VM / passthrough. */
-const isSharedNetwork = (
-  networkId: string,
-  usage: Map<string, number>
-): boolean => (usage.get(networkId) || 0) >= 2;
-
-const vmCardMetrics = (vm: ServerV2ComputeNode) => {
-  const nicCount = Math.max(1, vm.vNICs.length);
-  const bodyH = VM_BODY_MIN;
-  // Choose height so the NIC band is exactly the bottom 25% and still roomy.
-  let height = Math.ceil((VM_HEADER_H + bodyH) / (1 - NIC_ZONE_RATIO));
-  let nicZoneH = Math.round(height * NIC_ZONE_RATIO);
-  if (nicZoneH < NIC_ZONE_MIN) {
-    nicZoneH = NIC_ZONE_MIN;
-    height = Math.ceil((VM_HEADER_H + bodyH + nicZoneH) / 1);
-    // Re-fit so band ≈ 25%: grow total if needed
-    const target = Math.ceil(nicZoneH / NIC_ZONE_RATIO);
-    if (target > height) height = target;
-    nicZoneH = Math.round(height * NIC_ZONE_RATIO);
+/** Orthogonal bus only: vertical → shared horizontal channel → vertical. No diagonals/curves. */
+const busPath = (from: Pt, to: Pt, busY: number) => {
+  const y1 = from.y;
+  const y2 = to.y;
+  // Always visit the shared channel so stacked layers don't get diagonal shortcuts.
+  if (Math.abs(from.x - to.x) < 1.5 && Math.abs(busY - y1) < 1.5) {
+    return `M ${from.x} ${y1} L ${to.x} ${y2}`;
   }
-  // Wider cards when many NICs sit in one row
-  const width = Math.max(VM_MIN_W, 56 + nicCount * 44);
-  return { height, width, nicZoneH, nicZoneY: height - nicZoneH };
+  return `M ${from.x} ${y1} L ${from.x} ${busY} L ${to.x} ${busY} L ${to.x} ${y2}`;
 };
 
-/** Same LibreICONS RJ45 paths as `Rj45Port` (node faceplate jacks). */
+/**
+ * Passthrough bypass: drop to edge rail, run along canvas side,
+ * then enter physical zone — never crosses logical NAT/bridge cards.
+ */
+const bypassPath = (from: Pt, to: Pt, railX: number, midY: number) =>
+  `M ${from.x} ${from.y} L ${from.x} ${from.y + 10} L ${railX} ${from.y + 10} L ${railX} ${midY} L ${to.x} ${midY} L ${to.x} ${to.y}`;
+
+/** Evenly distribute fixed-size cards across a band width. */
+const distributeHorizontally = (
+  count: number,
+  bandLeft: number,
+  bandWidth: number,
+  itemW: number,
+  gap: number
+): number[] => {
+  if (count <= 0) return [];
+  const total = count * itemW + Math.max(0, count - 1) * gap;
+  const start = bandLeft + Math.max(0, (bandWidth - total) / 2);
+  return Array.from({ length: count }, (_, i) => start + i * (itemW + gap));
+};
+
+/**
+ * Port-based anchoring on the bottom edge of a compute node.
+ * X_i = X_node + Width / (N+1) * i  (i = 1..N)
+ */
+const vnicAnchor = (
+  nodeX: number,
+  nodeY: number,
+  nodeW: number,
+  nodeH: number,
+  index1Based: number,
+  n: number
+): Pt => ({
+  x: nodeX + (nodeW / (n + 1)) * index1Based,
+  y: nodeY + nodeH
+});
+
+const PortDot = ({
+  cx,
+  cy,
+  fill,
+  r = 4
+}: {
+  cx: number;
+  cy: number;
+  fill: string;
+  r?: number;
+}) => (
+  <circle cx={cx} cy={cy} r={r} fill={fill} stroke="#fff" strokeWidth={1.5} />
+);
+
+/** Same LibreICONS RJ45 paths as `Rj45Port` on device nodes / switches. */
 const RJ45_BEZEL = '#cfd8dc';
 const RJ45_BODY = '#455a64';
 const RJ45_PINS = '#fdd835';
@@ -256,13 +181,11 @@ const RJ45_PINS = '#fdd835';
 const MiniJack = ({
   x,
   y,
-  size = 16,
-  isConnected = false
+  size = 22
 }: {
   x: number;
   y: number;
   size?: number;
-  isConnected?: boolean;
 }) => (
   <svg
     x={x}
@@ -286,257 +209,91 @@ const MiniJack = ({
       fill={RJ45_PINS}
       d="M3.6667 4h.6666v2.3333H3.6667zm1 0h.6666v2.3333H4.6667zm1 0h.6666v2.3333H5.6667zm1 0h.6666v2.3333H6.6667zm1 0h.6666v2.3333H7.6667zm1 0h.6666v2.3333H8.6667zm1 0h.6666v2.3333H9.6667z"
     />
-    {isConnected && (
-      <g opacity={0.58}>
-        <rect
-          x={3.15}
-          y={3.55}
-          width={7.7}
-          height={4.35}
-          rx={0.25}
-          fill="rgba(241, 245, 249, 0.88)"
-          stroke="rgba(71, 85, 105, 0.4)"
-          strokeWidth={0.35}
-        />
-        <path
-          d="M4.15 7.85h5.7v2.05H4.15z"
-          fill="rgba(203, 213, 225, 0.9)"
-          stroke="rgba(71, 85, 105, 0.35)"
-          strokeWidth={0.3}
-        />
-        <path
-          d="M5.45 9.75h3.1l0.45 1.55H5z"
-          fill="rgba(148, 163, 184, 0.75)"
-          stroke="rgba(71, 85, 105, 0.4)"
-          strokeWidth={0.25}
-          strokeLinejoin="round"
-        />
-        <rect
-          x={5.55}
-          y={11.15}
-          width={2.9}
-          height={0.85}
-          rx={0.2}
-          fill="rgba(148, 163, 184, 0.55)"
-        />
-      </g>
-    )}
   </svg>
 );
 
-const KindPill = ({
-  label,
-  x,
-  y
-}: {
-  label: string;
-  x: number;
-  y: number;
-}) => (
-  <g transform={`translate(${x}, ${y})`}>
-    <rect width={34} height={16} rx={3} fill="#334155" />
-    <text
-      x={17}
-      y={8.5}
-      textAnchor="middle"
-      dominantBaseline="central"
-      fill="#f8fafc"
-      fontFamily={FONT}
-      fontSize={9}
-      fontWeight={700}
-      letterSpacing={0.3}
-    >
-      {label}
-    </text>
-  </g>
-);
-
-const netTone = (kind: string) => {
-  if (kind === 'nat') return { fill: '#fffbeb', stroke: '#f59e0b', text: '#d97706' };
-  if (kind === 'passthrough')
-    return { fill: '#f5f3ff', stroke: '#a855f7', text: '#7e22ce' };
-  return { fill: '#ecfdf5', stroke: '#10b981', text: '#059669' };
-};
-
-const slotLabel = (ref: NetRef): { title: string; tone: string } => {
-  if (ref.kind === 'passthrough') {
-    return {
-      title: ref.target ? `PT · ${ref.target}` : 'Passthrough',
-      tone: 'passthrough'
-    };
-  }
-  const name = ref.net.name || ref.net.id;
-  if (ref.kind === 'nat') return { title: `NAT · ${name}`, tone: 'nat' };
-  return { title: `Bridge · ${name}`, tone: 'bridge' };
-};
-
-const VmBlock = ({
+const ComputeCard = ({
   vm,
   x,
   y,
   width,
   height,
-  nicZoneY,
-  nicZoneH,
   networks,
-  usage
+  anchors
 }: {
   vm: ServerV2ComputeNode;
   x: number;
   y: number;
   width: number;
   height: number;
-  nicZoneY: number;
-  nicZoneH: number;
   networks: ServerV2LogicalNetwork[];
-  usage: Map<string, number>;
+  anchors: Pt[];
 }) => {
-  const kind = String(vm.type || 'vm').toUpperCase();
-  const isLxc = kind === 'LXC';
+  const lxc = isLxc(vm);
   const title = vm.name?.trim() || vm.id;
-  const nics = vm.vNICs.length > 0 ? vm.vNICs : [{ network: 'direct' } as ServerV2Vnic];
-  const colW = width / nics.length;
+  const nics = vm.vNICs.length > 0 ? vm.vNICs : [];
+  const metaParts = nics.map((v, i) => {
+    const ref = resolveVnicNet(v, networks);
+    if (ref.kind === 'passthrough') {
+      return `${v.id || `eth${i}`}: PT → ${v.target || '?'}`;
+    }
+    const ip = vnicIp(v);
+    const vlan = vnicVlan(v);
+    const mode = vnicMode(v);
+    const bits = [
+      ip && `IP ${ip}`,
+      vlan && `VLAN ${vlan}`,
+      mode === 'trunk' && 'Trunk'
+    ].filter(Boolean);
+    return bits.length ? bits.join(' · ') : ref.net.name || ref.networkId;
+  });
 
   return (
-    <g transform={`translate(${x}, ${y})`}>
+    <g transform={`translate(${x}, ${y})`} filter="url(#rail-shadow)">
       <rect
         width={width}
         height={height}
-        rx={5}
-        fill="#ffffff"
-        stroke={isLxc ? '#64748b' : '#94a3b8'}
-        strokeWidth={1}
-        strokeDasharray={isLxc ? '4 3' : undefined}
+        rx={6}
+        fill={lxc ? '#f0fdf4' : '#ffffff'}
+        stroke={lxc ? '#a7f3d0' : '#cbd5e1'}
+        strokeWidth={1.5}
       />
-      <rect width={width} height={VM_HEADER_H} rx={5} fill="#e2e8f0" />
-      <rect y={VM_HEADER_H - 5} width={width} height={5} fill="#e2e8f0" />
-
-      <KindPill label={kind === 'LXC' ? 'LXC' : 'VM'} x={8} y={6} />
       <text
-        x={48}
-        y={VM_HEADER_H / 2}
-        dominantBaseline="central"
+        x={12}
+        y={22}
         fontFamily={FONT}
         fontSize={12}
         fontWeight={700}
-        fill="#1e293b"
+        fill="#0f172a"
       >
-        {truncate(title, Math.max(8, Math.floor((width - 56) / 7)))}
+        {truncate(title, 26)}
+        <tspan
+          dx={6}
+          fontSize={9}
+          fontWeight={600}
+          fill={lxc ? '#047857' : '#64748b'}
+        >
+          {lxc ? 'LXC' : 'VM'}
+        </tspan>
       </text>
-
-      {/* Optional body meta (first NIC IP / VLAN summary) */}
-      {nics.slice(0, 2).map((vnic, i) => {
-        const ip = vnicIp(vnic);
-        const vlan = vnicVlan(vnic);
-        if (!ip && !vlan) return null;
-        return (
-          <text
-            key={`meta-${i}`}
-            x={12}
-            y={VM_HEADER_H + 14 + i * 12}
-            fontFamily={FONT}
-            fontSize={10}
-            fill="#64748b"
-          >
-            {truncate(
-              [ip && `IP ${ip}`, vlan && `VLAN ${vlan}`].filter(Boolean).join(' · '),
-              Math.max(12, Math.floor((width - 20) / 6.2))
-            )}
-          </text>
-        );
-      })}
-
-      {/* Recessed groove — top of bottom-25% NIC band */}
-      <rect
-        x={6}
-        y={nicZoneY - 1}
-        width={width - 12}
-        height={2}
-        rx={1}
-        fill="url(#vm-groove)"
-      />
-
-      {/* Bottom NIC band — vertical columns, one RJ45 each */}
-      <rect
-        x={1}
-        y={nicZoneY}
-        width={width - 2}
-        height={nicZoneH - 1}
-        fill="#f8fafc"
-        opacity={0.9}
-      />
-
-      {nics.map((vnic, i) => {
-        const ref = resolveVnicNet(vnic, networks);
-        const { title: label, tone } = slotLabel(ref);
-        const colors = netTone(tone);
-        const cx = colW * i + colW / 2;
-        const jackSize = Math.min(22, Math.max(14, colW * 0.4));
-        const jackY = height - 6 - jackSize;
-        const ifaceName = vnic.id || `eth${i}`;
-        const wired =
-          ref.kind === 'passthrough' ? true : Boolean(ref.networkId);
-
-        return (
-          <g key={`${vm.id}-nic-${i}`}>
-            {i > 0 && (
-              <line
-                x1={colW * i}
-                y1={nicZoneY + 4}
-                x2={colW * i}
-                y2={height - 4}
-                stroke="rgba(148,163,184,0.35)"
-                strokeWidth={1}
-              />
-            )}
-            <text
-              x={cx}
-              y={nicZoneY + 11}
-              textAnchor="middle"
-              fontFamily={FONT}
-              fontSize={Math.min(9, Math.max(7, colW * 0.18))}
-              fontWeight={700}
-              fill={colors.text}
-            >
-              {truncate(label, Math.max(6, Math.floor(colW / 6.5)))}
-            </text>
-            {ref.kind !== 'passthrough' &&
-              isSharedNetwork(ref.networkId, usage) && (
-              <text
-                x={cx}
-                y={nicZoneY + 21}
-                textAnchor="middle"
-                fontFamily={FONT}
-                fontSize={7.5}
-                fill="#94a3b8"
-              >
-                shared
-              </text>
-            )}
-            <text
-              x={cx}
-              y={jackY - 3}
-              textAnchor="middle"
-              fontFamily={FONT}
-              fontSize={8}
-              fill="#94a3b8"
-            >
-              {truncate(ifaceName, Math.max(4, Math.floor(colW / 7)))}
-            </text>
-            <MiniJack
-              x={cx - jackSize / 2}
-              y={jackY}
-              size={jackSize}
-              isConnected={wired}
-            />
-          </g>
-        );
-      })}
+      <text x={12} y={40} fontFamily={MONO} fontSize={9} fill="#334155">
+        {truncate(metaParts.join('  ·  ') || '—', 36)}
+      </text>
+      {/* Port dots sit on absolute anchors; drawn by wire layer */}
+      {anchors.map((_, i) => (
+        <circle
+          key={`slot-${i}`}
+          cx={anchors[i].x - x}
+          cy={height}
+          r={3}
+          fill="#94a3b8"
+        />
+      ))}
     </g>
   );
 };
 
-const NetBlock = ({
+const LogicCard = ({
   net,
   x,
   y,
@@ -549,422 +306,330 @@ const NetBlock = ({
   width: number;
   height: number;
 }) => {
-  const isNat = String(net.type).toLowerCase() === 'nat';
+  const nat = isNatNet(net);
   const title = net.name?.trim() || net.id;
-  const subtitle = net.name ? net.id : String(net.type);
-  const colors = netTone(isNat ? 'nat' : 'bridge');
+  const sub = nat
+    ? net.gateway_ip
+      ? `GW: ${net.gateway_ip}`
+      : 'NAT'
+    : net.uplink
+      ? `Uplink: ${net.uplink}`
+      : 'Internal only';
 
   return (
-    <g transform={`translate(${x}, ${y})`} filter="url(#card-shadow)">
+    <g transform={`translate(${x}, ${y})`} filter="url(#rail-shadow)">
       <rect
         width={width}
         height={height}
-        rx={8}
-        fill={colors.fill}
-        stroke={colors.stroke}
-        strokeWidth={2}
+        rx={6}
+        fill={nat ? '#fffbeb' : '#eff6ff'}
+        stroke={nat ? '#fde68a' : '#bfdbfe'}
+        strokeWidth={1.5}
       />
       <text
-        x={width / 2}
-        y={height / 2 - (net.gateway_ip || net.name ? 6 : 0)}
-        textAnchor="middle"
-        dominantBaseline="central"
+        x={12}
+        y={nat ? 18 : 20}
         fontFamily={FONT}
-        fontSize={12}
+        fontSize={11}
         fontWeight={700}
-        fill={colors.text}
+        fill="#0f172a"
       >
         {truncate(
-          `${isNat ? 'NAT' : 'Bridge'} · ${title}`,
-          Math.max(8, Math.floor(width / 7.5))
+          nat ? `NAT · ${title}` : `${title} (Bridge)`,
+          Math.max(14, Math.floor(width / 7))
         )}
       </text>
-      {(net.name || net.gateway_ip) && (
-        <text
-          x={width / 2}
-          y={height / 2 + 10}
-          textAnchor="middle"
-          dominantBaseline="central"
-          fontFamily={FONT}
-          fontSize={9.5}
-          fill="#64748b"
-        >
-          {truncate(
-            net.gateway_ip ? `${subtitle} · gw ${net.gateway_ip}` : subtitle,
-            Math.max(10, Math.floor(width / 6.5))
-          )}
-        </text>
-      )}
+      <text
+        x={12}
+        y={nat ? 34 : 38}
+        fontFamily={FONT}
+        fontSize={9}
+        fill="#64748b"
+      >
+        {truncate(sub, Math.max(16, Math.floor(width / 6)))}
+      </text>
     </g>
   );
 };
 
-/**
- * Host physical NICs — bottom band of the host chassis (not a separate card).
- * Same column layout as VM vNIC zone: labels above, RJ45 flush to the bottom.
- */
-const HostPnicBand = ({
-  pnics,
+const PnicCard = ({
+  pnic,
   x,
   y,
   width,
   height
 }: {
-  pnics: Array<ServerV2Pnic & { badges: string[] }>;
+  pnic: ServerV2Pnic & { badges: string[] };
   x: number;
   y: number;
   width: number;
   height: number;
 }) => {
-  const list = pnics.length > 0 ? pnics : [];
-  const colW = list.length > 0 ? width / list.length : width;
+  const label = pnic.label || pnic.name || '';
+  const isMgmt = pnic.badges.some((b) => /idrac|mgmt|dell/i.test(b));
+  const jackSize = Math.min(26, Math.max(18, Math.min(width * 0.28, 26)));
+  const jackY = height - 6 - jackSize;
+  const jackX = width / 2 - jackSize / 2;
+  const badge = pnic.badges[0];
 
   return (
-    <g transform={`translate(${x}, ${y})`}>
-      {/* Groove separator — content above touches this band */}
+    <g transform={`translate(${x}, ${y})`} filter="url(#rail-shadow)">
       <rect
-        x={8}
-        y={0}
-        width={width - 16}
-        height={2}
-        rx={1}
-        fill="url(#vm-groove)"
-      />
-      <rect
-        x={0}
-        y={3}
         width={width}
-        height={height - 3}
-        fill="#f1f5f9"
-        opacity={0.95}
+        height={height}
+        rx={6}
+        fill={isMgmt ? '#f8fafc' : '#f1f5f9'}
+        stroke={isMgmt ? '#94a3b8' : '#cbd5e1'}
+        strokeWidth={1.5}
+        strokeDasharray={isMgmt ? '4 3' : undefined}
       />
-
-      {list.map((pnic, i) => {
-        const label = pnic.label || pnic.name || pnic.id;
-        const cx = colW * i + colW / 2;
-        const jackSize = Math.min(26, Math.max(16, colW * 0.28));
-        const jackY = height - 4 - jackSize;
-        const badge = pnic.badges[0];
-
-        return (
-          <g key={pnic.id || `pnic-${i}`}>
-            {i > 0 && (
-              <line
-                x1={colW * i}
-                y1={6}
-                x2={colW * i}
-                y2={height - 2}
-                stroke="rgba(148,163,184,0.4)"
-                strokeWidth={1}
-              />
-            )}
-            <text
-              x={cx}
-              y={18}
-              textAnchor="middle"
-              fontFamily={FONT}
-              fontSize={Math.min(11, Math.max(8, colW * 0.12))}
-              fontWeight={700}
-              fill="#1e293b"
-            >
-              {truncate(pnic.id, Math.max(5, Math.floor(colW / 7)))}
-            </text>
-            {label && label !== pnic.id && (
-              <text
-                x={cx}
-                y={30}
-                textAnchor="middle"
-                fontFamily={FONT}
-                fontSize={8}
-                fill="#64748b"
-              >
-                {truncate(label, Math.max(5, Math.floor(colW / 6.5)))}
-              </text>
-            )}
-            {badge && (
-              <text
-                x={cx}
-                y={jackY - 3}
-                textAnchor="middle"
-                fontFamily={FONT}
-                fontSize={7.5}
-                fill="#94a3b8"
-              >
-                {truncate(badge, Math.max(4, Math.floor(colW / 7)))}
-              </text>
-            )}
-            <MiniJack x={cx - jackSize / 2} y={jackY} size={jackSize} />
-          </g>
-        );
-      })}
+      <text
+        x={width / 2}
+        y={18}
+        textAnchor="middle"
+        fontFamily={FONT}
+        fontSize={12}
+        fontWeight={700}
+        fill="#0f172a"
+      >
+        {truncate(pnic.id, Math.max(8, Math.floor(width / 8)))}
+      </text>
+      {label && label !== pnic.id && (
+        <text
+          x={width / 2}
+          y={34}
+          textAnchor="middle"
+          fontFamily={FONT}
+          fontSize={10}
+          fill="#64748b"
+        >
+          {truncate(label, Math.max(10, Math.floor(width / 6.5)))}
+        </text>
+      )}
+      {badge && (
+        <text
+          x={width / 2}
+          y={jackY - 4}
+          textAnchor="middle"
+          fontFamily={FONT}
+          fontSize={9}
+          fill="#94a3b8"
+        >
+          {truncate(
+            pnic.badges.slice(0, 2).join(' · '),
+            Math.max(8, Math.floor(width / 7))
+          )}
+        </text>
+      )}
+      <MiniJack x={jackX} y={jackY} size={jackSize} />
     </g>
   );
 };
 
 /**
- * Logical topology — one host chassis:
- * VMs on top → gap with bridges/NAT → physical RJ45 band at the bottom.
- * Cables: VM→bridge/NAT, passthrough/uplink→pNIC.
+ * Universal SVG network layout engine:
+ * Zone 1 Compute (grid) → Zone 2 NAT then Bridge → Zone 3 Physical.
+ * Orthogonal bus routing; passthrough bypasses logical zone on the edge rail.
  */
 export const ServerV2LogicalDiagram = ({ model, scale = 1 }: Props) => {
   const layout = useMemo(() => {
-    const usage = countNetworkUsage(model);
-    // All bridge / NAT instances sit in the mid corridor (between VMs and pNICs).
-    const midNets = model.logicalNetworks;
-
-    const totalVms = model.computeNodes.length;
-    const cols = Math.max(1, Math.min(MAX_COLUMNS, totalVms || 1));
-    const rows = Math.max(1, Math.ceil((totalVms || 1) / MAX_COLUMNS));
-
-    const metrics = model.computeNodes.map(vmCardMetrics);
-    const nodeW = Math.max(VM_MIN_W, ...metrics.map((m) => m.width));
-
-    const rowHeights: number[] = [];
-    for (let r = 0; r < rows; r += 1) {
-      const slice = metrics.slice(r * cols, r * cols + cols);
-      rowHeights.push(Math.max(...slice.map((m) => m.height), 120));
-    }
-
-    const vmsBlockH = rowHeights.reduce(
-      (sum, h, i) => sum + h + (i < rowHeights.length - 1 ? GAP_Y : 0),
-      0
-    );
-
-    const spanW =
-      Math.min(Math.max(totalVms, 1), cols) * nodeW +
-      Math.max(0, Math.min(Math.max(totalVms, 1), cols) - 1) * GAP_X;
-
-    const hasMidNets = midNets.length > 0;
     const pnics = model.host.pNICs.map((p) => ({
       ...normalizePnic(p),
       badges: normalizePnic(p).badges || []
     }));
-    const pnicCount = Math.max(1, pnics.length || 1);
+    const nats = model.logicalNetworks.filter(isNatNet);
+    const bridges = model.logicalNetworks.filter((n) => !isNatNet(n));
+    const vms = model.computeNodes;
 
-    // VMs → gap → [bridges/NAT] → gap → physical band
-    const headerH = START_Y;
-    const gapAboveMid = MID_GAP;
-    const gapBelowMid = MID_GAP;
-    const midBlockH = hasMidNets ? NET_H : 0;
-    const upperInner =
-      headerH + vmsBlockH + gapAboveMid + midBlockH + gapBelowMid;
+    const computeRows = Math.max(1, Math.ceil(vms.length / MAX_COLS));
+    const colsUsed = Math.min(MAX_COLS, Math.max(1, vms.length));
 
-    const pnicZoneH = Math.max(
-      HOST_PNIC_ZONE_MIN,
-      Math.round(upperInner * (NIC_ZONE_RATIO / (1 - NIC_ZONE_RATIO))),
-      56 + Math.min(24, pnicCount * 2)
+    const computeBandW =
+      colsUsed * NODE_W + Math.max(0, colsUsed - 1) * NODE_GAP_X;
+    const contentInnerW = Math.max(
+      computeBandW,
+      720,
+      pnics.length * 120 + Math.max(0, pnics.length - 1) * PNIC_GAP
     );
+    const chassisW = PAD * 2 + BYPASS_MARGIN * 2 + contentInnerW;
+    const contentLeft = PAD + BYPASS_MARGIN;
+    const contentRight = chassisW - PAD - BYPASS_MARGIN;
+    const contentW = contentRight - contentLeft;
 
-    const chassisPad = 12;
-    const chassisX = chassisPad;
-    const chassisY = chassisPad;
-    const bandW = Math.max(
-      spanW,
-      pnicCount * 56,
-      hasMidNets
-        ? midNets.length * 130 + Math.max(0, midNets.length - 1) * GAP_X
-        : 0
-    );
-    const chassisW = Math.max(bandW, spanW) + START_X * 2;
-    const chassisH = upperInner + pnicZoneH;
-    const calc_width = chassisX * 2 + chassisW;
-    const calc_height = chassisY * 2 + chassisH;
-
-    const contentOriginX = chassisX + START_X;
-    const pnicBand = {
-      x: chassisX,
-      y: chassisY + upperInner,
-      width: chassisW,
-      height: pnicZoneH
-    };
-
-    const vmPositions = model.computeNodes.map((vm, index) => {
-      const col = index % cols;
-      const row = Math.floor(index / cols);
-      const m = metrics[index];
-      const y =
-        chassisY +
-        headerH +
-        rowHeights.slice(0, row).reduce((sum, h) => sum + h + GAP_Y, 0);
-      const x = contentOriginX + col * (nodeW + GAP_X);
+    // —— Zone 1: Compute grid ——
+    const gridLeft =
+      contentLeft + Math.max(0, (contentW - computeBandW) / 2);
+    const computePositions = vms.map((vm, index) => {
+      const row = Math.floor(index / MAX_COLS);
+      const col = index % MAX_COLS;
+      const x = gridLeft + col * (NODE_W + NODE_GAP_X);
+      const y = Y_COMPUTE_START + row * (NODE_H + NODE_GAP_Y);
+      const nics = vm.vNICs.length > 0 ? vm.vNICs : [];
+      const n = Math.max(1, nics.length);
+      const anchors = (nics.length ? nics : [null]).map((_, i) =>
+        vnicAnchor(x, y, NODE_W, NODE_H, i + 1, n)
+      );
       return {
         ...vm,
         x,
         y,
-        width: nodeW,
-        height: m.height,
-        nicZoneY: m.nicZoneY,
-        nicZoneH: m.nicZoneH,
-        nicAnchors: (vm.vNICs.length ? vm.vNICs : [{ network: 'direct' }]).map(
-          (_v, i, arr) => {
-            const colW = nodeW / arr.length;
-            return {
-              x: x + colW * i + colW / 2,
-              y: y + m.height
-            };
-          }
-        )
+        width: NODE_W,
+        height: NODE_H,
+        anchors
       };
     });
 
-    const vmsBottom = chassisY + headerH + vmsBlockH;
-    const netsY = vmsBottom + gapAboveMid;
+    const yComputeEnd =
+      Y_COMPUTE_START +
+      computeRows * NODE_H +
+      Math.max(0, computeRows - 1) * NODE_GAP_Y;
 
-    // Prefer mid-layer cards under columns that use bridge/NAT — leave
-    // passthrough-only columns empty so PT cables can drop vertically.
-    const passthroughCols = new Set<number>();
-    model.computeNodes.forEach((vm, index) => {
-      const col = index % cols;
-      const vnics = vm.vNICs.length ? vm.vNICs : [];
-      if (
-        vnics.length > 0 &&
-        vnics.every((v) => resolveVnicNet(v, midNets).kind === 'passthrough')
-      ) {
-        passthroughCols.add(col);
-      }
-    });
+    // —— Zone 2: Logical (NAT band, then Bridge band) ——
+    const yLogicStart = yComputeEnd + ZONE_GAP;
+    const busY = yComputeEnd + BUS_CORRIDOR;
 
-    const bridgeCols = Array.from({ length: cols }, (_, c) => c).filter(
-      (c) => !passthroughCols.has(c)
-    );
-    const midSlots =
-      bridgeCols.length > 0
-        ? bridgeCols
-        : Array.from({ length: cols }, (_, c) => c);
-
-    const netW = Math.max(
-      130,
-      Math.min(
-        nodeW,
-        hasMidNets
-          ? (bandW - Math.max(0, midNets.length - 1) * GAP_X) /
-              Math.max(1, midNets.length)
-          : bandW
+    const natItemW = Math.min(
+      220,
+      Math.max(
+        140,
+        (contentW - Math.max(0, nats.length - 1) * LOGIC_GAP_X) /
+          Math.max(1, nats.length)
       )
     );
-
-    const netPositions = midNets.map((net, index) => {
-      let slotCol = midSlots[index % midSlots.length];
-      const attachedCol = model.computeNodes.findIndex((vm) =>
-        vm.vNICs.some((v) => {
-          const ref = resolveVnicNet(v, midNets);
-          return ref.kind !== 'passthrough' && ref.networkId === net.id;
-        })
-      );
-      if (attachedCol >= 0) {
-        const col = attachedCol % cols;
-        if (!passthroughCols.has(col) || midSlots.includes(col)) {
-          slotCol = col;
-        }
-      }
-      const colX = contentOriginX + slotCol * (nodeW + GAP_X);
+    const natXs = distributeHorizontally(
+      nats.length,
+      contentLeft,
+      contentW,
+      natItemW,
+      LOGIC_GAP_X
+    );
+    const natPositions = nats.map((net, index) => {
+      const x = natXs[index] ?? contentLeft;
+      const y = yLogicStart;
       return {
         ...net,
-        x: colX + Math.max(0, (nodeW - netW) / 2),
-        y: netsY,
-        width: netW,
-        height: NET_H
+        x,
+        y,
+        width: natItemW,
+        height: NAT_H,
+        topIn: { x: x + natItemW / 2, y },
+        bottomOut: { x: x + natItemW / 2, y: y + NAT_H },
+        rightOut: { x: x + natItemW, y: y + NAT_H / 2 }
       };
     });
 
-    // De-overlap nets that landed on the same column
-    const netsByCol = new Map<number, typeof netPositions>();
-    netPositions.forEach((net) => {
-      const col = Math.round((net.x - contentOriginX) / Math.max(1, nodeW + GAP_X));
-      const list = netsByCol.get(col) ?? [];
-      list.push(net);
-      netsByCol.set(col, list);
-    });
-    netsByCol.forEach((list) => {
-      if (list.length <= 1) return;
-      const totalW = list.length * netW + (list.length - 1) * 12;
-      const start = list[0].x + netW / 2 - totalW / 2;
-      list.forEach((net, i) => {
-        net.x = start + i * (netW + 12);
-      });
+    const yBridgeStart =
+      yLogicStart + (nats.length ? NAT_H + NAT_BRIDGE_GAP : 0);
+    const bridgeItemW = Math.min(
+      240,
+      Math.max(
+        150,
+        (contentW - Math.max(0, bridges.length - 1) * LOGIC_GAP_X) /
+          Math.max(1, bridges.length)
+      )
+    );
+    const bridgeXs = distributeHorizontally(
+      bridges.length,
+      contentLeft,
+      contentW,
+      bridgeItemW,
+      LOGIC_GAP_X
+    );
+    const bridgePositions = bridges.map((net, index) => {
+      const x = bridgeXs[index] ?? contentLeft;
+      const y = yBridgeStart;
+      return {
+        ...net,
+        x,
+        y,
+        width: bridgeItemW,
+        height: BRIDGE_H,
+        topIn: { x: x + bridgeItemW / 2, y },
+        bottomOut: { x: x + bridgeItemW / 2, y: y + BRIDGE_H },
+        leftIn: { x, y: y + BRIDGE_H / 2 }
+      };
     });
 
-    const pnicPositions = pnics.map((pnic, index) => {
-      const colW = pnicBand.width / Math.max(1, pnics.length);
-      const jackSize = Math.min(26, Math.max(16, colW * 0.28));
-      let jackCx = pnicBand.x + colW * index + colW / 2;
-      const ptVm = model.computeNodes.find((vm) =>
-        vm.vNICs.some((v) => {
-          const ref = resolveVnicNet(v, midNets);
-          return ref.kind === 'passthrough' && v.target === pnic.id;
-        })
+    const yLogicEnd =
+      bridges.length > 0
+        ? yBridgeStart + BRIDGE_H
+        : nats.length > 0
+          ? yLogicStart + NAT_H
+          : yLogicStart;
+
+    const natBridgeBusY =
+      nats.length && bridges.length
+        ? yLogicStart + NAT_H + NAT_BRIDGE_GAP / 2
+        : busY;
+
+    // —— Zone 3: Physical pNICs ——
+    const yHardware = yLogicEnd + HARDWARE_GAP;
+    const pnicCount = Math.max(1, pnics.length);
+    const pnicW = Math.max(
+      110,
+      (contentW - Math.max(0, pnicCount - 1) * PNIC_GAP) / pnicCount
+    );
+    const pnicStartX =
+      contentLeft +
+      Math.max(
+        0,
+        (contentW - (pnicCount * pnicW + (pnicCount - 1) * PNIC_GAP)) / 2
       );
-      if (ptVm) {
-        const vmIdx = model.computeNodes.indexOf(ptVm);
-        const col = vmIdx % cols;
-        jackCx = contentOriginX + col * (nodeW + GAP_X) + nodeW / 2;
-      } else {
-        const uplinkNet = midNets.find((n) => n.uplink === pnic.id);
-        if (uplinkNet) {
-          const placed = netPositions.find((n) => n.id === uplinkNet.id);
-          if (placed) jackCx = placed.x + placed.width / 2;
-        }
-      }
+    const pnicPositions = pnics.map((pnic, index) => {
+      const x = pnicStartX + index * (pnicW + PNIC_GAP);
       return {
         ...pnic,
-        x: pnicBand.x + colW * index,
-        y: pnicBand.y,
-        width: colW,
-        height: pnicBand.height,
-        jackCx,
-        jackTop: pnicBand.y + pnicBand.height - 4 - jackSize
+        x,
+        y: yHardware,
+        width: pnicW,
+        height: PNIC_H,
+        topIn: { x: x + pnicW / 2, y: yHardware }
       };
     });
 
-    const midObstacles: Obstacle[] = netPositions.map((n) => ({
-      x: n.x,
-      y: n.y,
-      width: n.width,
-      height: n.height
-    }));
-
-    const routeBounds = {
-      minX: chassisX + 16,
-      maxX: chassisX + chassisW - 16
-    };
+    const chassisH = yHardware + PNIC_H + BOTTOM_MARGIN;
+    const bypassRailX = chassisW - PAD - BYPASS_MARGIN / 2;
+    const bypassMidY = yLogicStart + (yLogicEnd - yLogicStart) / 2;
 
     return {
-      calc_width,
-      calc_height,
-      chassis: { x: chassisX, y: chassisY, width: chassisW, height: chassisH },
-      vmPositions,
-      netPositions,
+      chassisW,
+      chassisH,
+      computePositions,
+      natPositions,
+      bridgePositions,
       pnicPositions,
-      pnicBand,
-      pnics,
-      midObstacles,
-      routeBounds,
-      usage
+      busY,
+      natBridgeBusY,
+      bypassRailX,
+      bypassMidY,
+      yHardware,
+      hostTitle: model.host.name || model.host.id,
+      contentLeft
     };
   }, [model]);
 
   const {
-    calc_width,
-    calc_height,
-    chassis,
-    vmPositions,
-    netPositions,
+    chassisW,
+    chassisH,
+    computePositions,
+    natPositions,
+    bridgePositions,
     pnicPositions,
-    pnicBand,
-    pnics,
-    midObstacles,
-    routeBounds,
-    usage
+    busY,
+    natBridgeBusY,
+    bypassRailX,
+    bypassMidY,
+    yHardware,
+    hostTitle,
+    contentLeft
   } = layout;
-
-  const hostTitle = model.host.name || model.host.id;
 
   return (
     <Box
       component="svg"
-      viewBox={`0 0 ${calc_width} ${calc_height}`}
-      width={calc_width * scale}
-      height={calc_height * scale}
+      viewBox={`0 0 ${chassisW} ${chassisH}`}
+      width={chassisW * scale}
+      height={chassisH * scale}
       sx={{
         overflow: 'visible',
         display: 'block',
@@ -973,182 +638,243 @@ export const ServerV2LogicalDiagram = ({ model, scale = 1 }: Props) => {
       }}
     >
       <defs>
-        <linearGradient id="vm-groove" x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0%" stopColor="rgba(15,23,42,0.18)" />
-          <stop offset="55%" stopColor="rgba(15,23,42,0.06)" />
-          <stop offset="100%" stopColor="rgba(255,255,255,0.7)" />
-        </linearGradient>
-        <filter id="card-shadow" x="-5%" y="-5%" width="110%" height="110%">
-          <feDropShadow dx="0" dy="2" stdDeviation="3" floodOpacity="0.08" />
+        <filter id="rail-shadow" x="-5%" y="-5%" width="110%" height="110%">
+          <feDropShadow dx="0" dy="2" stdDeviation="3" floodOpacity="0.05" />
         </filter>
+        <linearGradient id="pnic-rail-groove" x1="0" y1="0" x2="1" y2="0">
+          <stop offset="0%" stopColor="rgba(255,255,255,0.8)" />
+          <stop offset="50%" stopColor="rgba(15,23,42,0.18)" />
+          <stop offset="100%" stopColor="rgba(255,255,255,0.8)" />
+        </linearGradient>
         <style>
           {`
-            .path-standard { stroke: #22c55e; stroke-width: 2.5; fill: none; }
-            .path-trunk { stroke: #ef4444; stroke-width: 2; fill: none; }
-            .path-access { stroke: #3b82f6; stroke-width: 2; fill: none; }
-            .path-nat { stroke: #f59e0b; stroke-width: 2; fill: none; stroke-dasharray: 6 4; }
-            .path-passthrough { stroke: #a855f7; stroke-width: 3; fill: none; stroke-dasharray: 6 4; }
+            .wire { stroke-width: 2; fill: none; }
+            .wire-pass { stroke-width: 2.5; stroke-dasharray: 6 4; }
+            .wire-nat { stroke-dasharray: 4 4; }
+            .wire-hw { stroke-width: 2.5; }
           `}
         </style>
       </defs>
 
       <rect
-        x={chassis.x}
-        y={chassis.y}
-        width={chassis.width}
-        height={chassis.height}
+        x={PAD / 2}
+        y={PAD / 2}
+        width={chassisW - PAD}
+        height={chassisH - PAD}
         rx={12}
         fill="#f8fafc"
-        stroke="#cbd5e1"
+        stroke="#e2e8f0"
         strokeWidth={2}
       />
 
       <text
-        x={chassis.x + START_X}
-        y={chassis.y + 28}
+        x={PAD + 16}
+        y={PAD + 26}
         fontFamily={FONT}
-        fontSize={15}
+        fontSize={16}
         fontWeight={700}
         fill="#0f172a"
       >
-        Host: {truncate(hostTitle, 42)}
+        {truncate(hostTitle, 48)}
       </text>
       <text
-        x={chassis.x + START_X}
-        y={chassis.y + 46}
+        x={PAD + 16}
+        y={PAD + 46}
         fontFamily={FONT}
         fontSize={11}
         fill="#64748b"
       >
-        Logical Network Diagram
+        Compute → NAT → Bridge → Physical · orthogonal bus
       </text>
 
-      <g className="cables">
-        {vmPositions.map((vm) =>
-          vm.vNICs.map((vnic, i) => {
+      <text
+        x={contentLeft}
+        y={Y_COMPUTE_START - 14}
+        fontFamily={FONT}
+        fontSize={11}
+        fontWeight={700}
+        letterSpacing={0.5}
+        fill="#64748b"
+      >
+        1 · COMPUTE (grid ≤{MAX_COLS})
+      </text>
+      {natPositions.length > 0 && (
+        <text
+          x={contentLeft}
+          y={natPositions[0].y - 12}
+          fontFamily={FONT}
+          fontSize={11}
+          fontWeight={700}
+          letterSpacing={0.5}
+          fill="#64748b"
+        >
+          2a · NAT
+        </text>
+      )}
+      {bridgePositions.length > 0 && (
+        <text
+          x={contentLeft}
+          y={bridgePositions[0].y - 12}
+          fontFamily={FONT}
+          fontSize={11}
+          fontWeight={700}
+          letterSpacing={0.5}
+          fill="#64748b"
+        >
+          2b · BRIDGE / vSwitch
+        </text>
+      )}
+      {pnicPositions.length > 0 && (
+        <text
+          x={contentLeft}
+          y={yHardware - 12}
+          fontFamily={FONT}
+          fontSize={11}
+          fontWeight={700}
+          letterSpacing={0.5}
+          fill="#64748b"
+        >
+          3 · PHYSICAL (pNICs)
+        </text>
+      )}
+
+      <g className="wires">
+        {computePositions.map((vm) =>
+          (vm.vNICs.length ? vm.vNICs : []).map((vnic, i) => {
             const ref = resolveVnicNet(vnic, model.logicalNetworks);
-            const anchor = vm.nicAnchors[i];
+            const anchor = vm.anchors[i];
             if (!anchor) return null;
-            const mode = vnicMode(vnic);
 
             if (ref.kind === 'passthrough') {
               const target = pnicPositions.find((p) => p.id === vnic.target);
               if (!target) return null;
+              const color = wireColor({ kind: 'passthrough' });
               return (
                 <g key={`pt-${vm.id}-${i}`}>
                   <path
-                    d={routeCable(
-                      anchor.x,
-                      anchor.y,
-                      target.jackCx,
-                      target.jackTop,
-                      midObstacles,
-                      routeBounds
+                    d={bypassPath(
+                      anchor,
+                      target.topIn,
+                      bypassRailX,
+                      bypassMidY
                     )}
-                    className="path-passthrough"
+                    className="wire wire-pass"
+                    stroke={color}
                   />
-                  <PortDot cx={anchor.x} cy={anchor.y} fill="#a855f7" />
+                  <PortDot cx={anchor.x} cy={anchor.y} fill={color} />
                   <PortDot
-                    cx={target.jackCx}
-                    cy={target.jackTop}
-                    fill="#a855f7"
+                    cx={target.topIn.x}
+                    cy={target.topIn.y}
+                    fill={color}
                   />
                 </g>
               );
             }
 
-            const targetNet = netPositions.find((n) => n.id === ref.networkId);
-            if (!targetNet) return null;
-            const className =
-              mode === 'trunk'
-                ? 'path-trunk'
-                : ref.kind === 'nat'
-                  ? 'path-nat'
-                  : 'path-access';
-            const endX = targetNet.x + targetNet.width / 2;
-            const endY = targetNet.y;
-            const stroke =
-              mode === 'trunk'
-                ? '#ef4444'
-                : ref.kind === 'nat'
-                  ? '#f59e0b'
-                  : '#3b82f6';
+            const mode = vnicMode(vnic);
+            const vlan = vnicVlan(vnic);
+            const color = wireColor({
+              kind: mode === 'trunk' ? 'trunk' : 'access',
+              vlan
+            });
+
+            if (ref.kind === 'nat') {
+              const target = natPositions.find((n) => n.id === ref.networkId);
+              if (!target) return null;
+              return (
+                <g key={`net-${vm.id}-${i}`}>
+                  <path
+                    d={busPath(anchor, target.topIn, busY)}
+                    className="wire wire-nat"
+                    stroke={color}
+                  />
+                  <PortDot cx={anchor.x} cy={anchor.y} fill={color} />
+                  <PortDot
+                    cx={target.topIn.x}
+                    cy={target.topIn.y}
+                    fill={color}
+                  />
+                </g>
+              );
+            }
+
+            const target = bridgePositions.find((n) => n.id === ref.networkId);
+            if (!target) return null;
             return (
               <g key={`net-${vm.id}-${i}`}>
                 <path
-                  d={routeCable(
-                    anchor.x,
-                    anchor.y,
-                    endX,
-                    endY,
-                    [],
-                    routeBounds
-                  )}
-                  className={className}
+                  d={busPath(anchor, target.topIn, busY)}
+                  className="wire"
+                  stroke={color}
                 />
-                <PortDot cx={anchor.x} cy={anchor.y} fill={stroke} />
-                <PortDot cx={endX} cy={endY} fill={stroke} />
+                <PortDot cx={anchor.x} cy={anchor.y} fill={color} />
+                <PortDot
+                  cx={target.topIn.x}
+                  cy={target.topIn.y}
+                  fill={color}
+                />
               </g>
             );
           })
         )}
 
-        {netPositions.map((net) => {
-          const nodes: React.ReactNode[] = [];
-          if (net.uplink) {
-            const pnic = pnicPositions.find((p) => p.id === net.uplink);
-            if (pnic) {
-              const startX = net.x + net.width / 2;
-              const startY = net.y + net.height;
-              nodes.push(
-                <g key={`uplink-${net.id}`}>
-                  <path
-                    d={routeCable(
-                      startX,
-                      startY,
-                      pnic.jackCx,
-                      pnic.jackTop,
-                      [],
-                      routeBounds
-                    )}
-                    className="path-standard"
-                  />
-                  <PortDot cx={startX} cy={startY} fill="#22c55e" />
-                  <PortDot
-                    cx={pnic.jackCx}
-                    cy={pnic.jackTop}
-                    fill="#22c55e"
-                  />
-                </g>
-              );
-            }
-          }
-          if (net.connectsTo) {
-            const target = netPositions.find((n) => n.id === net.connectsTo);
-            if (target) {
-              const fromRight = net.x < target.x;
-              const x1 = fromRight ? net.x + net.width : net.x;
-              const x2 = fromRight ? target.x : target.x + target.width;
-              const y1 = net.y + net.height / 2;
-              const y2 = target.y + target.height / 2;
-              nodes.push(
-                <g key={`connect-${net.id}`}>
-                  <path
-                    d={routeSideLink(x1, y1, x2, y2)}
-                    className="path-nat"
-                  />
-                  <PortDot cx={x1} cy={y1} fill="#f59e0b" />
-                  <PortDot cx={x2} cy={y2} fill="#f59e0b" />
-                </g>
-              );
-            }
-          }
-          return nodes;
+        {natPositions.map((nat) => {
+          if (!nat.connectsTo) return null;
+          const bridge = bridgePositions.find((b) => b.id === nat.connectsTo);
+          if (!bridge) return null;
+          const color = wireColor({ kind: 'nat' });
+          return (
+            <g key={`nat-up-${nat.id}`}>
+              <path
+                d={busPath(nat.bottomOut, bridge.topIn, natBridgeBusY)}
+                className="wire wire-nat"
+                stroke={color}
+              />
+              <PortDot cx={nat.bottomOut.x} cy={nat.bottomOut.y} fill={color} />
+              <PortDot
+                cx={bridge.topIn.x}
+                cy={bridge.topIn.y}
+                fill={color}
+              />
+            </g>
+          );
+        })}
+
+        {bridgePositions.map((br) => {
+          if (!br.uplink) return null;
+          const pnic = pnicPositions.find((p) => p.id === br.uplink);
+          if (!pnic) return null;
+          const color = wireColor({ kind: 'hw' });
+          const hwBusY = br.bottomOut.y + (yHardware - br.bottomOut.y) / 2;
+          return (
+            <g key={`uplink-${br.id}`}>
+              <path
+                d={busPath(br.bottomOut, pnic.topIn, hwBusY)}
+                className="wire wire-hw"
+                stroke={color}
+              />
+              <PortDot cx={br.bottomOut.x} cy={br.bottomOut.y} fill={color} />
+              <PortDot cx={pnic.topIn.x} cy={pnic.topIn.y} fill={color} />
+            </g>
+          );
         })}
       </g>
 
-      {netPositions.map((net) => (
-        <NetBlock
+      {computePositions.map((vm) => (
+        <ComputeCard
+          key={vm.id}
+          vm={vm}
+          x={vm.x}
+          y={vm.y}
+          width={vm.width}
+          height={vm.height}
+          networks={model.logicalNetworks}
+          anchors={vm.anchors}
+        />
+      ))}
+
+      {natPositions.map((net) => (
+        <LogicCard
           key={net.id}
           net={net}
           x={net.x}
@@ -1158,29 +884,39 @@ export const ServerV2LogicalDiagram = ({ model, scale = 1 }: Props) => {
         />
       ))}
 
-      {pnics.length > 0 && (
-        <HostPnicBand
-          pnics={pnics}
-          x={pnicBand.x}
-          y={pnicBand.y}
-          width={pnicBand.width}
-          height={pnicBand.height}
+      {bridgePositions.map((net) => (
+        <LogicCard
+          key={net.id}
+          net={net}
+          x={net.x}
+          y={net.y}
+          width={net.width}
+          height={net.height}
         />
-      )}
+      ))}
 
-      {vmPositions.map((vm) => (
-        <VmBlock
-          key={vm.id}
-          vm={vm}
-          x={vm.x}
-          y={vm.y}
-          width={vm.width}
-          height={vm.height}
-          nicZoneY={vm.nicZoneY}
-          nicZoneH={vm.nicZoneH}
-          networks={model.logicalNetworks}
-          usage={usage}
-        />
+      {pnicPositions.map((pnic, i) => (
+        <g key={pnic.id}>
+          {i > 0 && (
+            <g aria-hidden>
+              <rect
+                x={pnic.x - PNIC_GAP / 2 - 1.5}
+                y={pnic.y + 8}
+                width={3}
+                height={PNIC_H - 16}
+                rx={1}
+                fill="url(#pnic-rail-groove)"
+              />
+            </g>
+          )}
+          <PnicCard
+            pnic={pnic}
+            x={pnic.x}
+            y={pnic.y}
+            width={pnic.width}
+            height={pnic.height}
+          />
+        </g>
       ))}
     </Box>
   );

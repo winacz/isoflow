@@ -16,6 +16,8 @@ interface Props {
   /** Same Shape2dPort[] the connector engine uses for magnetic snap. */
   layoutPorts: Shape2dPort[];
   name?: string;
+  /** Management / host IP from model item settings. */
+  ip?: string;
   width?: number;
   height?: number;
   centered?: boolean;
@@ -37,6 +39,7 @@ export const ProxmoxNode = ({
   size,
   layoutPorts,
   name,
+  ip,
   width,
   height,
   centered = true,
@@ -86,7 +89,10 @@ export const ProxmoxNode = ({
   }, [peerHighlightPortIds]);
 
   const title = name?.trim() || config.name || 'Server';
-  const platformLabel = config.platformLabel;
+  /** Top strip before VM grid (matches layout START_Y). Title fills ~78% of it. */
+  const headerBandH = 80;
+  const titleFontSize = Math.max(16, Math.round(headerBandH * 0.78));
+  const titleY = headerBandH / 2;
 
   const nameByPortId = useMemo(() => {
     const map = new Map<string, string>();
@@ -285,8 +291,7 @@ export const ProxmoxNode = ({
               .node-vm { fill: #ffffff; stroke: #94a3b8; stroke-width: 1; }
               .node-lxc { fill: #ffffff; stroke: #94a3b8; stroke-width: 1; stroke-dasharray: 4 4; }
               .vm-box { fill: #ffffff; stroke: #94a3b8; stroke-width: 1; }
-              .px-title-${uid} { fill: #0f172a; font-family: ui-sans-serif, system-ui, sans-serif; font-size: 16px; font-weight: 700; }
-              .px-platform-${uid} { fill: #64748b; font-family: ui-sans-serif, system-ui, sans-serif; font-size: 11px; font-weight: 600; }
+              .px-title-${uid} { fill: #0f172a; font-family: ui-sans-serif, system-ui, sans-serif; font-size: ${titleFontSize}px; font-weight: 700; }
               .text-sub { fill: #64748b; font-family: ui-sans-serif, system-ui, sans-serif; font-size: 10px; }
               .text-bold { fill: #334155; font-family: ui-sans-serif, system-ui, sans-serif; font-size: 12px; font-weight: 700; }
               .vm-box { fill: #f1f5f9; stroke: #94a3b8; stroke-width: 1.5; }
@@ -309,12 +314,39 @@ export const ProxmoxNode = ({
           rx={8}
           className={`px-chassis-${uid} host-bg`}
         />
-        <text x={20} y={26} className={`px-title-${uid}`}>
+        <text
+          x={20}
+          y={titleY}
+          dominantBaseline="middle"
+          className={`px-title-${uid}`}
+        >
           {title}
         </text>
-        {platformLabel && (
-          <text x={20} y={42} className={`px-platform-${uid}`}>
-            {platformLabel}
+        {Boolean(ip?.trim()) && (
+          <text
+            x={layout.internalWidth - 24}
+            y={titleY}
+            textAnchor="end"
+            dominantBaseline="middle"
+            fill="#64748b"
+            fontFamily="ui-sans-serif, system-ui, sans-serif"
+            fontSize={Math.max(12, Math.round(headerBandH * 0.22))}
+            fontWeight={700}
+          >
+            <tspan
+              fill="#94a3b8"
+              fontSize={Math.max(10, Math.round(headerBandH * 0.16))}
+              fontWeight={800}
+              letterSpacing={1.2}
+            >
+              IP{' '}
+            </tspan>
+            <tspan
+              fill="#0f172a"
+              fontFamily="ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace"
+            >
+              {ip!.trim()}
+            </tspan>
           </text>
         )}
 

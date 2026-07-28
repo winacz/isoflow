@@ -34,7 +34,12 @@ export const updateTextBox = (
     const newTextBox = { ...textBox.value, ...updates };
     textBoxes[textBox.index] = newTextBox;
 
-    if (updates.content !== undefined || updates.fontSize !== undefined) {
+    if (
+      updates.content !== undefined ||
+      updates.fontSize !== undefined ||
+      updates.fontFamily !== undefined ||
+      updates.fontWeight !== undefined
+    ) {
       const stateAfterSync = syncTextBox(newTextBox.id, {
         viewId,
         state: draft

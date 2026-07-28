@@ -21,6 +21,9 @@ export const Shape2dPortHoverController = () => {
   const projectionMode = useUiStateStore((state) => {
     return state.projectionMode;
   });
+  const modeType = useUiStateStore((state) => {
+    return state.mode.type;
+  });
   const mouse = useUiStateStore((state) => {
     return state.mouse;
   });
@@ -56,6 +59,13 @@ export const Shape2dPortHoverController = () => {
     if (!isPlanProjection(projectionMode) || projectionMode === 'TWO_D_V2') {
       clearPending();
       setShape2dPortHover(null);
+      return;
+    }
+
+    // Skip hit-tests while dragging — saves work and avoids loupe churn.
+    if (modeType === 'DRAG_ITEMS' || modeType === 'CONNECTOR') {
+      clearPending();
+      if (shape2dPortHover) setShape2dPortHover(null);
       return;
     }
 
@@ -113,6 +123,7 @@ export const Shape2dPortHoverController = () => {
     });
   }, [
     projectionMode,
+    modeType,
     mouse.position.screen.x,
     mouse.position.screen.y,
     zoom,

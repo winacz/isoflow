@@ -463,6 +463,30 @@ export const VIEW_ITEM_DEFAULTS: Required<
   locked: false
 };
 
+/**
+ * Plan description callout size. Former max (10×) is now the minimum —
+ * bubbles were unreadably small at the old 3× floor. Steps of 10 keep
+ * size changes obvious on screen.
+ */
+export const NODE_LABEL_SCALE_MIN = 10;
+export const NODE_LABEL_SCALE_MAX = 40;
+export const NODE_LABEL_SCALE_STEP = 10;
+export const NODE_LABEL_SCALE_DEFAULT = NODE_LABEL_SCALE_MIN;
+
+export const clampNodeLabelScale = (value: number | undefined | null) => {
+  const raw = value ?? NODE_LABEL_SCALE_DEFAULT;
+  const clamped = Math.min(
+    NODE_LABEL_SCALE_MAX,
+    Math.max(NODE_LABEL_SCALE_MIN, raw)
+  );
+  // Snap to the configured step so legacy fractional scales land cleanly.
+  const stepped =
+    Math.round((clamped - NODE_LABEL_SCALE_MIN) / NODE_LABEL_SCALE_STEP) *
+      NODE_LABEL_SCALE_STEP +
+    NODE_LABEL_SCALE_MIN;
+  return Math.min(NODE_LABEL_SCALE_MAX, Math.max(NODE_LABEL_SCALE_MIN, stepped));
+};
+
 export const CONNECTOR_DEFAULTS: Required<Omit<Connector, 'id' | 'color'>> = {
   width: 10,
   description: '',
@@ -478,7 +502,11 @@ export const CONNECTOR_SEARCH_OFFSET = { x: 1, y: 1 };
 export const TEXTBOX_DEFAULTS: Required<Omit<TextBox, 'id' | 'tile'>> = {
   orientation: 'X',
   fontSize: 0.6,
-  content: 'Text'
+  content: 'Text',
+  fontWeight: 'bold',
+  fontFamily: 'Roboto, Arial, sans-serif',
+  textAlign: 'center',
+  color: '#000000'
 };
 
 export const TEXTBOX_PADDING = 0.2;

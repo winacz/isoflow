@@ -20,6 +20,8 @@ interface Props {
   shapeId: string;
   itemId?: string;
   name?: string;
+  /** Management / host IP from model item settings. */
+  ip?: string;
   width?: number;
   height?: number;
   centered?: boolean;
@@ -49,6 +51,7 @@ export const ServerV2Node = ({
   shapeId,
   itemId,
   name,
+  ip,
   width,
   height,
   centered = true,
@@ -109,6 +112,7 @@ export const ServerV2Node = ({
           shapeId={shapeId}
           name={hostTitle}
           subtitle={subtitle}
+          ip={ip}
           width={pxWidth}
           height={pxHeight}
           centered={false}

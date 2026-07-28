@@ -17,11 +17,30 @@ type NodeDragState = {
   clear: () => void;
 };
 
-export const useNodeDragStore = create<NodeDragState>((set) => {
+const tilesEqual = (
+  a: Record<string, Coords>,
+  b: Record<string, Coords>
+): boolean => {
+  const aKeys = Object.keys(a);
+  const bKeys = Object.keys(b);
+  if (aKeys.length !== bKeys.length) return false;
+  for (const key of aKeys) {
+    const at = a[key];
+    const bt = b[key];
+    if (!bt || at.x !== bt.x || at.y !== bt.y) return false;
+  }
+  return true;
+};
+
+export const useNodeDragStore = create<NodeDragState>((set, get) => {
   return {
     tiles: {},
     mounts: {},
     setLive: (tiles, mounts) => {
+      const prev = get();
+      if (!mounts && tilesEqual(prev.tiles, tiles)) {
+        return;
+      }
       set((state) => {
         return {
           tiles,

@@ -37,7 +37,15 @@ import {
   stripToEndpointAnchors,
   analyzeGraph,
   smartPlaceNodes,
+  smartPlaceNodesSl3,
   channelRoute,
+  sharedBendShape2dRoutes,
+  smartPlaceNodesSl4,
+  diagonalBundleShape2dRoutes,
+  getConnectorPathPreview,
+  compactAlgorithmWaypoints,
+  claudeSortSwapLeaves,
+  claudeSortBundleRoutes,
   type TidyInPlaceVariant
 } from 'src/utils';
 import {
@@ -515,6 +523,81 @@ export const useScene = () => {
   );
 
   /**
+   * Apply algorithm waypoints as a sparse polyline (ports + major bends only).
+   * Dense tile fills are skipped — they froze Smart Layout 2 on large graphs
+   * and reintroduced zigzags when endpoints were slightly off-axis.
+   */
+  const applyConnectorRoutes = useCallback(
+    (
+      baseState: State,
+      connectors: Connector[],
+      routes: Record<string, Coords[]>
+    ): State => {
+      const viewId = currentViewId;
+      const connectorById = new Map(
+        connectors.map((connector) => {
+          return [connector.id, connector] as const;
+        })
+      );
+
+      return produce(baseState, (draft) => {
+        const view = getItemByIdOrThrow(draft.model.views, viewId);
+        const viewConnectors = draft.model.views[view.index].connectors;
+        if (!viewConnectors) return;
+
+        const viewForPath = {
+          ...view.value,
+          connectors: viewConnectors,
+          items: draft.model.views[view.index].items
+        };
+
+        Object.entries(routes).forEach(([connectorId, routeTiles]) => {
+          const connector = connectorById.get(connectorId);
+          if (!connector) return;
+
+          const endpointAnchors = connector.anchors.filter((anchor) => {
+            return Boolean(anchor.ref.item);
+          });
+          if (endpointAnchors.length < 2) return;
+
+          const compactTiles = compactAlgorithmWaypoints(
+            routeTiles.length > 24
+              ? [routeTiles[0], routeTiles[routeTiles.length - 1]]
+              : routeTiles
+          );
+
+          const anchors = [
+            endpointAnchors[0],
+            ...compactTiles.map((tile) => {
+              return { id: generateId(), ref: { tile } };
+            }),
+            endpointAnchors[endpointAnchors.length - 1]
+          ];
+
+          const entry = getItemByIdOrThrow(viewConnectors, connectorId);
+          viewConnectors[entry.index] = {
+            ...entry.value,
+            anchors
+          };
+
+          try {
+            draft.scene.connectors[connectorId] = {
+              path: getConnectorPathPreview({
+                anchors,
+                view: viewForPath,
+                modelItems: draft.model.items
+              })
+            };
+          } catch {
+            // Keep previous scene path if path build fails for this cable.
+          }
+        });
+      });
+    },
+    [currentViewId]
+  );
+
+  /**
    * "Mój algorytm": diagonal fan from switch/hub toward selected leaves,
    * nearest-to-diagonal first, no shared grid edges between cables.
    */
@@ -540,41 +623,14 @@ export const useScene = () => {
       if (Object.keys(routes).length === 0) return;
 
       beginHistoryTransaction();
-
-      Object.entries(routes).forEach(([connectorId, tiles]) => {
-        const connector = (view.connectors ?? []).find((candidate) => {
-          return candidate.id === connectorId;
-        });
-        if (!connector) return;
-
-        const endpointAnchors = connector.anchors.filter((anchor) => {
-          return Boolean(anchor.ref.item);
-        });
-        if (endpointAnchors.length < 2) return;
-
-        const anchors = [
-          endpointAnchors[0],
-          ...tiles.map((tile) => {
-            return { id: generateId(), ref: { tile } };
-          }),
-          endpointAnchors[endpointAnchors.length - 1]
-        ];
-
-        const newState = reducers.view({
-          action: 'UPDATE_CONNECTOR',
-          payload: {
-            id: connectorId,
-            anchors,
-            overlapResolve: 'off'
-          },
-          ctx: { viewId: currentViewId, state: getState() }
-        });
-        setState(newState, { skipHistory: true });
-      });
-
+      setState(
+        applyConnectorRoutes(state, view.connectors ?? [], routes),
+        { skipHistory: true }
+      );
       endHistoryTransaction();
     },
     [
+      applyConnectorRoutes,
       beginHistoryTransaction,
       endHistoryTransaction,
       getState,
@@ -593,37 +649,33 @@ export const useScene = () => {
 
       beginHistoryTransaction();
 
-      // --- 1. Porządkuj: swap nodes among existing slots ---
-      if (ids.length >= 2) {
-        const state = getState();
-        const view = getItemByIdOrThrow(state.model.views, currentViewId).value;
-        const selectedItems = (view.items ?? []).filter((item) => {
-          return ids.includes(item.id);
+      let next: State = getState();
+      const view = getItemByIdOrThrow(next.model.views, currentViewId).value;
+      const selectedItems = (view.items ?? []).filter((item) => {
+        return ids.includes(item.id);
+      });
+
+      // --- 1. Porządkuj: swap tiles only (no per-node cable sync) ---
+      if (selectedItems.length >= 2) {
+        const targets = tidyShape2dItems({
+          selectedItems,
+          allItems: view.items ?? [],
+          modelItems: next.model.items,
+          connectors: view.connectors ?? []
         });
 
-        if (selectedItems.length >= 2) {
-          const targets = tidyShape2dItems({
-            selectedItems,
-            allItems: view.items ?? [],
-            modelItems: state.model.items,
-            connectors: view.connectors ?? []
+        Object.entries(targets).forEach(([id, tile]) => {
+          next = reducers.view({
+            action: 'UPDATE_VIEWITEM',
+            payload: { id, tile, skipConnectorSync: true },
+            ctx: { viewId: currentViewId, state: next }
           });
-
-          Object.entries(targets).forEach(([id, tile]) => {
-            const newState = reducers.view({
-              action: 'UPDATE_VIEWITEM',
-              payload: { id, tile },
-              ctx: { viewId: currentViewId, state: getState() }
-            });
-            setState(newState, { skipHistory: true });
-          });
-        }
+        });
       }
 
-      // --- 2. Mój algorytm: fan routes from the (possibly swapped) layout ---
-      const stateAfterTidy = getState();
+      // --- 2. Fan routes from the (possibly swapped) layout ---
       const viewAfterTidy = getItemByIdOrThrow(
-        stateAfterTidy.model.views,
+        next.model.views,
         currentViewId
       ).value;
       const selectedAfterTidy = (viewAfterTidy.items ?? []).filter((item) => {
@@ -634,47 +686,22 @@ export const useScene = () => {
         const routes = diagonalFanShape2dRoutes({
           selectedItems: selectedAfterTidy,
           allItems: viewAfterTidy.items ?? [],
-          modelItems: stateAfterTidy.model.items,
+          modelItems: next.model.items,
           connectors: viewAfterTidy.connectors ?? []
         });
 
-        Object.entries(routes).forEach(([connectorId, routeTiles]) => {
-          const connector = (viewAfterTidy.connectors ?? []).find(
-            (candidate) => {
-              return candidate.id === connectorId;
-            }
-          );
-          if (!connector) return;
-
-          const endpointAnchors = connector.anchors.filter((anchor) => {
-            return Boolean(anchor.ref.item);
-          });
-          if (endpointAnchors.length < 2) return;
-
-          const anchors = [
-            endpointAnchors[0],
-            ...routeTiles.map((tile) => {
-              return { id: generateId(), ref: { tile } };
-            }),
-            endpointAnchors[endpointAnchors.length - 1]
-          ];
-
-          const newState = reducers.view({
-            action: 'UPDATE_CONNECTOR',
-            payload: {
-              id: connectorId,
-              anchors,
-              overlapResolve: 'off'
-            },
-            ctx: { viewId: currentViewId, state: getState() }
-          });
-          setState(newState, { skipHistory: true });
-        });
+        next = applyConnectorRoutes(
+          next,
+          viewAfterTidy.connectors ?? [],
+          routes
+        );
       }
 
+      setState(next, { skipHistory: true });
       endHistoryTransaction();
     },
     [
+      applyConnectorRoutes,
       beginHistoryTransaction,
       endHistoryTransaction,
       getState,
@@ -689,8 +716,8 @@ export const useScene = () => {
 
       beginHistoryTransaction();
 
-      const state = getState();
-      const view = getItemByIdOrThrow(state.model.views, currentViewId).value;
+      let next: State = getState();
+      const view = getItemByIdOrThrow(next.model.views, currentViewId).value;
       const selectedItems = (view.items ?? []).filter((item) => {
         return ids.includes(item.id);
       });
@@ -700,7 +727,7 @@ export const useScene = () => {
         const graph = analyzeGraph({
           selectedItems,
           allItems: view.items ?? [],
-          modelItems: state.model.items,
+          modelItems: next.model.items,
           connectors: view.connectors ?? [],
           rectangles: view.rectangles ?? []
         });
@@ -710,25 +737,23 @@ export const useScene = () => {
           graph,
           selectedItems,
           allItems: view.items ?? [],
-          modelItems: state.model.items,
+          modelItems: next.model.items,
           gridStep: getGridSnapStep(gridStyle)
         });
 
-        // Aplikuj pozycje
+        // Move tiles only — no per-node cable A* (that caused zigzag / freezes).
         Object.entries(targets).forEach(([id, tile]) => {
-          const newState = reducers.view({
+          next = reducers.view({
             action: 'UPDATE_VIEWITEM',
-            payload: { id, tile },
-            ctx: { viewId: currentViewId, state: getState() }
+            payload: { id, tile, skipConnectorSync: true },
+            ctx: { viewId: currentViewId, state: next }
           });
-          setState(newState, { skipHistory: true });
         });
       }
 
-      // Faza C: Routing (na nowych pozycjach)
-      const stateAfterPlace = getState();
+      // Faza C: Orthogonal channel routes — store bend polylines (no A* refill).
       const viewAfterPlace = getItemByIdOrThrow(
-        stateAfterPlace.model.views,
+        next.model.views,
         currentViewId
       ).value;
       const selectedAfterPlace = (viewAfterPlace.items ?? []).filter((item) => {
@@ -739,45 +764,22 @@ export const useScene = () => {
         const routes = channelRoute({
           selectedItems: selectedAfterPlace,
           allItems: viewAfterPlace.items ?? [],
-          modelItems: stateAfterPlace.model.items,
+          modelItems: next.model.items,
           connectors: viewAfterPlace.connectors ?? []
         });
 
-        Object.entries(routes).forEach(([connectorId, routeTiles]) => {
-          const connector = (viewAfterPlace.connectors ?? []).find(
-            (candidate) => candidate.id === connectorId
-          );
-          if (!connector) return;
-
-          const endpointAnchors = connector.anchors.filter((anchor) => {
-            return Boolean(anchor.ref.item);
-          });
-          if (endpointAnchors.length < 2) return;
-
-          const anchors = [
-            endpointAnchors[0],
-            ...routeTiles.map((tile) => {
-              return { id: generateId(), ref: { tile } };
-            }),
-            endpointAnchors[endpointAnchors.length - 1]
-          ];
-
-          const newState = reducers.view({
-            action: 'UPDATE_CONNECTOR',
-            payload: {
-              id: connectorId,
-              anchors,
-              overlapResolve: 'off'
-            },
-            ctx: { viewId: currentViewId, state: getState() }
-          });
-          setState(newState, { skipHistory: true });
-        });
+        next = applyConnectorRoutes(
+          next,
+          viewAfterPlace.connectors ?? [],
+          routes
+        );
       }
 
+      setState(next, { skipHistory: true });
       endHistoryTransaction();
     },
     [
+      applyConnectorRoutes,
       beginHistoryTransaction,
       endHistoryTransaction,
       getState,
@@ -799,8 +801,9 @@ export const useScene = () => {
         return ids.includes(item.id);
       });
 
+      let next: State = state;
+
       if (selectedItems.length >= 2) {
-        // Faza A: Analiza grafu i układ siatkowy (Smart Layout)
         const graph = analyzeGraph({
           selectedItems,
           allItems: view.items ?? [],
@@ -817,21 +820,20 @@ export const useScene = () => {
           gridStep: getGridSnapStep(gridStyle)
         });
 
-        // Aplikuj pozycje
-        Object.entries(targets).forEach(([id, tile]) => {
-          const newState = reducers.view({
-            action: 'UPDATE_VIEWITEM',
-            payload: { id, tile },
-            ctx: { viewId: currentViewId, state: getState() }
+        // One immer pass for all tile moves (avoids N full-state copies).
+        next = produce(next, (draft) => {
+          const draftView = getItemByIdOrThrow(draft.model.views, currentViewId);
+          const items = draft.model.views[draftView.index].items;
+          if (!items) return;
+          Object.entries(targets).forEach(([id, tile]) => {
+            const entry = getItemByIdOrThrow(items, id);
+            items[entry.index] = { ...entry.value, tile };
           });
-          setState(newState, { skipHistory: true });
         });
       }
 
-      // Faza B: Diagonal Routing (algorytm Test)
-      const stateAfterPlace = getState();
       const viewAfterPlace = getItemByIdOrThrow(
-        stateAfterPlace.model.views,
+        next.model.views,
         currentViewId
       ).value;
       const selectedAfterPlace = (viewAfterPlace.items ?? []).filter((item) => {
@@ -842,45 +844,249 @@ export const useScene = () => {
         const routes = diagonalFanShape2dRoutes({
           selectedItems: selectedAfterPlace,
           allItems: viewAfterPlace.items ?? [],
-          modelItems: stateAfterPlace.model.items,
+          modelItems: next.model.items,
           connectors: viewAfterPlace.connectors ?? []
         });
 
-        Object.entries(routes).forEach(([connectorId, routeTiles]) => {
-          const connector = (viewAfterPlace.connectors ?? []).find(
-            (candidate) => candidate.id === connectorId
-          );
-          if (!connector) return;
-
-          const endpointAnchors = connector.anchors.filter((anchor) => {
-            return Boolean(anchor.ref.item);
-          });
-          if (endpointAnchors.length < 2) return;
-
-          const anchors = [
-            endpointAnchors[0],
-            ...routeTiles.map((tile) => {
-              return { id: generateId(), ref: { tile } };
-            }),
-            endpointAnchors[endpointAnchors.length - 1]
-          ];
-
-          const newState = reducers.view({
-            action: 'UPDATE_CONNECTOR',
-            payload: {
-              id: connectorId,
-              anchors,
-              overlapResolve: 'off'
-            },
-            ctx: { viewId: currentViewId, state: getState() }
-          });
-          setState(newState, { skipHistory: true });
-        });
+        next = applyConnectorRoutes(
+          next,
+          viewAfterPlace.connectors ?? [],
+          routes
+        );
       }
 
+      setState(next, { skipHistory: true });
       endHistoryTransaction();
     },
     [
+      applyConnectorRoutes,
+      beginHistoryTransaction,
+      endHistoryTransaction,
+      getState,
+      setState,
+      currentViewId,
+      gridStyle
+    ]
+  );
+
+  /**
+   * Smart Layout 3: place leaves by hub-port order (min crossings), then
+   * stub → shared-X elbows → SE corridor → orthogonal into switch ports.
+   */
+  const runSmartLayout3ForItems = useCallback(
+    (ids: string[]) => {
+      if (ids.length === 0) return;
+
+      beginHistoryTransaction();
+
+      const state = getState();
+      const view = getItemByIdOrThrow(state.model.views, currentViewId).value;
+      const selectedItems = (view.items ?? []).filter((item) => {
+        return ids.includes(item.id);
+      });
+
+      let next: State = state;
+
+      if (selectedItems.length >= 2) {
+        const targets = smartPlaceNodesSl3({
+          selectedItems,
+          allItems: view.items ?? [],
+          modelItems: state.model.items,
+          connectors: view.connectors ?? [],
+          gridStep: getGridSnapStep(gridStyle)
+        });
+
+        next = produce(next, (draft) => {
+          const draftView = getItemByIdOrThrow(draft.model.views, currentViewId);
+          const items = draft.model.views[draftView.index].items;
+          if (!items) return;
+          Object.entries(targets).forEach(([id, tile]) => {
+            const entry = getItemByIdOrThrow(items, id);
+            items[entry.index] = { ...entry.value, tile };
+          });
+        });
+      }
+
+      const viewAfterPlace = getItemByIdOrThrow(
+        next.model.views,
+        currentViewId
+      ).value;
+      const selectedAfterPlace = (viewAfterPlace.items ?? []).filter((item) => {
+        return ids.includes(item.id);
+      });
+
+      if (selectedAfterPlace.length > 0) {
+        const routes = sharedBendShape2dRoutes({
+          selectedItems: selectedAfterPlace,
+          allItems: viewAfterPlace.items ?? [],
+          modelItems: next.model.items,
+          connectors: viewAfterPlace.connectors ?? []
+        });
+
+        next = applyConnectorRoutes(
+          next,
+          viewAfterPlace.connectors ?? [],
+          routes
+        );
+      }
+
+      setState(next, { skipHistory: true });
+      endHistoryTransaction();
+    },
+    [
+      applyConnectorRoutes,
+      beginHistoryTransaction,
+      endHistoryTransaction,
+      getState,
+      setState,
+      currentViewId,
+      gridStyle
+    ]
+  );
+
+  /**
+   * Smart Layout 4:
+   * 1) Score straight RJ45↔RJ45 only (no pathfinding)
+   * 2) Reorder/pack leaves to minimize overlaps then crossings
+   * 3) Tight diagonal bundle into ports (e.g. NW leaves: right→horizontal→diagonal→down)
+   */
+  const runSmartLayout4ForItems = useCallback(
+    (ids: string[]) => {
+      if (ids.length === 0) return;
+
+      beginHistoryTransaction();
+
+      const state = getState();
+      const view = getItemByIdOrThrow(state.model.views, currentViewId).value;
+      const selectedItems = (view.items ?? []).filter((item) => {
+        return ids.includes(item.id);
+      });
+
+      let next: State = state;
+
+      if (selectedItems.length >= 2) {
+        const targets = smartPlaceNodesSl4({
+          selectedItems,
+          allItems: view.items ?? [],
+          modelItems: state.model.items,
+          connectors: view.connectors ?? [],
+          gridStep: getGridSnapStep(gridStyle)
+        });
+
+        next = produce(next, (draft) => {
+          const draftView = getItemByIdOrThrow(draft.model.views, currentViewId);
+          const items = draft.model.views[draftView.index].items;
+          if (!items) return;
+          Object.entries(targets).forEach(([id, tile]) => {
+            const entry = getItemByIdOrThrow(items, id);
+            items[entry.index] = { ...entry.value, tile };
+          });
+        });
+      }
+
+      const viewAfterPlace = getItemByIdOrThrow(
+        next.model.views,
+        currentViewId
+      ).value;
+      const selectedAfterPlace = (viewAfterPlace.items ?? []).filter((item) => {
+        return ids.includes(item.id);
+      });
+
+      if (selectedAfterPlace.length > 0) {
+        const routes = diagonalBundleShape2dRoutes({
+          selectedItems: selectedAfterPlace,
+          allItems: viewAfterPlace.items ?? [],
+          modelItems: next.model.items,
+          connectors: viewAfterPlace.connectors ?? []
+        });
+
+        next = applyConnectorRoutes(
+          next,
+          viewAfterPlace.connectors ?? [],
+          routes
+        );
+      }
+
+      setState(next, { skipHistory: true });
+      endHistoryTransaction();
+    },
+    [
+      applyConnectorRoutes,
+      beginHistoryTransaction,
+      endHistoryTransaction,
+      getState,
+      setState,
+      currentViewId,
+      gridStyle
+    ]
+  );
+
+  /**
+   * Claude Sort:
+   * 1) Greedy pairwise swap of same-footprint leaf nodes to minimise crossings.
+   * 2) Bundle routing: stub → shared trunk → fan into hub ports.
+   */
+  const runClaudeSortForItems = useCallback(
+    (ids: string[]) => {
+      if (ids.length === 0) return;
+
+      beginHistoryTransaction();
+
+      const state = getState();
+      const view = getItemByIdOrThrow(state.model.views, currentViewId).value;
+      const selectedItems = (view.items ?? []).filter((item) => {
+        return ids.includes(item.id);
+      });
+
+      let next: State = state;
+
+      if (selectedItems.length >= 2) {
+        // Phase 1: swap leaves to minimise crossings
+        const targets = claudeSortSwapLeaves({
+          selectedItems,
+          allItems: view.items ?? [],
+          modelItems: state.model.items,
+          connectors: view.connectors ?? [],
+          gridStep: getGridSnapStep(gridStyle)
+        });
+
+        next = produce(next, (draft) => {
+          const draftView = getItemByIdOrThrow(draft.model.views, currentViewId);
+          const items = draft.model.views[draftView.index].items;
+          if (!items) return;
+          Object.entries(targets).forEach(([id, tile]) => {
+            const entry = getItemByIdOrThrow(items, id);
+            items[entry.index] = { ...entry.value, tile };
+          });
+        });
+      }
+
+      const viewAfterPlace = getItemByIdOrThrow(next.model.views, currentViewId).value;
+      const selectedAfterPlace = (viewAfterPlace.items ?? []).filter((item) => {
+        return ids.includes(item.id);
+      });
+
+      if (selectedAfterPlace.length > 0) {
+        // Phase 2: bundle routing
+        const routes = claudeSortBundleRoutes({
+          selectedItems: selectedAfterPlace,
+          allItems: viewAfterPlace.items ?? [],
+          modelItems: next.model.items,
+          connectors: viewAfterPlace.connectors ?? []
+        });
+
+        next = applyConnectorRoutes(
+          next,
+          viewAfterPlace.connectors ?? [],
+          routes
+        );
+      }
+
+      setState(next, { skipHistory: true });
+      endHistoryTransaction();
+    },
+    [
+      applyConnectorRoutes,
       beginHistoryTransaction,
       endHistoryTransaction,
       getState,
@@ -1190,6 +1396,9 @@ export const useScene = () => {
       runTestLayoutForItems,
       runSmartLayoutForItems,
       runSmartLayout2ForItems,
+      runSmartLayout3ForItems,
+      runSmartLayout4ForItems,
+      runClaudeSortForItems,
       regenerateRoutesForItems,
       setSimplePathsMode,
       deleteViewItem,
@@ -1228,6 +1437,9 @@ export const useScene = () => {
       runTestLayoutForItems,
       runSmartLayoutForItems,
       runSmartLayout2ForItems,
+      runSmartLayout3ForItems,
+      runSmartLayout4ForItems,
+      runClaudeSortForItems,
       regenerateRoutesForItems,
       setSimplePathsMode,
       deleteViewItem,

@@ -20,7 +20,7 @@ export const TransformControlsManager = () => {
     case 'RECTANGLE':
       return <RectangleTransformControls id={itemControls.id} />;
     case 'TEXTBOX':
-      return isTwoD ? null : <TextBoxTransformControls id={itemControls.id} />;
+      return <TextBoxTransformControls id={itemControls.id} />;
     default:
       return null;
   }

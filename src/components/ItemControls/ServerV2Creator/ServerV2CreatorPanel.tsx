@@ -50,11 +50,20 @@ interface Props {
   previewMode?: PreviewMode;
 }
 
-const createPnic = (): ServerV2Pnic => ({
-  id: `eth${Date.now() % 1000}`,
-  label: 'NIC',
-  badges: ['1GbE']
-});
+const createPnic = (existing: ServerV2Pnic[] = []): ServerV2Pnic => {
+  const used = new Set(existing.map((p) => p.id));
+  let n = existing.length;
+  let id = `eth${n}`;
+  while (used.has(id)) {
+    n += 1;
+    id = `eth${n}`;
+  }
+  return {
+    id,
+    label: `NIC ${n}`,
+    badges: ['1GbE']
+  };
+};
 
 const createNetwork = (): ServerV2LogicalNetwork => ({
   id: `net_${generateId().slice(0, 6)}`,
@@ -341,7 +350,7 @@ export const ServerV2CreatorPanel = ({
         <Button
           size="small"
           startIcon={<AddIcon />}
-          onClick={() => setPnics([...pnics, createPnic()])}
+          onClick={() => setPnics([...pnics, createPnic(pnics)])}
         >
           Dodaj port
         </Button>

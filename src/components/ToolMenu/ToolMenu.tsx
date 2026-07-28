@@ -231,27 +231,25 @@ export const ToolMenu = ({
         isActive={mode.type === 'CONNECTOR'}
       />
       {!isTwoD && (
-        <>
-          <IconButton
-            name="Rectangle"
-            Icon={<CropSquareIcon />}
-            onClick={() => {
-              uiStateStoreActions.setMode({
-                type: 'RECTANGLE.DRAW',
-                showCursor: true,
-                id: null
-              });
-            }}
-            isActive={mode.type === 'RECTANGLE.DRAW'}
-          />
-          <IconButton
-            name="Text"
-            Icon={<TitleIcon />}
-            onClick={createTextBoxProxy}
-            isActive={mode.type === 'TEXTBOX'}
-          />
-        </>
+        <IconButton
+          name="Rectangle"
+          Icon={<CropSquareIcon />}
+          onClick={() => {
+            uiStateStoreActions.setMode({
+              type: 'RECTANGLE.DRAW',
+              showCursor: true,
+              id: null
+            });
+          }}
+          isActive={mode.type === 'RECTANGLE.DRAW'}
+        />
       )}
+      <IconButton
+        name="Text"
+        Icon={<TitleIcon />}
+        onClick={createTextBoxProxy}
+        isActive={mode.type === 'TEXTBOX'}
+      />
     </Stack>
   );
 

@@ -22,9 +22,9 @@ import {
 import { ModelItem } from 'src/types';
 
 /** Loupe diameter on screen (px) — stays roughly constant while zooming. */
-const LOUPE_SCREEN_PX = 172;
+const LOUPE_SCREEN_PX = 248;
 /** Magnification inside the glass at zoom=1 (screen-constant after SceneLayer). */
-const LOUPE_MAG = 0.7;
+const LOUPE_MAG = 0.55;
 /** Fade-out when leaving ports (ms). */
 const LOUPE_FADE_OUT_MS = 320;
 /** Fade-in when appearing (ms). */

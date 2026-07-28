@@ -5,13 +5,23 @@ import {
   TextField,
   ToggleButton,
   ToggleButtonGroup,
-  Slider
+  Slider,
+  Select,
+  MenuItem
 } from '@mui/material';
-import { TextRotationNone as TextRotationNoneIcon } from '@mui/icons-material';
+import { 
+  TextRotationNone as TextRotationNoneIcon,
+  FormatAlignLeft as FormatAlignLeftIcon,
+  FormatAlignCenter as FormatAlignCenterIcon,
+  FormatAlignRight as FormatAlignRightIcon,
+  FormatBold as FormatBoldIcon
+} from '@mui/icons-material';
 import { useTextBox } from 'src/hooks/useTextBox';
 import { useUiStateStore } from 'src/stores/uiStateStore';
 import { getIsoProjectionCss } from 'src/utils';
 import { useScene } from 'src/hooks/useScene';
+import { ColorSelector } from 'src/components/ColorSelector/ColorSelector';
+import { TEXTBOX_DEFAULTS } from 'src/config';
 import { ControlsContainer } from '../components/ControlsContainer';
 import { Section } from '../components/Section';
 import { DeleteButton } from '../components/DeleteButton';
@@ -39,17 +49,17 @@ export const TextBoxControls = ({ id }: Props) => {
       </Section>
       <Section title="Text size">
         <Slider
-          marks
-          step={0.3}
-          min={0.3}
-          max={0.9}
+          marks={false}
+          step={0.1}
+          min={0.2}
+          max={5.0}
           value={textBox.fontSize}
           onChange={(e, newSize) => {
             updateTextBox(textBox.id, { fontSize: newSize as number });
           }}
         />
       </Section>
-      <Section title="Alignment">
+      <Section title="Orientation">
         <ToggleButtonGroup
           value={textBox.orientation}
           exclusive
@@ -71,6 +81,57 @@ export const TextBoxControls = ({ id }: Props) => {
             />
           </ToggleButton>
         </ToggleButtonGroup>
+      </Section>
+      <Section title="Font Family">
+        <Select
+          value={textBox.fontFamily || TEXTBOX_DEFAULTS.fontFamily}
+          onChange={(e) => {
+            updateTextBox(textBox.id, { fontFamily: e.target.value as string });
+          }}
+          size="small"
+          fullWidth
+        >
+          <MenuItem value="Roboto, Arial, sans-serif">Roboto / Arial</MenuItem>
+          <MenuItem value="Courier New, monospace">Courier New</MenuItem>
+          <MenuItem value="Times New Roman, serif">Times New Roman</MenuItem>
+        </Select>
+      </Section>
+      <Section title="Text Alignment">
+        <ToggleButtonGroup
+          value={textBox.textAlign || TEXTBOX_DEFAULTS.textAlign}
+          exclusive
+          onChange={(e, textAlign) => {
+            if (textAlign) {
+              updateTextBox(textBox.id, { textAlign });
+            }
+          }}
+        >
+          <ToggleButton value="left"><FormatAlignLeftIcon /></ToggleButton>
+          <ToggleButton value="center"><FormatAlignCenterIcon /></ToggleButton>
+          <ToggleButton value="right"><FormatAlignRightIcon /></ToggleButton>
+        </ToggleButtonGroup>
+      </Section>
+      <Section title="Style">
+        <ToggleButtonGroup
+          value={textBox.fontWeight || TEXTBOX_DEFAULTS.fontWeight}
+          exclusive
+          onChange={(e, fontWeight) => {
+            if (fontWeight) {
+              updateTextBox(textBox.id, { fontWeight });
+            }
+          }}
+        >
+          <ToggleButton value="normal">Normal</ToggleButton>
+          <ToggleButton value="bold"><FormatBoldIcon /></ToggleButton>
+        </ToggleButtonGroup>
+      </Section>
+      <Section title="Color">
+        <ColorSelector
+          activeColor={textBox.color}
+          onChange={(color) => {
+            updateTextBox(textBox.id, { color });
+          }}
+        />
       </Section>
       <Section>
         <Box>

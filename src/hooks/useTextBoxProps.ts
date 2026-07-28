@@ -7,20 +7,38 @@ import {
   TEXTBOX_FONT_WEIGHT,
   TEXTBOX_PADDING
 } from 'src/config';
+import { useScene } from 'src/hooks/useScene';
+import { useUiStateStore } from 'src/stores/uiStateStore';
+import { isPlanProjection } from 'src/utils';
 
 export const useTextBoxProps = (textBox: TextBox) => {
+  const { colors } = useScene();
+  const projectionMode = useUiStateStore((state) => state.projectionMode);
+  const isTwoD = isPlanProjection(projectionMode);
+  
   const fontProps = useMemo(() => {
+    const colorHex = colors.find(c => c.id === textBox.color)?.value ?? TEXTBOX_DEFAULTS.color;
+    const scale = isTwoD ? 40 : UNPROJECTED_TILE_SIZE; // Use TILE_SIZE_2D (40) roughly for 2D mode
     return {
-      fontSize:
-        UNPROJECTED_TILE_SIZE * (textBox.fontSize ?? TEXTBOX_DEFAULTS.fontSize),
-      fontFamily: DEFAULT_FONT_FAMILY,
-      fontWeight: TEXTBOX_FONT_WEIGHT
+      fontSize: scale * (textBox.fontSize ?? TEXTBOX_DEFAULTS.fontSize),
+      fontFamily: textBox.fontFamily ?? TEXTBOX_DEFAULTS.fontFamily,
+      fontWeight: textBox.fontWeight ?? TEXTBOX_DEFAULTS.fontWeight,
+      textAlign: (textBox.textAlign ?? TEXTBOX_DEFAULTS.textAlign) as 'left' | 'center' | 'right',
+      color: colorHex
     };
-  }, [textBox.fontSize]);
+  }, [
+    textBox.fontSize,
+    textBox.fontFamily,
+    textBox.fontWeight,
+    textBox.textAlign,
+    textBox.color,
+    colors
+  ]);
 
   const paddingX = useMemo(() => {
-    return UNPROJECTED_TILE_SIZE * TEXTBOX_PADDING;
-  }, []);
+    const scale = isTwoD ? 40 : UNPROJECTED_TILE_SIZE;
+    return scale * TEXTBOX_PADDING;
+  }, [isTwoD]);
 
   return { paddingX, fontProps };
 };

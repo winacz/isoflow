@@ -205,13 +205,13 @@ export const Renderer = ({ showGrid, backgroundColor }: RendererProps) => {
             <Connectors connectors={visibleConnectors} />
           </SceneLayer>
           <SceneLayer>
-            <TextBoxes textBoxes={textBoxes} />
-          </SceneLayer>
-          <SceneLayer>
             <ConnectorLabels connectors={visibleConnectors} />
           </SceneLayer>
         </>
       )}
+      <SceneLayer order={isTwoD ? 2 : 0}>
+        <TextBoxes textBoxes={textBoxes} />
+      </SceneLayer>
       <SceneLayer
         order={isTwoD ? 1 : 11}
         sx={

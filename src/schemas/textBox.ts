@@ -5,8 +5,12 @@ import { id, coords, constrainedStrings } from './common';
 export const textBoxSchema = z.object({
   id,
   tile: coords,
-  content: constrainedStrings.name,
+  content: z.string().max(1000),
   fontSize: z.number().optional(),
+  fontWeight: z.string().optional(),
+  fontFamily: z.string().optional(),
+  textAlign: z.string().optional(),
+  color: z.string().optional(),
   orientation: z
     .union([
       z.literal(ProjectionOrientationEnum.X),
