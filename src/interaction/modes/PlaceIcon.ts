@@ -142,7 +142,9 @@ export const PlaceIcon: ModeActions = {
         uiState.projectionMode === 'TWO_D'
           ? snapTile2dToGrid(
               getShape2dPlacementTile(uiState.mouse.position.tile, shapeSize),
-              getGridSnapStep(uiState.gridStyle)
+              isCabinet
+                ? getGridSnapStep(uiState.gridStyle)
+                : { x: 1, y: 1 }
             )
           : uiState.mouse.position.tile;
 
