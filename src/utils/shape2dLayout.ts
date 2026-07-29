@@ -53,6 +53,31 @@ export const isSwitchLikeIcon = (icon: string | undefined | null): boolean => {
 
 export type Shape2dLayoutMode = 'vertical' | 'horizontal' | 'grid';
 
+/** Repeated-click packing for horizontal / vertical layout (Algorithms UI). */
+export type Shape2dPackVariant = 'tight' | 'spaced' | 'wrap5';
+
+export const SHAPE_2D_PACK_VARIANTS: Shape2dPackVariant[] = [
+  'tight',
+  'spaced',
+  'wrap5'
+];
+
+export const SHAPE_2D_PACK_LABELS: Record<Shape2dPackVariant, string> = {
+  tight: 'przy sobie',
+  spaced: 'z odstępem',
+  wrap5: 'max 5 / rząd'
+};
+
+export const shape2dPackLabel = (
+  pack: Shape2dPackVariant,
+  mode: 'horizontal' | 'vertical'
+) => {
+  if (pack !== 'wrap5') return SHAPE_2D_PACK_LABELS[pack];
+  return mode === 'vertical' ? 'max 5 / kolumna' : 'max 5 / rząd';
+};
+
+export const SHAPE_2D_PACK_WRAP_LIMIT = 5;
+
 type Footprint = {
   id: string;
   tile: Coords;

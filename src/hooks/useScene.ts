@@ -239,7 +239,8 @@ export const useScene = () => {
   const layoutViewItems = useCallback(
     (
       ids: string[],
-      mode: 'vertical' | 'horizontal' | 'grid'
+      mode: 'vertical' | 'horizontal' | 'grid',
+      _pack?: 'tight' | 'spaced' | 'wrap5'
     ) => {
       const state = getState();
       const view = getItemByIdOrThrow(state.model.views, currentViewId).value;
@@ -886,6 +887,17 @@ export const useScene = () => {
     ]
   );
 
+  /** Soft compat for leftover AlgorithmsPopup — alias / no-op after 88e2dab restore. */
+  const runSmartLayout3ForItems = runSmartLayout2ForItems;
+  const runSmartLayout4ForItems = runSmartLayout2ForItems;
+  const runClaudeSortForItems = runSmartLayout2ForItems;
+  const arrangeSelectedNodes = useCallback((_ids: string[]) => {
+    // Occupancy arrange engine not present in 88e2dab tooling.
+  }, []);
+  const recalculateAllRoutes = useCallback(() => {
+    // Occupancy recalculate pass not present in 88e2dab tooling.
+  }, []);
+
   /**
    * Drop intermediate waypoints on cables touching the given nodes and
    * rebuild paths (fresh A* between port endpoints).
@@ -1186,6 +1198,11 @@ export const useScene = () => {
       runTestLayoutForItems,
       runSmartLayoutForItems,
       runSmartLayout2ForItems,
+      runSmartLayout3ForItems,
+      runSmartLayout4ForItems,
+      runClaudeSortForItems,
+      arrangeSelectedNodes,
+      recalculateAllRoutes,
       regenerateRoutesForItems,
       setSimplePathsMode,
       deleteViewItem,
@@ -1224,6 +1241,11 @@ export const useScene = () => {
       runTestLayoutForItems,
       runSmartLayoutForItems,
       runSmartLayout2ForItems,
+      runSmartLayout3ForItems,
+      runSmartLayout4ForItems,
+      runClaudeSortForItems,
+      arrangeSelectedNodes,
+      recalculateAllRoutes,
       regenerateRoutesForItems,
       setSimplePathsMode,
       deleteViewItem,
