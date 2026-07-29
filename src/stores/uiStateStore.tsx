@@ -5,7 +5,6 @@ import {
   getStartingMode,
   clamp,
   setSimplePathsEnabled,
-  setRoutingStyleEnabled,
   getPanScrollFromDelta,
   projectionPrefsKey,
   isPlanProjection
@@ -27,7 +26,6 @@ const smoothZoom = createSmoothZoomController();
 
 const initialState = () => {
   setSimplePathsEnabled(INITIAL_UI_STATE.simplePaths);
-  setRoutingStyleEnabled(INITIAL_UI_STATE.routingStyle);
 
   return createStore<UiStateStore>((set, get) => {
     return {
@@ -65,7 +63,6 @@ const initialState = () => {
       viewTransformByMode: INITIAL_UI_STATE.viewTransformByMode,
       vlan1CableColor: INITIAL_UI_STATE.vlan1CableColor,
       simplePaths: INITIAL_UI_STATE.simplePaths,
-      routingStyle: INITIAL_UI_STATE.routingStyle,
       isWorkshopOpen: INITIAL_UI_STATE.isWorkshopOpen,
       isRightSidebarOpen: INITIAL_UI_STATE.isRightSidebarOpen,
       actions: {
@@ -401,10 +398,6 @@ const initialState = () => {
             setSimplePathsEnabled(next);
             return { simplePaths: next };
           });
-        },
-        setRoutingStyle: (routingStyle) => {
-          setRoutingStyleEnabled(routingStyle);
-          set({ routingStyle });
         },
         setWorkshopOpen: (isWorkshopOpen) => {
           set({ isWorkshopOpen });

@@ -48,8 +48,7 @@ import {
 import { isPlanProjection } from './projection';
 import {
   axisAlignedLineTiles,
-  buildDiagonalAwareTiles,
-  sideFirstOrthoTiles
+  buildDiagonalAwareTiles
 } from './pathOptions';
 import { useScene } from 'src/hooks/useScene';
 
@@ -1064,19 +1063,13 @@ interface GetConnectorPath {
   modelItems?: { id: string; icon?: string }[];
   /** Prefer 90° routing (no diagonal steps). */
   orthogonal?: boolean;
-  /** Optional shared cable-avoidance costs (global `${x},${y}` keys). */
-  costMap?: Map<string, number>;
-  /** Apply RJ45 exit bias on the first segment. */
-  portExitPenalty?: boolean;
 }
 
 export const getConnectorPath = ({
   anchors,
   view,
   modelItems,
-  orthogonal = false,
-  costMap,
-  portExitPenalty = false
+  orthogonal = false
 }: GetConnectorPath): {
   tiles: Coords[];
   rectangle: Rect;
@@ -1124,26 +1117,6 @@ export const getConnectorPath = ({
     };
     const segmentSize = getBoundingBoxSize(segmentArea);
 
-    let localCost: Map<string, number> | undefined;
-    if (costMap && costMap.size > 0) {
-      localCost = new Map();
-      const { lowX, lowY, highX, highY } = segmentSorted;
-      for (let gx = lowX; gx <= highX; gx += 1) {
-        for (let gy = lowY; gy <= highY; gy += 1) {
-          const penalty = costMap.get(`${gx},${gy}`);
-          if (!penalty) continue;
-          const local = normalisePositionFromOrigin({
-            position: { x: gx, y: gy },
-            origin: segmentOrigin
-          });
-          localCost.set(
-            `${Math.round(local.x)},${Math.round(local.y)}`,
-            penalty
-          );
-        }
-      }
-    }
-
     const segmentPath = findPath({
       from: normalisePositionFromOrigin({
         position: fromGlobal,
@@ -1154,9 +1127,7 @@ export const getConnectorPath = ({
         origin: segmentOrigin
       }),
       gridSize: segmentSize,
-      orthogonal,
-      costMap: localCost,
-      portExitPenalty: portExitPenalty && i === 1
+      orthogonal
     }).map((tile) => {
       const global = CoordsUtils.subtract(segmentOrigin, tile);
       return toPathLocal(global);
@@ -1235,9 +1206,8 @@ export const materializeAlgorithmConnectorPath = ({
 };
 
 /**
- * Path through anchors for 2D / drag preview.
- * H/V legs stay axis-filled; exact 45° legs use diagonal fill; other bends
- * use sideways-first ortho L (exit right/left before diving).
+ * Drag-time path: only the consecutive anchor tiles (no A* / no L-fill).
+ * Cheap O(anchors) preview — call getConnectorPath on mouseup for the real route.
  */
 export const getConnectorPathPreview = ({
   anchors,
@@ -1270,33 +1240,15 @@ export const getConnectorPathPreview = ({
     to: { x: sorted.lowX, y: sorted.lowY }
   };
 
-  const toPathLocal = (global: Coords): Coords => {
-    return normalisePositionFromOrigin({
-      position: global,
+  const tiles: Coords[] = [];
+  anchorPosition.forEach((position) => {
+    const local = normalisePositionFromOrigin({
+      position,
       origin: rectangle.from
     });
-  };
-
-  let globalTiles: Coords[] = [];
-  for (let i = 1; i < anchorPosition.length; i += 1) {
-    const from = anchorPosition[i - 1];
-    const to = anchorPosition[i];
-    const dx = Math.abs(to.x - from.x);
-    const dy = Math.abs(to.y - from.y);
-    const segment =
-      from.x === to.x || from.y === to.y
-        ? axisAlignedLineTiles(from, to)
-        : dx === dy
-          ? buildDiagonalAwareTiles(from, to)
-          : sideFirstOrthoTiles(from, to);
-    globalTiles =
-      globalTiles.length === 0
-        ? segment
-        : [...globalTiles, ...segment.slice(1)];
-  }
-
-  const tiles = globalTiles.map((position) => {
-    return toPathLocal(position);
+    const prev = tiles[tiles.length - 1];
+    if (prev && CoordsUtils.isEqual(prev, local)) return;
+    tiles.push(local);
   });
 
   return { tiles, rectangle };

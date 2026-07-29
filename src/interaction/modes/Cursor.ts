@@ -156,6 +156,46 @@ const applyItemSelection = (
   uiState.actions.setSelectedItemIds([itemId]);
 };
 
+const getAnchorOrdering = (
+  anchor: ConnectorAnchor,
+  connector: SceneConnector,
+  view: View,
+  modelItems?: ModelItem[]
+) => {
+  const anchorTile = getAnchorTile(anchor, view, modelItems);
+  const index = connector.path.tiles.findIndex((pathTile) => {
+    const globalTile = connectorPathTileToGlobal(
+      pathTile,
+      connector.path.rectangle.from
+    );
+    return CoordsUtils.isEqual(globalTile, anchorTile);
+  });
+
+  if (index !== -1) {
+    return index;
+  }
+
+  let bestIndex = Math.floor(connector.path.tiles.length / 2);
+  let bestDist = Number.POSITIVE_INFINITY;
+
+  connector.path.tiles.forEach((pathTile, pathIndex) => {
+    const globalTile = connectorPathTileToGlobal(
+      pathTile,
+      connector.path.rectangle.from
+    );
+    const dist =
+      Math.abs(globalTile.x - anchorTile.x) +
+      Math.abs(globalTile.y - anchorTile.y);
+
+    if (dist < bestDist) {
+      bestDist = dist;
+      bestIndex = pathIndex;
+    }
+  });
+
+  return bestIndex;
+};
+
 const getAnchor = (
   connectorId: string,
   tile: Coords,
@@ -191,20 +231,27 @@ const getAnchor = (
 
     const newAnchor: ConnectorAnchor = {
       id: generateId(),
-      ref: { tile: { x: Math.round(tile.x), y: Math.round(tile.y) } }
+      ref: { tile }
     };
 
-    // Insert between the two anchors whose segment contains the click.
-    // Do NOT re-sort by nearest path corner — that often placed the WP after
-    // an endpoint and the cable jumped / looped weirdly.
-    const orderedAnchors = insertWaypointBetweenAnchors({
-      anchors: connector.anchors,
-      newAnchor,
-      tile: newAnchor.ref.tile!,
-      path: connector.path,
-      view: scene.currentView,
-      modelItems
-    });
+    const orderedAnchors = [...connector.anchors, newAnchor]
+      .map((anch) => {
+        return {
+          ...anch,
+          ordering: getAnchorOrdering(
+            anch,
+            connector,
+            scene.currentView,
+            modelItems
+          )
+        };
+      })
+      .sort((a, b) => {
+        return a.ordering - b.ordering;
+      })
+      .map(({ ordering: _ordering, ...anch }) => {
+        return anch;
+      });
 
     scene.updateConnector(
       connector.id,
@@ -217,183 +264,17 @@ const getAnchor = (
   return anchor;
 };
 
-/**
- * Place `newAnchor` on the cable between the correct neighbouring anchors.
- */
-const insertWaypointBetweenAnchors = ({
-  anchors,
-  newAnchor,
-  tile,
-  path,
-  view,
-  modelItems
-}: {
-  anchors: ConnectorAnchor[];
-  newAnchor: ConnectorAnchor;
-  tile: Coords;
-  path: SceneConnector['path'];
-  view: View;
-  modelItems?: ModelItem[];
-}): ConnectorAnchor[] => {
-  if (anchors.length < 2) {
-    return [...anchors, newAnchor];
-  }
-
-  const tx = Math.round(tile.x);
-  const ty = Math.round(tile.y);
-
-  let positions: Coords[];
-  try {
-    positions = anchors.map((candidate) => {
-      return getAnchorTile(candidate, view, modelItems);
-    });
-  } catch {
-    // Fall back to path corners if an anchor cannot be resolved.
-    positions = path.tiles.map((pathTile) => {
-      return connectorPathTileToGlobal(pathTile, path.rectangle.from);
-    });
-    if (positions.length >= 2) {
-      let insertAfter = 0;
-      for (let i = 0; i < positions.length - 1; i += 1) {
-        if (tileLiesOnSegment(positions[i], positions[i + 1], tx, ty)) {
-          insertAfter = i;
-          break;
-        }
-      }
-      // Map path corner index onto anchor list as well as we can (endpoints).
-      const mid = Math.min(insertAfter, anchors.length - 2);
-      return [
-        ...anchors.slice(0, mid + 1),
-        newAnchor,
-        ...anchors.slice(mid + 1)
-      ];
-    }
-    return [
-      anchors[0],
-      newAnchor,
-      ...anchors.slice(1)
-    ];
-  }
-
-  let insertAfter = -1;
-  for (let i = 0; i < positions.length - 1; i += 1) {
-    if (tileLiesOnSegment(positions[i], positions[i + 1], tx, ty)) {
-      insertAfter = i;
-      break;
-    }
-  }
-
-  // Not exactly on a segment (rounding) — pick the closest segment.
-  if (insertAfter < 0) {
-    let bestDist = Number.POSITIVE_INFINITY;
-    for (let i = 0; i < positions.length - 1; i += 1) {
-      const dist = distanceToSegment(positions[i], positions[i + 1], tx, ty);
-      if (dist < bestDist) {
-        bestDist = dist;
-        insertAfter = i;
-      }
-    }
-  }
-
-  if (insertAfter < 0) {
-    insertAfter = 0;
-  }
-
-  // Never insert before the first or after the last endpoint.
-  insertAfter = Math.max(0, Math.min(insertAfter, anchors.length - 2));
-
-  return [
-    ...anchors.slice(0, insertAfter + 1),
-    newAnchor,
-    ...anchors.slice(insertAfter + 1)
-  ];
-};
-
-const distanceToSegment = (
-  a: Coords,
-  b: Coords,
-  tx: number,
-  ty: number
-): number => {
-  const ax = a.x;
-  const ay = a.y;
-  const bx = b.x;
-  const by = b.y;
-  const dx = bx - ax;
-  const dy = by - ay;
-  if (dx === 0 && dy === 0) {
-    return Math.abs(tx - ax) + Math.abs(ty - ay);
-  }
-  const t = Math.max(
-    0,
-    Math.min(1, ((tx - ax) * dx + (ty - ay) * dy) / (dx * dx + dy * dy))
-  );
-  const px = ax + t * dx;
-  const py = ay + t * dy;
-  return Math.abs(tx - px) + Math.abs(ty - py);
-};
-
 const connectorTouchesTile = (
   connector: { path: SceneConnector['path'] },
   tile: Coords
 ) => {
-  const globals = connector.path.tiles.map((pathTile) => {
-    return connectorPathTileToGlobal(pathTile, connector.path.rectangle.from);
+  return connector.path.tiles.some((pathTile) => {
+    const globalPathTile = connectorPathTileToGlobal(
+      pathTile,
+      connector.path.rectangle.from
+    );
+    return CoordsUtils.isEqual(globalPathTile, tile);
   });
-  if (globals.length === 0) return false;
-
-  const tx = Math.round(tile.x);
-  const ty = Math.round(tile.y);
-
-  for (let i = 0; i < globals.length; i += 1) {
-    if (Math.round(globals[i].x) === tx && Math.round(globals[i].y) === ty) {
-      return true;
-    }
-  }
-
-  // Preview paths only store corners — also hit-test every segment between them.
-  for (let i = 1; i < globals.length; i += 1) {
-    if (tileLiesOnSegment(globals[i - 1], globals[i], tx, ty)) {
-      return true;
-    }
-  }
-
-  return false;
-};
-
-/** True when grid tile (tx,ty) lies on the rasterized segment a→b (ortho or diagonal). */
-const tileLiesOnSegment = (
-  a: Coords,
-  b: Coords,
-  tx: number,
-  ty: number
-): boolean => {
-  const ax = Math.round(a.x);
-  const ay = Math.round(a.y);
-  const bx = Math.round(b.x);
-  const by = Math.round(b.y);
-
-  const minX = Math.min(ax, bx);
-  const maxX = Math.max(ax, bx);
-  const minY = Math.min(ay, by);
-  const maxY = Math.max(ay, by);
-  if (tx < minX || tx > maxX || ty < minY || ty > maxY) return false;
-
-  if (ax === bx) return tx === ax;
-  if (ay === by) return ty === ay;
-
-  const dx = bx - ax;
-  const dy = by - ay;
-  const steps = Math.max(Math.abs(dx), Math.abs(dy));
-  if (steps === 0) return ax === tx && ay === ty;
-
-  for (let s = 0; s <= steps; s += 1) {
-    const x = Math.round(ax + (dx * s) / steps);
-    const y = Math.round(ay + (dy * s) / steps);
-    if (x === tx && y === ty) return true;
-  }
-
-  return false;
 };
 
 /**
@@ -437,84 +318,6 @@ const findTileWaypointAt = (
   }
 
   return null;
-};
-
-/** True while idle hover shows ns/ew-resize over a draggable cable segment. */
-let segmentHoverCursor = false;
-
-const updateIdleSegmentCursor = ({
-  uiState,
-  scene,
-  model
-}: {
-  uiState: Parameters<ModeActionsAction>[0]['uiState'];
-  scene: ReturnType<typeof useScene>;
-  model: Parameters<ModeActionsAction>[0]['model'];
-}) => {
-  if (!isPlanProjection(uiState.projectionMode)) return;
-  if (uiState.mode.type !== 'CURSOR' || uiState.mode.mousedownItem) return;
-
-  const selectedConnectorId =
-    uiState.itemControls?.type === 'CONNECTOR'
-      ? uiState.itemControls.id
-      : null;
-
-  if (!selectedConnectorId) {
-    if (segmentHoverCursor) {
-      setWindowCursor('default');
-      segmentHoverCursor = false;
-    }
-    return;
-  }
-
-  const tile = uiState.mouse.position.tile;
-
-  // Waypoints keep the default cursor (grab is for the WP itself).
-  if (resolveWaypointAtTile(tile, scene)) {
-    if (segmentHoverCursor) {
-      setWindowCursor('default');
-      segmentHoverCursor = false;
-    }
-    return;
-  }
-
-  const sceneConnector = scene.connectors.find((con) => {
-    return con.id === selectedConnectorId;
-  });
-  const freshConnector = model.actions
-    .get()
-    .views.find((view) => {
-      return view.id === uiState.view;
-    })
-    ?.connectors?.find((con) => {
-      return con.id === selectedConnectorId;
-    });
-
-  if (!sceneConnector || sceneConnector.locked || freshConnector?.locked) {
-    if (segmentHoverCursor) {
-      setWindowCursor('default');
-      segmentHoverCursor = false;
-    }
-    return;
-  }
-
-  const segment = findWaypointSegmentAtTile({
-    connectorId: selectedConnectorId,
-    anchors: freshConnector?.anchors ?? sceneConnector.anchors,
-    path: sceneConnector.path,
-    tile
-  });
-
-  if (segment) {
-    setWindowCursor(segment.axis === 'H' ? 'ns-resize' : 'ew-resize');
-    segmentHoverCursor = true;
-    return;
-  }
-
-  if (segmentHoverCursor) {
-    setWindowCursor('default');
-    segmentHoverCursor = false;
-  }
 };
 
 const isTileOnDeviceBody = (
@@ -843,12 +646,7 @@ export const Cursor: ModeActions = {
     }
   },
   mousemove: ({ scene, uiState, model }) => {
-    if (uiState.mode.type !== 'CURSOR') return;
-
-    // Segment drag affordance: double-arrow cursor on H/V spans (no handle UI).
-    updateIdleSegmentCursor({ uiState, scene, model });
-
-    if (!hasMovedTile(uiState.mouse)) return;
+    if (uiState.mode.type !== 'CURSOR' || !hasMovedTile(uiState.mouse)) return;
 
     // 2D: drag from an empty port → start connector tool from that port
     if (
@@ -1278,10 +1076,7 @@ export const Cursor: ModeActions = {
 
     // Double-click on cable tile (including over a device body) → add waypoint.
     // Skip pure port handles — those stay as port attachments.
-    // Creating a węzeł implies bent paths — leave simplePaths so sync keeps mids.
-    if (uiState.simplePaths) {
-      uiState.actions.setSimplePaths(false);
-    }
+    if (uiState.simplePaths) return;
 
     const portHit = getShape2dPortAtTile({
       tile,

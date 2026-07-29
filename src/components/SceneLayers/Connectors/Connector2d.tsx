@@ -1,9 +1,11 @@
 import React, { memo, useMemo } from 'react';
 import { useTheme, Box } from '@mui/material';
+import OpenWithOutlinedIcon from '@mui/icons-material/OpenWithOutlined';
 import { TILE_SIZE_2D, getShape2dPortIfaceName } from 'src/config';
 import {
   connectorPathTileToGlobal,
   getAnchorTile,
+  findWaypointSegmentAtTile,
   splitConnectorPathByNodeBodies,
   buildConnectorSvgPathD,
   getConnectorRelationSummary,
@@ -28,7 +30,7 @@ interface Props {
   connector: ReturnType<typeof useScene>['connectors'][0];
   jumps?: ConnectorJump[];
   isSelected?: boolean;
-  /** Emphasize line (e.g. linked to selected node); also shows mid waypoints */
+  /** Emphasize line (e.g. linked to selected node) without showing waypoints */
   isFocused?: boolean;
   /** Stronger than focus — stack handle hover target */
   isHighlighted?: boolean;
@@ -55,6 +57,14 @@ export const Connector2d = memo(({
   const connector = useConnector(_connector.id);
   const modelItems = useModelStore((state) => {
     return state.items;
+  });
+  // Mouse only when selected (segment hover handle) — locked cables stay fixed.
+  const mouseTile = useUiStateStore((state) => {
+    return isSelected && !connector.locked ? state.mouse.position.tile : null;
+  });
+  // Zoom for segment drag handle (selected cable only).
+  const zoom = useUiStateStore((state) => {
+    return isSelected && !connector.locked ? state.zoom : 1;
   });
   const selectedWaypointIds = useUiStateStore((state) => {
     return state.selectedWaypointIds;
@@ -197,26 +207,19 @@ export const Connector2d = memo(({
     });
   }, [globalTiles, items, modelItems, endpointItemIds, softDim]);
 
-  const showWaypoints = Boolean(isSelected || isFocused);
-
-  /** Mid-tile "węzły" — grab handles (ports are endpoints, not shown here). */
   const anchorPositions = useMemo(() => {
-    if (!showWaypoints) return [];
+    if (!isSelected) return [];
 
-    return connector.anchors
-      .filter((anchor) => {
-        return Boolean(anchor.ref.tile);
-      })
-      .map((anchor) => {
-        const position = getAnchorTile(anchor, currentView, modelItems);
-        return {
-          id: anchor.id,
-          locked: Boolean(anchor.locked && anchor.ref.tile),
-          x: (position.x - bounds.minX) * TILE_SIZE_2D + TILE_SIZE_2D / 2,
-          y: (position.y - bounds.minY) * TILE_SIZE_2D + TILE_SIZE_2D / 2
-        };
-      });
-  }, [currentView, connector.anchors, bounds, showWaypoints, modelItems]);
+    return connector.anchors.map((anchor) => {
+      const position = getAnchorTile(anchor, currentView, modelItems);
+      return {
+        id: anchor.id,
+        locked: Boolean(anchor.locked && anchor.ref.tile),
+        x: (position.x - bounds.minX) * TILE_SIZE_2D + TILE_SIZE_2D / 2,
+        y: (position.y - bounds.minY) * TILE_SIZE_2D + TILE_SIZE_2D / 2
+      };
+    });
+  }, [currentView, connector.anchors, bounds, isSelected, modelItems]);
 
   const selectedWaypointPositions = useMemo(() => {
     if (selectedWaypointIds.length === 0) return [];
@@ -237,10 +240,29 @@ export const Connector2d = memo(({
       });
   }, [selectedWaypointIds, connector.anchors, bounds]);
 
+  const hoveredSegmentHandle = useMemo(() => {
+    if (!isSelected || !mouseTile) return null;
+
+    const segment = findWaypointSegmentAtTile({
+      connectorId: connector.id,
+      anchors: connector.anchors,
+      path: connector.path,
+      tile: mouseTile
+    });
+
+    if (!segment) return null;
+
+    return {
+      id: segment.existingWaypointIds.join(':'),
+      x: (segment.mid.x - bounds.minX) * TILE_SIZE_2D + TILE_SIZE_2D / 2,
+      y: (segment.mid.y - bounds.minY) * TILE_SIZE_2D + TILE_SIZE_2D / 2
+    };
+  }, [isSelected, connector, mouseTile, bounds]);
+
   const connectorWidthPx = useMemo(() => {
-    const base = (TILE_SIZE_2D / 100) * connector.width * 1.85;
+    const base = (TILE_SIZE_2D / 100) * connector.width * 1.25;
     // Untagged links read clearer when slightly heavier
-    return isUntaggedLink ? base * 1.35 : base;
+    return isUntaggedLink ? base * 1.45 : base;
   }, [connector.width, isUntaggedLink]);
 
   const solidDashArray = useMemo(() => {
@@ -416,31 +438,26 @@ export const Connector2d = memo(({
           const lockedColor = '#ea580c';
           const stroke = anchor.locked
             ? lockedColor
-            : isSelected
-              ? theme.palette.common.black
-              : theme.palette.grey[700];
-          // Larger grab targets — easier to drag mid-path "węzły".
-          const outer = isSelected ? (anchor.locked ? 16 : 14) : 12;
-          const inner = isSelected ? (anchor.locked ? 11 : 10) : 8.5;
+            : theme.palette.common.black;
           return (
             <g key={anchor.id}>
               <Circle
                 tile={anchor}
-                radius={outer}
+                radius={anchor.locked ? 12 : 10}
                 fill={anchor.locked ? lockedColor : theme.palette.common.white}
-                fillOpacity={anchor.locked ? 0.28 : isSelected ? 0.75 : 0.6}
+                fillOpacity={anchor.locked ? 0.28 : 0.7}
               />
               <Circle
                 tile={anchor}
-                radius={inner}
+                radius={anchor.locked ? 8 : 7}
                 stroke={stroke}
                 fill={theme.palette.common.white}
-                strokeWidth={isSelected ? (anchor.locked ? 3.5 : 3) : 2.75}
+                strokeWidth={anchor.locked ? 3.5 : 3}
               />
               {anchor.locked && (
                 <Circle
                   tile={anchor}
-                  radius={4}
+                  radius={3.5}
                   fill={lockedColor}
                   fillOpacity={1}
                 />
@@ -452,13 +469,13 @@ export const Connector2d = memo(({
           <g key={`wp-sel-${anchor.id}`}>
             <Circle
               tile={anchor}
-              radius={12}
+              radius={9}
               fill={theme.palette.primary.main}
               fillOpacity={0.25}
             />
             <Circle
               tile={anchor}
-              radius={8}
+              radius={6}
               stroke={theme.palette.primary.main}
               fill={theme.palette.common.white}
               strokeWidth={3}
@@ -466,6 +483,40 @@ export const Connector2d = memo(({
           </g>
         ))}
       </Svg>
+
+      {hoveredSegmentHandle && (
+        <Box
+          sx={{
+            position: 'absolute',
+            left: hoveredSegmentHandle.x,
+            top: hoveredSegmentHandle.y,
+            // Counter SceneLayer zoom + grow when zoomed out (same idea as stack handles)
+            transform: `translate(-50%, -50%) scale(${Math.min(
+              1.5,
+              Math.max(1, Math.pow(1 / Math.max(zoom, 0.12), 0.35))
+            ) / Math.max(zoom, 0.08)})`,
+            transformOrigin: 'center center',
+            width: 24,
+            height: 24,
+            borderRadius: '4px',
+            bgcolor: theme.palette.common.white,
+            border: `1.5px solid ${handleColor}`,
+            boxShadow: '0 1px 4px rgba(0,0,0,0.2)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            pointerEvents: 'none',
+            zIndex: 3
+          }}
+        >
+          <OpenWithOutlinedIcon
+            sx={{
+              fontSize: 16,
+              color: handleColor
+            }}
+          />
+        </Box>
+      )}
     </Box>
   );
 });

@@ -15,8 +15,6 @@ export * from './connectorBendWaypoints';
 export * from './exportOptions';
 export * from './vlanColors';
 export * from './shape2dLayout';
-export * from './routingEngine';
-export * from './layoutEngine';
 export * from './deviceTemplateLayout';
 export * from './deviceTemplateRegistry';
 export * from './deviceTemplateStorage';

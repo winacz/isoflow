@@ -38,19 +38,6 @@ export const isSimplePathsEnabled = () => {
   return simplePathsEnabled;
 };
 
-export type RoutingStyle = 'ORTHOGONAL' | 'DIAGONAL' | 'STRAIGHT';
-
-/** Active 2D routing style (synced from uiStateStore). */
-let routingStyle: RoutingStyle = 'ORTHOGONAL';
-
-export const setRoutingStyleEnabled = (style: RoutingStyle) => {
-  routingStyle = style;
-};
-
-export const getRoutingStyle = (): RoutingStyle => {
-  return routingStyle;
-};
-
 /** Lock a tile to horizontal or vertical movement from `origin`. */
 export const axisLockTile = (tile: Coords, origin: Coords): Coords => {
   const dx = Math.abs(tile.x - origin.x);
@@ -154,28 +141,6 @@ export const axisAlignedLineTiles = (from: Coords, to: Coords): Coords[] => {
   ];
 };
 
-/**
- * Ortho L that prefers a sideways run first whenever the target is not on the
- * same column — exit right/left at source Y, then vertical. Only when targets
- * share X do we dive vertically first.
- */
-export const sideFirstOrthoTiles = (from: Coords, to: Coords): Coords[] => {
-  const a = { x: Math.round(from.x), y: Math.round(from.y) };
-  const b = { x: Math.round(to.x), y: Math.round(to.y) };
-
-  if (a.x === b.x || a.y === b.y) {
-    return axisAlignedLineTiles(a, b);
-  }
-
-  // Always sideways-first when there is any horizontal delta (user: "w prawo").
-  const bend = { x: b.x, y: a.y };
-
-  return [
-    ...axisAlignedLineTiles(a, bend),
-    ...axisAlignedLineTiles(bend, b).slice(1)
-  ];
-};
-
 /** Full orthogonal tile path using at most two elbows (L or U). */
 export const buildOrthogonalTiles = (
   from: Coords,
@@ -247,9 +212,6 @@ export const buildDiagonalAwareTiles = (from: Coords, to: Coords): Coords[] => {
  * Drop micro stair-step waypoints from algorithm output. Keeps major elbows
  * (legs of length ≥ 2). If the list is still noisy, keep only first + last.
  */
-/** Prefer ~2–3 mid bends on algorithm paths (ends always kept). */
-export const PREFERRED_PATH_BENDS = 3;
-
 export const compactAlgorithmWaypoints = (tiles: Coords[]): Coords[] => {
   if (tiles.length <= 2) {
     return tiles.map((tile) => {
@@ -286,51 +248,19 @@ export const compactAlgorithmWaypoints = (tiles: Coords[]): Coords[] => {
     }
   }
 
-  if (major.length <= 2) {
+  if (major.length <= 4) {
     return major;
   }
 
-  const mids = major.slice(1, -1);
-  if (mids.length <= PREFERRED_PATH_BENDS) {
-    return major;
-  }
-
-  // Too many elbows — keep ends + evenly spaced preferred mid bends.
-  const sampled: Coords[] = [];
-  for (let i = 0; i < PREFERRED_PATH_BENDS; i += 1) {
-    const idx = Math.round(
-      ((i + 1) * (mids.length + 1)) / (PREFERRED_PATH_BENDS + 1) - 1
-    );
-    const clamped = Math.max(0, Math.min(mids.length - 1, idx));
-    const tile = mids[clamped];
-    if (
-      !sampled.some((candidate) => {
-        return candidate.x === tile.x && candidate.y === tile.y;
-      })
-    ) {
-      sampled.push({ ...tile });
-    }
-  }
-
-  return [major[0], ...sampled, major[major.length - 1]];
+  return [major[0], major[major.length - 1]];
 };
 
 /**
  * Render-time cleanup: dense stair-step paths → smooth geometric line;
  * normal paths → corners only (SVG draws clean segments between elbows).
- * Non-H/V/45 chords between corners are expanded so the SVG never draws
- * a free-angle line.
  */
 export const simplifyTilesForDraw = (tiles: Coords[]): Coords[] => {
-  if (tiles.length < 3) {
-    if (tiles.length < 2) return tiles;
-    const a = tiles[0];
-    const b = tiles[1];
-    const dx = Math.abs(a.x - b.x);
-    const dy = Math.abs(a.y - b.y);
-    if (dx === 0 || dy === 0 || dx === dy) return tiles;
-    return buildDiagonalAwareTiles(a, b);
-  }
+  if (tiles.length < 3) return tiles;
 
   let turns = 0;
   for (let i = 1; i < tiles.length - 1; i += 1) {
@@ -366,37 +296,5 @@ export const simplifyTilesForDraw = (tiles: Coords[]): Coords[] => {
     }
   }
   corners.push({ ...tiles[tiles.length - 1] });
-
-  // Expand any free-angle corner chord into 45°+stub (or H/V).
-  let expanded: Coords[] = [];
-  for (let i = 1; i < corners.length; i += 1) {
-    const from = corners[i - 1];
-    const to = corners[i];
-    const dx = Math.abs(from.x - to.x);
-    const dy = Math.abs(from.y - to.y);
-    const segment =
-      dx === 0 || dy === 0 || dx === dy
-        ? [from, to]
-        : buildDiagonalAwareTiles(from, to);
-    expanded =
-      expanded.length === 0 ? segment : [...expanded, ...segment.slice(1)];
-  }
-
-  // Re-corner the expanded polyline for a clean SVG.
-  if (expanded.length < 3) return expanded;
-  const out: Coords[] = [{ ...expanded[0] }];
-  for (let i = 1; i < expanded.length - 1; i += 1) {
-    const prev = expanded[i - 1];
-    const cur = expanded[i];
-    const next = expanded[i + 1];
-    const inDx = Math.sign(cur.x - prev.x);
-    const inDy = Math.sign(cur.y - prev.y);
-    const outDx = Math.sign(next.x - cur.x);
-    const outDy = Math.sign(next.y - cur.y);
-    if (inDx !== outDx || inDy !== outDy) {
-      out.push({ ...cur });
-    }
-  }
-  out.push({ ...expanded[expanded.length - 1] });
-  return out;
+  return corners;
 };

@@ -47,9 +47,6 @@ export const Connectors = ({ connectors }: Props) => {
   const itemControls = useUiStateStore((state) => {
     return state.itemControls;
   });
-  const selectedItemIds = useUiStateStore((state) => {
-    return state.selectedItemIds;
-  });
   const mode = useUiStateStore((state) => {
     return state.mode;
   });
@@ -88,17 +85,11 @@ export const Connectors = ({ connectors }: Props) => {
     return null;
   }, [mode, itemControls]);
 
-  /** All plan nodes in the selection (multi-select), else the focused ITEM. */
-  const focusedItemIds = useMemo(() => {
-    if (projectionMode !== 'TWO_D') return [] as string[];
-    if (selectedItemIds.length > 0) return selectedItemIds;
-    if (itemControls?.type === 'ITEM') return [itemControls.id];
-    return [];
-  }, [projectionMode, selectedItemIds, itemControls]);
+  const selectedItemId =
+    itemControls?.type === 'ITEM' ? itemControls.id : null;
 
   const hasSelectionFocus = Boolean(
-    selectedConnectorId ||
-      (projectionMode === 'TWO_D' && focusedItemIds.length > 0)
+    selectedConnectorId || (projectionMode === 'TWO_D' && selectedItemId)
   );
   const softDim = mode.type === 'DRAG_ITEMS';
 
@@ -111,20 +102,18 @@ export const Connectors = ({ connectors }: Props) => {
       direct.add(selectedConnectorId);
     }
 
-    if (focusedItemIds.length > 0) {
-      // Port focus only applies to a single-device selection.
-      const usePorts =
-        focusedItemIds.length === 1 && focusedPortIds.length > 0;
-      const soleItemId = focusedItemIds[0];
-
+    if (selectedItemId) {
       connectors.forEach((connector) => {
-        const related = usePorts
-          ? focusedPortIds.some((portId) => {
-              return connectorUsesPort(connector, soleItemId, portId);
-            })
-          : focusedItemIds.some((itemId) => {
-              return connectorTouchesItem(connector, itemId);
-            });
+        const related =
+          focusedPortIds.length > 0
+            ? focusedPortIds.some((portId) => {
+                return connectorUsesPort(
+                  connector,
+                  selectedItemId,
+                  portId
+                );
+              })
+            : connectorTouchesItem(connector, selectedItemId);
         if (related) direct.add(connector.id);
       });
     }
@@ -139,7 +128,7 @@ export const Connectors = ({ connectors }: Props) => {
   }, [
     projectionMode,
     selectedConnectorId,
-    focusedItemIds,
+    selectedItemId,
     focusedPortIds,
     connectors,
     modelItems

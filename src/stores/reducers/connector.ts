@@ -7,10 +7,10 @@ import {
   getAllAnchors,
   resolveConnectorAnchorsAgainstOthers,
   resolveOrthogonalDetourAfterWaypointRemoval,
-  separatePreviewPathFromOthers,
   collectOtherConnectorPaths,
   withOrthogonalPath,
   dedupeTileWaypoints,
+  snapConnectorPathToElbowGuides,
   stripToEndpointAnchors,
   materializeBendWaypoints,
   isSimplePathsEnabled
@@ -108,177 +108,155 @@ export const syncConnector = (
 
       draft.scene = stateAfterDelete.scene;
       draft.model = stateAfterDelete.model;
-      return;
-    }
+    } else {
+      let anchors = connector.value.anchors;
+      const isTwoDView = viewUsesShape2d(
+        view.value.items,
+        draft.model.items
+      );
 
-    let anchors = connector.value.anchors;
-    const isTwoDView = viewUsesShape2d(view.value.items, draft.model.items);
-
-    // 2D plan: simplePaths uses port↔port only when there are no mid tile
-    // waypoints. Once dodge/tidy (or the user) inserts WPs, keep them so
-    // sync does not destroy IDs mid-drag.
-    if (isTwoDView) {
-      const hasMidTileWaypoints = anchors.some((anchor, index) => {
-        return (
-          index > 0 &&
-          index < anchors.length - 1 &&
-          Boolean(anchor.ref.tile)
-        );
-      });
-      const forceDirect =
-        Boolean(options?.ignoreWaypoints) ||
-        ((options?.simplePaths ?? isSimplePathsEnabled()) &&
-          !hasMidTileWaypoints);
-      let pathAnchors = forceDirect
-        ? getItemEndpointAnchors(anchors)
-        : anchors;
-
-      if (forceDirect) {
+      // "Wyłącz obliczanie": plain port↔port line (drop every mid WP).
+      const simplePaths =
+        isTwoDView &&
+        (options?.simplePaths ?? isSimplePathsEnabled());
+      if (simplePaths) {
+        anchors = getItemEndpointAnchors(anchors);
         const connectors = draft.model.views[view.index].connectors;
         if (connectors) {
           connectors[connector.index] = {
             ...connector.value,
-            anchors: pathAnchors
+            anchors
           };
         }
+
+        draft.scene.connectors[connector.value.id] = {
+          path: getConnectorPathPreview({
+            anchors,
+            view: view.value,
+            modelItems: draft.model.items
+          })
+        };
+        return;
       }
 
-      if (!options?.fastPath) {
+      const forceEndpoints = Boolean(options?.ignoreWaypoints);
+
+      const routingAnchors = forceEndpoints
+        ? stripToEndpointAnchors(anchors)
+        : anchors;
+
+      if (isTwoDView && overlapResolve !== 'off') {
         const otherPaths = collectOtherConnectorPaths(
           draft.scene.connectors,
           connector.value.id
         );
+
         if (otherPaths.length > 0) {
-          const separated = separatePreviewPathFromOthers({
-            anchors: pathAnchors,
-            view: view.value,
-            modelItems: draft.model.items,
-            otherPaths,
-            laneIndex: options?.laneIndex ?? 0,
-            removedTile: options?.removedTile
-          });
-          if (separated !== pathAnchors) {
-            pathAnchors = separated;
+          const resolved =
+            overlapResolve === 'orthogonalDetour'
+              ? resolveOrthogonalDetourAfterWaypointRemoval({
+                  anchors: routingAnchors,
+                  removedTile: options?.removedTile,
+                  view: view.value,
+                  modelItems: draft.model.items,
+                  otherPaths,
+                  laneIndex: options?.laneIndex ?? 0
+                })
+              : resolveConnectorAnchorsAgainstOthers({
+                  anchors: routingAnchors,
+                  view: view.value,
+                  modelItems: draft.model.items,
+                  otherPaths
+                });
+
+          if (resolved !== routingAnchors) {
+            anchors = resolved;
             const connectors = draft.model.views[view.index].connectors;
             if (connectors) {
               connectors[connector.index] = {
                 ...connector.value,
-                anchors: pathAnchors
+                anchors
               };
             }
-          }
-        }
-      }
-
-      draft.scene.connectors[connector.value.id] = {
-        path: getConnectorPathPreview({
-          anchors: pathAnchors,
-          view: view.value,
-          modelItems: draft.model.items
-        })
-      };
-      return;
-    }
-
-    // —— Isometric / legacy path building ——
-    const forceEndpoints = Boolean(options?.ignoreWaypoints);
-    const routingAnchors = forceEndpoints
-      ? stripToEndpointAnchors(anchors)
-      : anchors;
-
-    if (overlapResolve !== 'off') {
-      const otherPaths = collectOtherConnectorPaths(
-        draft.scene.connectors,
-        connector.value.id
-      );
-
-      if (otherPaths.length > 0) {
-        const resolved =
-          overlapResolve === 'orthogonalDetour'
-            ? resolveOrthogonalDetourAfterWaypointRemoval({
-                anchors: routingAnchors,
-                removedTile: options?.removedTile,
-                view: view.value,
-                modelItems: draft.model.items,
-                otherPaths,
-                laneIndex: options?.laneIndex ?? 0
-              })
-            : resolveConnectorAnchorsAgainstOthers({
-                anchors: routingAnchors,
-                view: view.value,
-                modelItems: draft.model.items,
-                otherPaths
-              });
-
-        if (resolved !== routingAnchors) {
-          anchors = resolved;
-          const connectors = draft.model.views[view.index].connectors;
-          if (connectors) {
-            connectors[connector.index] = {
-              ...connector.value,
-              anchors
-            };
+          } else if (options?.ignoreWaypoints) {
+            anchors = routingAnchors;
           }
         } else if (options?.ignoreWaypoints) {
           anchors = routingAnchors;
         }
-      } else if (options?.ignoreWaypoints) {
+      } else if (forceEndpoints) {
         anchors = routingAnchors;
       }
-    } else if (forceEndpoints) {
-      anchors = routingAnchors;
-    }
 
-    const pathAnchors = forceEndpoints
-      ? stripToEndpointAnchors(anchors)
-      : anchors;
+      // Live node/WP drag: polyline through current anchors (no A* / L-fill).
+      const pathAnchors = forceEndpoints
+        ? stripToEndpointAnchors(anchors)
+        : anchors;
 
-    if (options?.fastPath) {
-      draft.scene.connectors[connector.value.id] = {
-        path: getConnectorPathPreview({
+      if (options?.fastPath) {
+        draft.scene.connectors[connector.value.id] = {
+          path: getConnectorPathPreview({
+            anchors: pathAnchors,
+            view: view.value,
+            modelItems: draft.model.items
+          })
+        };
+        return;
+      }
+
+      const buildOrthogonal =
+        isTwoDView &&
+        (Boolean(options?.ignoreWaypoints) ||
+          (overlapResolve === 'orthogonalDetour' &&
+            (Boolean(options?.removedTile) || pathAnchors.length > 2)));
+
+      const buildPath = () => {
+        return getConnectorPath({
           anchors: pathAnchors,
           view: view.value,
-          modelItems: draft.model.items
-        })
+          modelItems: draft.model.items,
+          orthogonal: buildOrthogonal
+        });
       };
-      return;
-    }
 
-    const buildOrthogonal =
-      Boolean(options?.ignoreWaypoints) ||
-      (overlapResolve === 'orthogonalDetour' &&
-        (Boolean(options?.removedTile) || pathAnchors.length > 2));
+      let path = buildOrthogonal
+        ? withOrthogonalPath(buildPath, options?.removedTile)
+        : buildPath();
 
-    const buildPath = () => {
-      return getConnectorPath({
-        anchors: pathAnchors,
-        view: view.value,
-        modelItems: draft.model.items,
-        orthogonal: buildOrthogonal
-      });
-    };
-
-    let path = buildOrthogonal
-      ? withOrthogonalPath(buildPath, options?.removedTile)
-      : buildPath();
-
-    if (options?.materializeBends) {
-      const withBends = materializeBendWaypoints({
-        anchors: pathAnchors,
-        path,
-        view: view.value,
-        modelItems: draft.model.items
-      });
-      const connectors = draft.model.views[view.index].connectors;
-      if (connectors) {
-        connectors[connector.index] = {
-          ...connectors[connector.index],
-          anchors: withBends
-        };
+      // Align automatic elbows with nearby cable bends (shared Y/X guides).
+      if (isTwoDView && pathAnchors.length === 2 && !forceEndpoints) {
+        const guidePaths = collectOtherConnectorPaths(
+          draft.scene.connectors,
+          connector.value.id
+        );
+        path = snapConnectorPathToElbowGuides({
+          anchors: pathAnchors,
+          path,
+          view: view.value,
+          modelItems: draft.model.items,
+          otherPaths: guidePaths,
+          orthogonal: buildOrthogonal
+        });
       }
-    }
 
-    draft.scene.connectors[connector.value.id] = { path };
+      if (isTwoDView && options?.materializeBends) {
+        const withBends = materializeBendWaypoints({
+          anchors: pathAnchors,
+          path,
+          view: view.value,
+          modelItems: draft.model.items
+        });
+        const connectors = draft.model.views[view.index].connectors;
+        if (connectors) {
+          connectors[connector.index] = {
+            ...connectors[connector.index],
+            anchors: withBends
+          };
+        }
+      }
+
+      draft.scene.connectors[connector.value.id] = { path };
+    }
   });
 
   return newState;
@@ -292,7 +270,6 @@ export type UpdateConnectorPayload = {
   materializeBends?: boolean;
   fastPath?: boolean;
   simplePaths?: boolean;
-  laneIndex?: number;
 } & Partial<Connector>;
 
 export const updateConnector = (
@@ -304,7 +281,6 @@ export const updateConnector = (
     materializeBends,
     fastPath,
     simplePaths,
-    laneIndex,
     ...updates
   }: UpdateConnectorPayload,
   { state, viewId }: ViewReducerContext
@@ -344,8 +320,7 @@ export const updateConnector = (
           ignoreWaypoints,
           materializeBends,
           fastPath,
-          simplePaths,
-          laneIndex
+          simplePaths
         }
       );
 

@@ -167,171 +167,8 @@ type TileWaypoint = {
   pathIndex: number;
 };
 
-/** Ortho axis only — diagonals return null (no segment handle / drag). */
-const orthoAxis = (start: Coords, end: Coords): 'H' | 'V' | null => {
-  if (start.x === end.x && start.y !== end.y) return 'V';
-  if (start.y === end.y && start.x !== end.x) return 'H';
-  return null;
-};
-
-const midTileOf = (a: Coords, b: Coords): Coords => {
-  return {
-    x: Math.round((a.x + b.x) / 2),
-    y: Math.round((a.y + b.y) / 2)
-  };
-};
-
-/** One step from `from` toward `toward` (ortho or diagonal). */
-const exitStep = (from: Coords, toward: Coords): Coords => {
-  return {
-    x: from.x + Math.sign(toward.x - from.x),
-    y: from.y + Math.sign(toward.y - from.y)
-  };
-};
-
-/**
- * True when `tile` lies on the open interior of an H/V segment (or on either
- * cell when the span is only one step — sparse preview paths often have no
- * intermediate tiles).
- */
-const tileOnOrthoSegment = (
-  tile: Coords,
-  a: Coords,
-  b: Coords,
-  axis: 'H' | 'V'
-): boolean => {
-  if (axis === 'H') {
-    if (tile.y !== a.y) return false;
-    const lo = Math.min(a.x, b.x);
-    const hi = Math.max(a.x, b.x);
-    if (hi - lo <= 1) return tile.x === lo || tile.x === hi;
-    return tile.x > lo && tile.x < hi;
-  }
-
-  if (tile.x !== a.x) return false;
-  const lo = Math.min(a.y, b.y);
-  const hi = Math.max(a.y, b.y);
-  if (hi - lo <= 1) return tile.y === lo || tile.y === hi;
-  return tile.y > lo && tile.y < hi;
-};
-
-type SegmentEndpoint = {
-  kind: 'port' | 'wp';
-  id: string | null;
-  tile: Coords;
-};
-
-/**
- * Port → mid WPs (anchor order) → port. Uses path ends for ports and actual
- * WP tiles for geometry so sparse corner-only paths still work.
- */
-const buildSegmentEndpoints = (
-  anchors: ConnectorAnchor[],
-  globalTiles: Coords[]
-): SegmentEndpoint[] => {
-  if (globalTiles.length < 2) return [];
-
-  const start: SegmentEndpoint = {
-    kind: 'port',
-    id: null,
-    tile: globalTiles[0]
-  };
-  const end: SegmentEndpoint = {
-    kind: 'port',
-    id: null,
-    tile: globalTiles[globalTiles.length - 1]
-  };
-
-  const points: SegmentEndpoint[] = [start];
-
-  anchors.forEach((anchor) => {
-    const tile = anchor.ref.tile;
-    if (!tile) return;
-    if (CoordsUtils.isEqual(tile, start.tile)) return;
-    if (CoordsUtils.isEqual(tile, end.tile)) return;
-
-    const last = points[points.length - 1];
-    if (CoordsUtils.isEqual(last.tile, tile)) return;
-
-    points.push({ kind: 'wp', id: anchor.id, tile });
-  });
-
-  const last = points[points.length - 1];
-  if (!CoordsUtils.isEqual(last.tile, end.tile)) {
-    points.push(end);
-  }
-
-  return points;
-};
-
-const hitFromEndpoints = (
-  connectorId: string,
-  a: SegmentEndpoint,
-  b: SegmentEndpoint,
-  axis: 'H' | 'V'
-): WaypointSegmentHit => {
-  const mid = midTileOf(a.tile, b.tile);
-
-  if (a.kind === 'wp' && b.kind === 'wp' && a.id && b.id) {
-    return {
-      connectorId,
-      mid,
-      axis,
-      existingWaypointIds: [a.id, b.id],
-      materializeAtPort: false,
-      materializeBothPorts: false
-    };
-  }
-
-  if (a.kind === 'port' && b.kind === 'port') {
-    return {
-      connectorId,
-      mid,
-      axis,
-      existingWaypointIds: [],
-      materializeAtPort: false,
-      materializeBothPorts: true,
-      startPortTile: exitStep(a.tile, b.tile),
-      endPortTile: exitStep(b.tile, a.tile)
-    };
-  }
-
-  if (a.kind === 'port' && b.kind === 'wp' && b.id) {
-    return {
-      connectorId,
-      mid,
-      axis,
-      existingWaypointIds: [b.id],
-      materializeAtPort: true,
-      materializeBothPorts: false,
-      portTile: exitStep(a.tile, b.tile),
-      portSide: 'start'
-    };
-  }
-
-  if (a.kind === 'wp' && b.kind === 'port' && a.id) {
-    return {
-      connectorId,
-      mid,
-      axis,
-      existingWaypointIds: [a.id],
-      materializeAtPort: true,
-      materializeBothPorts: false,
-      portTile: exitStep(b.tile, a.tile),
-      portSide: 'end'
-    };
-  }
-
-  return {
-    connectorId,
-    mid,
-    axis,
-    existingWaypointIds: [],
-    materializeAtPort: false,
-    materializeBothPorts: true,
-    startPortTile: exitStep(a.tile, b.tile),
-    endPortTile: exitStep(b.tile, a.tile)
-  };
+const segmentAxis = (start: Coords, end: Coords): 'H' | 'V' => {
+  return start.y === end.y ? 'H' : 'V';
 };
 
 /** One-step perpendicular (tile space) — used to keep exit WPs off port cells. */
@@ -437,12 +274,10 @@ const hitFromPortPortPath = (
     endExit = { x: endTile.x + perp.x, y: endTile.y + perp.y };
   }
 
-  const axis = orthoAxis(startTile, endTile) ?? 'H';
-
   return {
     connectorId,
     mid,
-    axis,
+    axis: segmentAxis(startTile, endTile),
     existingWaypointIds: [],
     materializeAtPort: false,
     materializeBothPorts: true,
@@ -462,8 +297,7 @@ const hitFromSpan = (
   const mid = spanTiles[Math.floor(spanTiles.length / 2)];
   const startTile = spanTiles[0];
   const endTile = spanTiles[spanTiles.length - 1];
-  const axis = orthoAxis(startTile, endTile);
-  if (!axis) return null;
+  const axis = segmentAxis(startTile, endTile);
 
   if (span.startWaypointId && span.endWaypointId) {
     return {
@@ -509,48 +343,13 @@ const hitFromSpan = (
 };
 
 /**
- * Mid-point handles for every H/V span between consecutive path nodes
- * (port ↔ WP ↔ WP ↔ port). Diagonals are omitted.
- */
-export const listOrthoSegmentHandles = ({
-  anchors,
-  path
-}: {
-  anchors: ConnectorAnchor[];
-  path: ConnectorPath;
-}): Array<{
-  id: string;
-  mid: Coords;
-  axis: 'H' | 'V';
-}> => {
-  const globalTiles = getGlobalPathTiles(path);
-  const points = buildSegmentEndpoints(anchors, globalTiles);
-  const handles: Array<{ id: string; mid: Coords; axis: 'H' | 'V' }> = [];
-
-  for (let i = 0; i < points.length - 1; i += 1) {
-    const a = points[i];
-    const b = points[i + 1];
-    const axis = orthoAxis(a.tile, b.tile);
-    if (!axis) continue;
-
-    handles.push({
-      id: `${a.id ?? 'port'}:${b.id ?? 'port'}`,
-      mid: midTileOf(a.tile, b.tile),
-      axis
-    });
-  }
-
-  return handles;
-};
-
-/**
- * Finds a draggable H/V span under `tile`:
+ * Finds a draggable span under `tile`:
  * - between two tile waypoints,
  * - between a path end (RJ45 port) and the nearest tile waypoint,
  * - or the whole path when there are no tile waypoints yet (port↔port).
  *
- * Uses geometric ortho tests so sparse corner-only preview paths still hit.
- * Diagonals are ignored — use `findWaypointSegmentNearTile` for stack badges.
+ * Requires an intermediate path tile (strict hover) — use
+ * `findWaypointSegmentNearTile` for stack-badge grabs on diagonals.
  */
 export const findWaypointSegmentAtTile = ({
   connectorId,
@@ -567,16 +366,36 @@ export const findWaypointSegmentAtTile = ({
 
   if (globalTiles.length < 2) return null;
 
-  const points = buildSegmentEndpoints(anchors, globalTiles);
+  const tileWaypoints = listTileWaypoints(anchors, globalTiles);
 
-  for (let i = 0; i < points.length - 1; i += 1) {
-    const a = points[i];
-    const b = points[i + 1];
-    const axis = orthoAxis(a.tile, b.tile);
-    if (!axis) continue;
-    if (!tileOnOrthoSegment(tile, a.tile, b.tile, axis)) continue;
+  // No waypoints yet: whole cable between two ports is one draggable span
+  if (tileWaypoints.length === 0) {
+    if (globalTiles.length < 3) return null;
 
-    return hitFromEndpoints(connectorId, a, b, axis);
+    const hovering = globalTiles.some((pathTile, index) => {
+      if (index === 0 || index === globalTiles.length - 1) return false;
+      return CoordsUtils.isEqual(pathTile, tile);
+    });
+
+    if (!hovering) return null;
+
+    return hitFromPortPortPath(connectorId, globalTiles);
+  }
+
+  const spans = buildSpans(tileWaypoints, globalTiles.length);
+
+  for (const span of spans) {
+    const spanTiles = globalTiles.slice(span.fromIndex, span.toIndex + 1);
+    if (spanTiles.length < 3) continue;
+
+    const hoveringSpan = spanTiles.some((pathTile, index) => {
+      if (index === 0 || index === spanTiles.length - 1) return false;
+      return CoordsUtils.isEqual(pathTile, tile);
+    });
+
+    if (!hoveringSpan) continue;
+
+    return hitFromSpan(connectorId, globalTiles, span);
   }
 
   return null;
@@ -629,10 +448,7 @@ export const findWaypointSegmentNearTile = ({
 
   if (!containing) return null;
 
-  return (
-    hitFromSpan(connectorId, globalTiles, containing) ??
-    hitFromPortPortPath(connectorId, globalTiles)
-  );
+  return hitFromSpan(connectorId, globalTiles, containing);
 };
 
 /**
@@ -959,364 +775,6 @@ export const moveWaypointSegment = (
 
     return anchor;
   });
-};
-
-/**
- * Snap `target` so the vector from `origin` is horizontal, vertical, or 45°.
- * Used for waypoint / segment edits on the plan grid.
- */
-export const snapTileToHV45FromOrigin = (
-  origin: Coords,
-  target: Coords
-): Coords => {
-  const tx = Math.round(target.x);
-  const ty = Math.round(target.y);
-  const dx = tx - origin.x;
-  const dy = ty - origin.y;
-
-  if (dx === 0 && dy === 0) {
-    return { x: origin.x, y: origin.y };
-  }
-
-  const adx = Math.abs(dx);
-  const ady = Math.abs(dy);
-
-  if (adx === 0 || ady === 0) {
-    return { x: origin.x + dx, y: origin.y + dy };
-  }
-
-  const toH = ady;
-  const toV = adx;
-  const to45 = Math.abs(adx - ady);
-
-  if (toH <= toV && toH <= to45) {
-    return { x: origin.x + dx, y: origin.y };
-  }
-  if (toV <= to45) {
-    return { x: origin.x, y: origin.y + dy };
-  }
-
-  const m = Math.max(adx, ady);
-  return {
-    x: origin.x + Math.sign(dx) * m,
-    y: origin.y + Math.sign(dy) * m
-  };
-};
-
-/** True when the chord between two tiles is H, V, or exact 45°. */
-export const isHV45Segment = (a: Coords, b: Coords): boolean => {
-  const dx = Math.abs(a.x - b.x);
-  const dy = Math.abs(a.y - b.y);
-  return dx === 0 || dy === 0 || dx === dy;
-};
-
-/**
- * Snap a dragged waypoint so every leg to `neighbors` stays H / V / 45°.
- * Prefers the candidate closest to `desired`.
- */
-export const snapTileToHV45Neighbors = (
-  desired: Coords,
-  neighbors: Coords[]
-): Coords => {
-  const target = { x: Math.round(desired.x), y: Math.round(desired.y) };
-  if (neighbors.length === 0) return target;
-
-  const candidates: Coords[] = [target];
-  neighbors.forEach((ref) => {
-    candidates.push(snapTileToHV45FromOrigin(ref, target));
-    candidates.push({ x: ref.x, y: target.y });
-    candidates.push({ x: target.x, y: ref.y });
-
-    const adx = Math.abs(target.x - ref.x);
-    const ady = Math.abs(target.y - ref.y);
-    const sx = Math.sign(target.x - ref.x) || 1;
-    const sy = Math.sign(target.y - ref.y) || 1;
-    const dMax = Math.max(adx, ady);
-    const dMin = Math.min(adx, ady);
-    if (dMax > 0) {
-      candidates.push({ x: ref.x + sx * dMax, y: ref.y + sy * dMax });
-    }
-    if (dMin > 0) {
-      candidates.push({ x: ref.x + sx * dMin, y: ref.y + sy * dMin });
-    }
-  });
-
-  // With two neighbors, also try axis/45 intersections near the cursor.
-  if (neighbors.length >= 2) {
-    const [a, b] = neighbors;
-    const xs = [a.x, b.x, target.x];
-    const ys = [a.y, b.y, target.y];
-    xs.forEach((x) => {
-      ys.forEach((y) => {
-        candidates.push({ x, y });
-      });
-    });
-    // 45° from a intersecting H/V from b (and vice versa)
-    const try45 = (from: Coords, other: Coords) => {
-      for (const s of [-1, 1]) {
-        candidates.push({ x: other.x, y: from.y + s * Math.abs(other.x - from.x) });
-        candidates.push({ x: from.x + s * Math.abs(other.y - from.y), y: other.y });
-      }
-    };
-    try45(a, b);
-    try45(b, a);
-  }
-
-  let best = target;
-  let bestScore = Number.POSITIVE_INFINITY;
-
-  candidates.forEach((candidate) => {
-    const invalid = neighbors.reduce((count, ref) => {
-      return count + (isHV45Segment(ref, candidate) ? 0 : 1);
-    }, 0);
-    const dist =
-      Math.abs(candidate.x - desired.x) + Math.abs(candidate.y - desired.y);
-    const score = invalid * 10000 + dist;
-    if (score < bestScore) {
-      bestScore = score;
-      best = candidate;
-    }
-  });
-
-  return best;
-};
-
-/** Snap a drag delta to H / V / 45° in tile space. */
-export const snapDeltaToHV45 = (delta: Coords): Coords => {
-  return snapTileToHV45FromOrigin(CoordsUtils.zero(), delta);
-};
-
-type SegmentEndRole = 'collinear' | 'corner' | 'loose';
-
-const classifySegmentEnd = (
-  outer: Coords | null,
-  cur: Coords,
-  other: Coords,
-  axis: 'H' | 'V'
-): SegmentEndRole => {
-  if (!outer) return 'loose';
-
-  if (axis === 'H') {
-    if (outer.y === cur.y && other.y === cur.y) return 'collinear';
-    return 'corner';
-  }
-
-  if (outer.x === cur.x && other.x === cur.x) return 'collinear';
-  return 'corner';
-};
-
-const resolveAnchorPositions = (
-  anchors: ConnectorAnchor[],
-  view: View,
-  modelItems: ModelItem[] | undefined,
-  overrides: Record<string, Coords>
-): Array<Coords | null> => {
-  return anchors.map((anchor) => {
-    if (overrides[anchor.id]) {
-      return { ...overrides[anchor.id] };
-    }
-    try {
-      return getAnchorTile(anchor, view, modelItems);
-    } catch {
-      return null;
-    }
-  });
-};
-
-/**
- * Ortho segment drag: translate a free H/V span, or form a step when one end
- * sits on a straight run and the other is a corner — lock the collinear end,
- * move the corner, and insert an elbow so the path stays H/V (no bend).
- */
-export const applyOrthoSegmentDrag = ({
-  anchors,
-  startAnchorId,
-  endAnchorId,
-  originStart,
-  originEnd,
-  delta,
-  view,
-  modelItems
-}: {
-  anchors: ConnectorAnchor[];
-  startAnchorId: string;
-  endAnchorId: string;
-  originStart: Coords;
-  originEnd: Coords;
-  delta: Coords;
-  view: View;
-  modelItems?: { id: string; icon?: string }[];
-}): ConnectorAnchor[] => {
-  if (CoordsUtils.isEqual(delta, CoordsUtils.zero())) {
-    return anchors;
-  }
-
-  const axis = orthoAxis(originStart, originEnd);
-  if (!axis) {
-    return anchors;
-  }
-
-  const constrained =
-    axis === 'H' ? { x: 0, y: delta.y } : { x: delta.x, y: 0 };
-  if (CoordsUtils.isEqual(constrained, CoordsUtils.zero())) {
-    return anchors;
-  }
-
-  const startIndex = anchors.findIndex((anchor) => {
-    return anchor.id === startAnchorId;
-  });
-  const endIndex = anchors.findIndex((anchor) => {
-    return anchor.id === endAnchorId;
-  });
-  if (startIndex < 0 || endIndex < 0) {
-    return anchors;
-  }
-
-  const positions = resolveAnchorPositions(
-    anchors,
-    view,
-    modelItems as ModelItem[] | undefined,
-    {
-      [startAnchorId]: originStart,
-      [endAnchorId]: originEnd
-    }
-  );
-
-  const outerOf = (index: number, otherIndex: number): Coords | null => {
-    const outerIndex = index < otherIndex ? index - 1 : index + 1;
-    if (outerIndex < 0 || outerIndex >= positions.length) return null;
-    return positions[outerIndex];
-  };
-
-  const startRole = classifySegmentEnd(
-    outerOf(startIndex, endIndex),
-    originStart,
-    originEnd,
-    axis
-  );
-  const endRole = classifySegmentEnd(
-    outerOf(endIndex, startIndex),
-    originEnd,
-    originStart,
-    axis
-  );
-
-  let moveStart = true;
-  let moveEnd = true;
-
-  if (startRole === 'collinear' && endRole === 'corner') {
-    moveStart = false;
-  } else if (endRole === 'collinear' && startRole === 'corner') {
-    moveEnd = false;
-  }
-
-  if (anchors[startIndex]?.locked) moveStart = false;
-  if (anchors[endIndex]?.locked) moveEnd = false;
-
-  if (!moveStart && !moveEnd) {
-    return anchors;
-  }
-
-  // Both free → translate (level if needed), keep a straight H/V span.
-  if (moveStart && moveEnd) {
-    const [nextStart, nextEnd] = levelWaypointTiles(
-      [originStart, originEnd],
-      constrained
-    );
-    if (CoordsUtils.isEqual(nextStart, nextEnd)) {
-      return anchors;
-    }
-
-    return anchors.map((anchor) => {
-      if (anchor.id === startAnchorId && anchor.ref.tile) {
-        return { ...anchor, ref: { tile: nextStart } };
-      }
-      if (anchor.id === endAnchorId && anchor.ref.tile) {
-        return { ...anchor, ref: { tile: nextEnd } };
-      }
-      return anchor;
-    });
-  }
-
-  // One locked on the straight run, one corner → schodek + elbow WP.
-  const lockedId = moveStart ? endAnchorId : startAnchorId;
-  const freeId = moveStart ? startAnchorId : endAnchorId;
-  const lockedOrigin = moveStart ? originEnd : originStart;
-  const freeOrigin = moveStart ? originStart : originEnd;
-  const nextFree = CoordsUtils.add(freeOrigin, constrained);
-
-  if (CoordsUtils.isEqual(nextFree, lockedOrigin)) {
-    return anchors;
-  }
-
-  const elbowTile =
-    axis === 'H'
-      ? { x: lockedOrigin.x, y: nextFree.y }
-      : { x: nextFree.x, y: lockedOrigin.y };
-
-  const lo = Math.min(startIndex, endIndex);
-  const hi = Math.max(startIndex, endIndex);
-
-  // Reuse the mid WP between the ends (stable across drag frames).
-  const midAnchors: ConnectorAnchor[] = [];
-  for (let i = lo + 1; i < hi; i += 1) {
-    const mid = anchors[i];
-    if (mid?.ref.tile) midAnchors.push(mid);
-  }
-
-  let elbowId: string | null = null;
-  if (midAnchors.length === 1) {
-    elbowId = midAnchors[0].id;
-  } else if (midAnchors.length > 1) {
-    const onStub = midAnchors.find((mid) => {
-      const tile = mid.ref.tile!;
-      return axis === 'H'
-        ? tile.x === lockedOrigin.x
-        : tile.y === lockedOrigin.y;
-    });
-    elbowId = onStub?.id ?? midAnchors[0].id;
-  }
-
-  let nextAnchors = anchors.map((anchor) => {
-    if (anchor.id === freeId && anchor.ref.tile) {
-      return { ...anchor, ref: { tile: { ...nextFree } } };
-    }
-    if (anchor.id === lockedId && anchor.ref.tile) {
-      return { ...anchor, ref: { tile: { ...lockedOrigin } } };
-    }
-    if (elbowId && anchor.id === elbowId && anchor.ref.tile) {
-      return { ...anchor, ref: { tile: { ...elbowTile } } };
-    }
-    return anchor;
-  });
-
-  if (
-    !elbowId &&
-    !CoordsUtils.isEqual(elbowTile, lockedOrigin) &&
-    !CoordsUtils.isEqual(elbowTile, nextFree) &&
-    !hasTileWaypointAt(nextAnchors, elbowTile)
-  ) {
-    const elbow: ConnectorAnchor = {
-      id: generateId(),
-      ref: { tile: { ...elbowTile } }
-    };
-    const insertAt =
-      startIndex < endIndex
-        ? moveStart
-          ? startIndex + 1
-          : endIndex
-        : moveStart
-          ? startIndex
-          : endIndex + 1;
-
-    nextAnchors = [
-      ...nextAnchors.slice(0, insertAt),
-      elbow,
-      ...nextAnchors.slice(insertAt)
-    ];
-  }
-
-  return dedupeTileWaypoints(nextAnchors);
 };
 
 /**
