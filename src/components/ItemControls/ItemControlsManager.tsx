@@ -6,7 +6,7 @@ import { isShape2dIcon } from 'src/config';
 import { IconSelectionControls } from 'src/components/ItemControls/IconSelectionControls/IconSelectionControls';
 import { ShapeSelectionControls } from 'src/components/ItemControls/ShapeSelectionControls/ShapeSelectionControls';
 import { DeviceTemplateEditorControls } from 'src/components/ItemControls/DeviceCreator/DeviceTemplateEditorControls';
-import { AlgorithmsControls } from 'src/components/AlgorithmsPopup/AlgorithmsPopup';
+import { MultiNodeControls } from 'src/components/ItemControls/MultiNodeControls/MultiNodeControls';
 import { isPlanProjection } from 'src/utils';
 import { NodeControls } from './NodeControls/NodeControls';
 import { NodeControls2d } from './NodeControls/NodeControls2d';
@@ -43,10 +43,6 @@ export const ItemControlsManager = () => {
   });
 
   const Controls = useMemo(() => {
-    if (itemControls?.type === 'ALGORITHMS') {
-      return <AlgorithmsControls />;
-    }
-
     const planMulti =
       isPlanProjection(projectionMode) && selectedItemIds.length >= 2;
     const planSingleItem =
@@ -54,16 +50,9 @@ export const ItemControlsManager = () => {
       selectedItemIds.length === 1 &&
       itemControls?.type === 'ITEM';
 
-    // Multi-select: keep settings for primary item; algorithms open via tool button.
+    // Multi-select: shared color / VLAN for all selected plan nodes.
     if (planMulti) {
-      const primaryId =
-        itemControls?.type === 'ITEM' ? itemControls.id : selectedItemIds[0];
-      if (primaryId) {
-        return (
-          <NodeControlsSwitcher key={primaryId} id={primaryId} prefer2d />
-        );
-      }
-      return null;
+      return <MultiNodeControls />;
     }
 
     if (planSingleItem) {

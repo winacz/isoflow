@@ -22,6 +22,10 @@ import {
   parseWaypointSegmentId,
   moveWaypointSegment,
   levelWaypointTiles,
+  applyOrthoSegmentDrag,
+  snapTileToHV45FromOrigin,
+  snapTileToHV45Neighbors,
+  snapDeltaToHV45,
   untangleAnchorHairpins,
   applyOrthogonalBendAnchors,
   withOrthogonalPath,
@@ -44,7 +48,8 @@ import {
   getPanScrollFromDelta,
   getDragEdgeScrollVelocity,
   isDragEdgeVelocityActive,
-  DRAG_EDGE_DELAY_MS
+  DRAG_EDGE_DELAY_MS,
+  getAnchorTile
 } from 'src/utils';
 import { getShape2dSize, getModelItemSize } from 'src/config';
 import { useCabinetSnapStore } from 'src/stores/cabinetSnapStore';
@@ -183,6 +188,23 @@ const axisLockDelta = (delta: Coords): Coords => {
   }
 
   return { x: 0, y: delta.y };
+};
+
+/**
+ * Segment handle drag: horizontal span → only up/down; vertical → only left/right.
+ */
+const constrainSegmentDragDelta = (
+  start: Coords,
+  end: Coords,
+  delta: Coords
+): Coords => {
+  if (start.y === end.y) {
+    return { x: 0, y: delta.y };
+  }
+  if (start.x === end.x) {
+    return { x: delta.x, y: 0 };
+  }
+  return CoordsUtils.zero();
 };
 
 const dragItems = (
@@ -485,9 +507,14 @@ const dragItems = (
 
     if (selected.length === 0) return;
 
+    const orthoDelta = options?.isTwoD ? snapDeltaToHV45(delta) : delta;
+    if (CoordsUtils.isEqual(orthoDelta, CoordsUtils.zero())) {
+      return;
+    }
+
     const leveled = levelWaypointTiles(
       selected.map((item) => item.tile),
-      delta
+      orthoDelta
     );
 
     const nextByAnchor = new Map<string, Coords>();
@@ -608,12 +635,43 @@ const dragItems = (
       const origins = options?.anchorOrigins;
       const originStart = origins?.[startAnchorId];
       const originEnd = origins?.[endAnchorId];
+      const axisTiles =
+        originStart && originEnd
+          ? [originStart, originEnd]
+          : startA?.ref.tile && endA?.ref.tile
+            ? [startA.ref.tile, endA.ref.tile]
+            : null;
+      const segmentDelta = axisTiles
+        ? constrainSegmentDragDelta(axisTiles[0], axisTiles[1], delta)
+        : delta;
+      if (CoordsUtils.isEqual(segmentDelta, CoordsUtils.zero())) {
+        return;
+      }
 
-      let moved;
-      if (originStart && originEnd) {
+      let moved: Connector['anchors'];
+      if (
+        options?.isTwoD &&
+        originStart &&
+        originEnd &&
+        startAnchorId !== endAnchorId
+      ) {
+        moved = applyOrthoSegmentDrag({
+          anchors: connector.anchors,
+          startAnchorId,
+          endAnchorId,
+          originStart,
+          originEnd,
+          delta: segmentDelta,
+          view: scene.currentView,
+          modelItems: options.modelItems
+        });
+      } else if (originStart && originEnd) {
         // Absolute delta from drag-start tiles (avoids compounding with snap).
         if (startAnchorId === endAnchorId) {
-          const nextTile = CoordsUtils.add(originStart, delta);
+          const nextTile = snapTileToHV45FromOrigin(
+            originStart,
+            CoordsUtils.add(originStart, segmentDelta)
+          );
           moved = connector.anchors.map((anchor) => {
             if (anchor.id === startAnchorId && anchor.ref.tile) {
               return { ...anchor, ref: { tile: nextTile } };
@@ -623,7 +681,7 @@ const dragItems = (
         } else {
           const [leveledStart, leveledEnd] = levelWaypointTiles(
             [originStart, originEnd],
-            delta
+            segmentDelta
           );
           const nextStart = startA?.locked ? { ...originStart } : leveledStart;
           const nextEnd = endA?.locked ? { ...originEnd } : leveledEnd;
@@ -646,7 +704,7 @@ const dragItems = (
           connector.anchors,
           startAnchorId,
           endAnchorId,
-          delta
+          segmentDelta
         );
         // Re-pin locked ends after relative move.
         if (startA?.locked || endA?.locked) {
@@ -668,6 +726,8 @@ const dragItems = (
           !anchor.ref.tile ||
           anchor.locked
         ) {
+          // Elbow inserted by step-drag still participates in guide snap below
+          // only when it is one of the segment ends — leave other tiles as-is.
           return anchor;
         }
         return {
@@ -676,22 +736,8 @@ const dragItems = (
         };
       });
 
-      const freeDragId = startA?.locked
-        ? endAnchorId
-        : endA?.locked
-          ? startAnchorId
-          : startAnchorId;
-
-      let nextAnchors =
-        options?.isTwoD && options.orthogonal
-          ? applyOrthogonalBendAnchors({
-              anchors: snapped,
-              draggedAnchorId: freeDragId,
-              hint: tile,
-              view: scene.currentView,
-              modelItems: options.modelItems
-            })
-          : snapped;
+      // Segment drag is already H/V step-constrained — don't rebuild bends.
+      let nextAnchors = snapped;
 
       if (options?.isTwoD) {
         nextAnchors = untangleAnchorHairpins(
@@ -820,10 +866,43 @@ const dragItems = (
             return;
           }
 
-          const snappedTile = snapWpTile(tile, item.id);
+          const neighbors: Coords[] = [];
+          const prev = draft.anchors[anchor.index - 1];
+          const next = draft.anchors[anchor.index + 1];
+          if (prev) {
+            try {
+              neighbors.push(
+                getAnchorTile(prev, scene.currentView, options.modelItems)
+              );
+            } catch {
+              // ignore unresolved neighbor
+            }
+          }
+          if (next) {
+            try {
+              neighbors.push(
+                getAnchorTile(next, scene.currentView, options.modelItems)
+              );
+            } catch {
+              // ignore unresolved neighbor
+            }
+          }
+
+          const hv45Tile =
+            neighbors.length > 0
+              ? snapTileToHV45Neighbors(tile, neighbors)
+              : (() => {
+                  const dragOrigin =
+                    options?.anchorOrigins?.[item.id] ??
+                    anchor.value.ref.tile;
+                  return dragOrigin
+                    ? snapTileToHV45FromOrigin(dragOrigin, tile)
+                    : { x: Math.round(tile.x), y: Math.round(tile.y) };
+                })();
+          const snappedTile = snapWpTile(hv45Tile, item.id);
           if (
             hasTileWaypointAt(draft.anchors, snappedTile, item.id) &&
-            !CoordsUtils.isEqual(snappedTile, tile)
+            !CoordsUtils.isEqual(snappedTile, hv45Tile)
           ) {
             return;
           }

@@ -3,12 +3,13 @@ import { Box, Stack, ToggleButton, ToggleButtonGroup } from '@mui/material';
 import { DeviceCreatorPanel } from 'src/components/ItemControls/DeviceCreator/DeviceCreatorPanel';
 import { VirtualServerCreatorPanel } from 'src/components/ItemControls/VirtualServerCreator/VirtualServerCreatorPanel';
 import { ServerV2CreatorPanel } from 'src/components/ItemControls/ServerV2Creator/ServerV2CreatorPanel';
+import { ConnectionMatrixCreatorPanel } from 'src/components/ConnectionMatrixTopology/ConnectionMatrixCreatorPanel';
 import { useModelStore, useModelStoreApi } from 'src/stores/modelStore';
 
 export const WorkshopView = () => {
   const [creatorType, setCreatorType] = useState<
-    'SWITCH' | 'SERVER' | 'SERVER_V2' | 'PATCH_PANEL'
-  >('SWITCH');
+    'SWITCH' | 'SERVER' | 'SERVER_V2' | 'PATCH_PANEL' | 'MATRIX'
+  >('MATRIX');
   const [v2PreviewMode, setV2PreviewMode] = useState<'logical' | 'rack'>(
     'logical'
   );
@@ -88,6 +89,7 @@ export const WorkshopView = () => {
           <ToggleButton value="SWITCH">Switch</ToggleButton>
           <ToggleButton value="SERVER">Serwer (Virtual)</ToggleButton>
           <ToggleButton value="SERVER_V2">Serwer V2</ToggleButton>
+          <ToggleButton value="MATRIX">Macierz Proxmox</ToggleButton>
         </ToggleButtonGroup>
       </Stack>
 
@@ -115,6 +117,8 @@ export const WorkshopView = () => {
           onCancel={() => {}}
         />
       )}
+
+      {creatorType === 'MATRIX' && <ConnectionMatrixCreatorPanel />}
     </Box>
   );
 };

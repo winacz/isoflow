@@ -27,6 +27,20 @@ const ceilToStep = (value: number, step: number): number => {
   return Math.ceil(value / s) * s;
 };
 
+/**
+ * Advance past an occupied span + gap, snapping UP to the grid.
+ * Rounding (Math.round) would swallow small gaps when snapStep > gap
+ * (e.g. rack step 9 + SHAPE_2D_LAYOUT_GAP 3 → identical to tight).
+ */
+const advancePackedCoord = (
+  from: number,
+  size: number,
+  gap: number,
+  step: number
+): number => {
+  return ceilToStep(from + size + gap, step);
+};
+
 /** Builtin switch or device template chassis (not hosts / cabinets / fillers). */
 export const isSwitchLikeIcon = (icon: string | undefined | null): boolean => {
   if (!icon) return false;
@@ -62,6 +76,12 @@ export const SHAPE_2D_PACK_VARIANTS: Shape2dPackVariant[] = [
   'wrap5'
 ];
 
+/** Grid only has tight / spaced (wrap is N/A). */
+export const SHAPE_2D_GRID_PACK_VARIANTS: Shape2dPackVariant[] = [
+  'tight',
+  'spaced'
+];
+
 export const SHAPE_2D_PACK_LABELS: Record<Shape2dPackVariant, string> = {
   tight: 'przy sobie',
   spaced: 'z odstępem',
@@ -70,9 +90,10 @@ export const SHAPE_2D_PACK_LABELS: Record<Shape2dPackVariant, string> = {
 
 export const shape2dPackLabel = (
   pack: Shape2dPackVariant,
-  mode: 'horizontal' | 'vertical'
+  mode: 'horizontal' | 'vertical' | 'grid'
 ) => {
   if (pack !== 'wrap5') return SHAPE_2D_PACK_LABELS[pack];
+  if (mode === 'grid') return SHAPE_2D_PACK_LABELS.spaced;
   return mode === 'vertical' ? 'max 5 / kolumna' : 'max 5 / rząd';
 };
 
@@ -166,10 +187,7 @@ const computePackedTargets = (
 
     ordered.forEach((item) => {
       if (col >= wrapLimit) {
-        x = snapTile2dToGrid(
-          { x: x + colMaxW + gap, y: start.y },
-          snapStep
-        ).x;
+        x = advancePackedCoord(x, colMaxW, gap, snapStep.x);
         y = start.y;
         col = 0;
         colMaxW = 0;
@@ -178,14 +196,7 @@ const computePackedTargets = (
       const tile = snapTile2dToGrid({ x, y }, snapStep);
       targets[item.id] = tile;
       colMaxW = Math.max(colMaxW, item.width);
-      y = snapTile2dToGrid(
-        { x: tile.x, y: tile.y + item.height + gap },
-        snapStep
-      ).y;
-      // Keep at least height+gap advance even if snap collapses.
-      if (y < tile.y + item.height + gap) {
-        y = tile.y + item.height + gap;
-      }
+      y = advancePackedCoord(tile.y, item.height, gap, snapStep.y);
       col += 1;
     });
     return targets;
@@ -199,10 +210,7 @@ const computePackedTargets = (
 
     ordered.forEach((item) => {
       if (col >= wrapLimit) {
-        y = snapTile2dToGrid(
-          { x: start.x, y: y + rowMaxH + gap },
-          snapStep
-        ).y;
+        y = advancePackedCoord(y, rowMaxH, gap, snapStep.y);
         x = start.x;
         col = 0;
         rowMaxH = 0;
@@ -211,19 +219,13 @@ const computePackedTargets = (
       const tile = snapTile2dToGrid({ x, y }, snapStep);
       targets[item.id] = tile;
       rowMaxH = Math.max(rowMaxH, item.height);
-      x = snapTile2dToGrid(
-        { x: tile.x + item.width + gap, y: tile.y },
-        snapStep
-      ).x;
-      if (x < tile.x + item.width + gap) {
-        x = tile.x + item.width + gap;
-      }
+      x = advancePackedCoord(tile.x, item.width, gap, snapStep.x);
       col += 1;
     });
     return targets;
   }
 
-  // grid — square-ish, always snapped
+  // grid — square-ish, always snapped; pack controls gap (tight / spaced)
   const cols = chooseSquareGridCols(ordered.length);
   const colWidths: number[] = Array.from({ length: cols }, () => 0);
   const rowHeights: number[] = [];
@@ -237,16 +239,21 @@ const computePackedTargets = (
 
   const colXs: number[] = [];
   let xCursor = start.x;
-  colWidths.forEach((width, index) => {
-    colXs[index] = snapTile2dToGrid({ x: xCursor, y: start.y }, snapStep).x;
-    xCursor = colXs[index] + width + gap;
+  colWidths.forEach((width) => {
+    colXs.push(snapTile2dToGrid({ x: xCursor, y: start.y }, snapStep).x);
+    xCursor = advancePackedCoord(colXs[colXs.length - 1], width, gap, snapStep.x);
   });
 
   const rowYs: number[] = [];
   let yCursor = start.y;
-  rowHeights.forEach((height, index) => {
-    rowYs[index] = snapTile2dToGrid({ x: start.x, y: yCursor }, snapStep).y;
-    yCursor = rowYs[index] + height + gap;
+  rowHeights.forEach((height) => {
+    rowYs.push(snapTile2dToGrid({ x: start.x, y: yCursor }, snapStep).y);
+    yCursor = advancePackedCoord(
+      rowYs[rowYs.length - 1],
+      height,
+      gap,
+      snapStep.y
+    );
   });
 
   ordered.forEach((item, index) => {
@@ -324,9 +331,17 @@ export const layoutShape2dItems = ({
 }): Record<string, Coords> => {
   if (selectedItems.length === 0) return {};
 
-  const effectiveGap =
-    gap ??
-    (pack === 'tight' ? 0 : SHAPE_2D_LAYOUT_GAP);
+  // On coarse grids (rack), ensure "spaced" is at least one snap cell —
+  // a raw gap of 3 would otherwise round away under step 9.
+  const spacedGap = Math.max(
+    SHAPE_2D_LAYOUT_GAP,
+    Math.max(1, snapStep.x),
+    Math.max(1, snapStep.y)
+  );
+  const effectiveGap = gap ?? (pack === 'tight' ? 0 : spacedGap);
+  // wrap5 on grid is meaningless — treat as spaced gap + no wrap
+  const effectivePack: Shape2dPackVariant =
+    mode === 'grid' && pack === 'wrap5' ? 'spaced' : pack;
 
   const modelItemMap = new Map(modelItems.map(i => [i.id, i]));
   const footprints = selectedItems.map((item) => {
@@ -353,7 +368,7 @@ export const layoutShape2dItems = ({
     mode,
     origin,
     effectiveGap,
-    mode === 'grid' ? 'spaced' : pack,
+    effectivePack,
     snapStep
   );
   const excludeItemIds = footprints.map((item) => item.id);
@@ -1033,6 +1048,484 @@ export const tidyInPlaceShape2dItems = ({
 };
 
 export type BundleOrientation = 'vertical' | 'horizontal';
+
+/**
+ * "Porządkuj ścieżki" routing:
+ * - Nodes above the switch: start with the NEAREST port on the bottom lane;
+ *   later cables drop to that corridor and run parallel above it.
+ * - Nodes below the switch: start with the furthest port (mirrored).
+ * - DIAGONAL: drop → parallel horizontal run → 45° into the switch port.
+ * - ORTHOGONAL: drop → L/U along the lane into the port.
+ *
+ * Waypoints are ordered from the connector's FIRST endpoint to its LAST.
+ */
+export const parallelOffsetShape2dRoutes = ({
+  selectedItems,
+  allItems,
+  modelItems,
+  connectors,
+  mode
+}: {
+  selectedItems: ViewItem[];
+  allItems: ViewItem[];
+  modelItems: { id: string; icon?: string }[];
+  connectors: TidyConnector[];
+  mode: 'ORTHOGONAL' | 'DIAGONAL';
+}): Record<string, Coords[]> => {
+  const selectedIds = new Set(
+    selectedItems.map((item) => {
+      return item.id;
+    })
+  );
+  const itemById = new Map(
+    allItems.map((item) => {
+      return [item.id, item] as const;
+    })
+  );
+  const iconById = new Map(
+    modelItems.map((item) => {
+      return [item.id, item.icon] as const;
+    })
+  );
+  const modelItemMap = new Map(modelItems.map((item) => [item.id, item]));
+
+  const isSwitch = (id: string) => {
+    return isSwitchLikeIcon(iconById.get(id));
+  };
+
+  type LaneCable = {
+    connectorId: string;
+    leafFirst: boolean;
+    leafId: string;
+    leafPortWorld: Coords;
+    leafPortSide: 'TOP' | 'BOTTOM' | 'LEFT' | 'RIGHT';
+    switchId: string;
+    switchPortWorld: Coords;
+    switchPortSide: 'TOP' | 'BOTTOM' | 'LEFT' | 'RIGHT';
+  };
+
+  const cables: LaneCable[] = [];
+
+  connectors.forEach((connector) => {
+    const ends = connector.anchors.filter((anchor) => {
+      return Boolean(anchor.ref.item);
+    });
+    if (ends.length < 2) return;
+
+    const first = ends[0];
+    const last = ends[ends.length - 1];
+    if (!first.ref.item || !last.ref.item) return;
+
+    const firstIsSwitch = isSwitch(first.ref.item);
+    const lastIsSwitch = isSwitch(last.ref.item);
+
+    let switchAnchor = first;
+    let leafAnchor = last;
+    let leafFirst = false;
+
+    if (firstIsSwitch !== lastIsSwitch) {
+      switchAnchor = firstIsSwitch ? first : last;
+      leafAnchor = firstIsSwitch ? last : first;
+      leafFirst = !firstIsSwitch;
+    } else {
+      const aSel = selectedIds.has(first.ref.item);
+      const bSel = selectedIds.has(last.ref.item);
+      if (aSel && bSel) {
+        switchAnchor = first;
+        leafAnchor = last;
+        leafFirst = false;
+      } else if (aSel !== bSel) {
+        if (aSel) {
+          leafAnchor = first;
+          switchAnchor = last;
+          leafFirst = true;
+        } else {
+          leafAnchor = last;
+          switchAnchor = first;
+          leafFirst = false;
+        }
+      } else {
+        return;
+      }
+    }
+
+    const leafId = leafAnchor.ref.item!;
+    const switchId = switchAnchor.ref.item!;
+    if (!selectedIds.has(leafId) && !selectedIds.has(switchId)) return;
+
+    const leafItem = itemById.get(leafId);
+    const switchItem = itemById.get(switchId);
+    if (!leafItem || !switchItem) return;
+
+    const leafPort = getShape2dPorts(iconById.get(leafId) ?? '').find(
+      (candidate) => candidate.id === leafAnchor.ref.port
+    );
+    const switchPort = getShape2dPorts(iconById.get(switchId) ?? '').find(
+      (candidate) => candidate.id === switchAnchor.ref.port
+    );
+    if (!leafPort || !switchPort) return;
+
+    cables.push({
+      connectorId: connector.id,
+      leafFirst,
+      leafId,
+      leafPortWorld: {
+        x: leafItem.tile.x + leafPort.tile.x,
+        y: leafItem.tile.y + leafPort.tile.y
+      },
+      leafPortSide: leafPort.side,
+      switchId,
+      switchPortWorld: {
+        x: switchItem.tile.x + switchPort.tile.x,
+        y: switchItem.tile.y + switchPort.tile.y
+      },
+      switchPortSide: switchPort.side
+    });
+  });
+
+  if (cables.length === 0) return {};
+
+  const groups = new Map<string, LaneCable[]>();
+  cables.forEach((cable) => {
+    const group = groups.get(cable.switchId) ?? [];
+    group.push(cable);
+    groups.set(cable.switchId, group);
+  });
+
+  const approachPoint = (cable: LaneCable, lane: number): Coords => {
+    switch (cable.switchPortSide) {
+      case 'TOP':
+        return {
+          x: cable.switchPortWorld.x,
+          y: cable.switchPortWorld.y - 1 - lane
+        };
+      case 'LEFT':
+        return {
+          x: cable.switchPortWorld.x - 1 - lane,
+          y: cable.switchPortWorld.y
+        };
+      case 'RIGHT':
+        return {
+          x: cable.switchPortWorld.x + 1 + lane,
+          y: cable.switchPortWorld.y
+        };
+      case 'BOTTOM':
+      default:
+        return {
+          x: cable.switchPortWorld.x,
+          y: cable.switchPortWorld.y + 1 + lane
+        };
+    }
+  };
+
+  const clean = (tiles: Coords[]): Coords[] => {
+    return tiles.filter((tile, index) => {
+      if (index === 0) return true;
+      const prev = tiles[index - 1];
+      return prev.x !== tile.x || prev.y !== tile.y;
+    });
+  };
+
+  const routes: Record<string, Coords[]> = {};
+
+  groups.forEach((group, switchId) => {
+    const switchItem = itemById.get(switchId);
+    if (!switchItem) return;
+
+    const switchSize = getShape2dSize(iconById.get(switchId) ?? '') ?? {
+      width: 1,
+      height: 1
+    };
+    const switchCenter = {
+      x: switchItem.tile.x + switchSize.width / 2,
+      y: switchItem.tile.y + switchSize.height / 2
+    };
+
+    const leafFootprints = group.map((cable) => {
+      return getFootprint(itemById.get(cable.leafId)!, modelItems, modelItemMap);
+    });
+    const bboxMinX = Math.min(...leafFootprints.map((f) => f.tile.x));
+    const bboxMaxX = Math.max(
+      ...leafFootprints.map((f) => f.tile.x + f.width - 1)
+    );
+    const bboxMinY = Math.min(...leafFootprints.map((f) => f.tile.y));
+    const bboxMaxY = Math.max(
+      ...leafFootprints.map((f) => f.tile.y + f.height - 1)
+    );
+    const leafCx = (bboxMinX + bboxMaxX) / 2;
+    const leafCy = (bboxMinY + bboxMaxY) / 2;
+
+    // Prefer horizontal trunk when leaves sit in a row (or exit top/bottom).
+    const horizontalTrunk =
+      Math.abs(switchCenter.x - leafCx) >= Math.abs(switchCenter.y - leafCy) ||
+      group.every((cable) => {
+        return (
+          cable.leafPortSide === 'BOTTOM' || cable.leafPortSide === 'TOP'
+        );
+      });
+
+    // Nodes above the switch → start with the NEAREST port (bottom lane).
+    // Nodes below → start with the furthest port (top lane).
+    const nodesAboveSwitch = switchCenter.y > leafCy;
+    const ordered = [...group].sort((a, b) => {
+      const da = Math.hypot(
+        a.switchPortWorld.x - leafCx,
+        a.switchPortWorld.y - leafCy
+      );
+      const db = Math.hypot(
+        b.switchPortWorld.x - leafCx,
+        b.switchPortWorld.y - leafCy
+      );
+      if (nodesAboveSwitch) {
+        if (da !== db) return da - db;
+        if (a.switchPortWorld.x !== b.switchPortWorld.x) {
+          return a.switchPortWorld.x - b.switchPortWorld.x;
+        }
+        return a.switchPortWorld.y - b.switchPortWorld.y;
+      }
+      if (db !== da) return db - da;
+      if (leafCx <= switchCenter.x) {
+        if (b.switchPortWorld.x !== a.switchPortWorld.x) {
+          return b.switchPortWorld.x - a.switchPortWorld.x;
+        }
+      } else if (a.switchPortWorld.x !== b.switchPortWorld.x) {
+        return a.switchPortWorld.x - b.switchPortWorld.x;
+      }
+      return b.switchPortWorld.y - a.switchPortWorld.y;
+    });
+
+    if (horizontalTrunk) {
+      const trunkAbove = switchCenter.y < leafCy;
+      const laneStride = mode === 'DIAGONAL' ? 2 : 1;
+      const laneCount = ordered.length;
+
+      // Index 0 (first in order) sits on the outer edge of the trunk:
+      // below leaves → bottom-most lane; above leaves → top-most lane.
+      const laneYAt = (laneIndex: number) => {
+        if (trunkAbove) {
+          const topY = bboxMinY - 2 - (laneCount - 1) * laneStride;
+          return topY + laneIndex * laneStride;
+        }
+        const bottomY = bboxMaxY + 2 + (laneCount - 1) * laneStride;
+        return bottomY - laneIndex * laneStride;
+      };
+
+      const exitTowardTrunk = (cable: LaneCable): Coords => {
+        const fp = getFootprint(
+          itemById.get(cable.leafId)!,
+          modelItems,
+          modelItemMap
+        );
+        if (trunkAbove) {
+          return { x: cable.leafPortWorld.x, y: fp.tile.y - 1 };
+        }
+        return { x: cable.leafPortWorld.x, y: fp.tile.y + fp.height };
+      };
+
+      const clearanceJogX = (cable: LaneCable, exit: Coords, laneY: number) => {
+        const myFp = getFootprint(
+          itemById.get(cable.leafId)!,
+          modelItems,
+          modelItemMap
+        );
+        const y0 = Math.min(exit.y, laneY);
+        const y1 = Math.max(exit.y, laneY);
+        const dirX = Math.sign(switchCenter.x - leafCx) || 1;
+
+        let jogX = exit.x;
+        let needsJog = false;
+
+        leafFootprints.forEach((fp) => {
+          if (fp.id === myFp.id) return;
+          const fpTop = fp.tile.y;
+          const fpBottom = fp.tile.y + fp.height - 1;
+          const fpLeft = fp.tile.x;
+          const fpRight = fp.tile.x + fp.width - 1;
+          const between =
+            fpBottom >= y0 &&
+            fpTop <= y1 &&
+            ((trunkAbove && fpBottom < myFp.tile.y) ||
+              (!trunkAbove && fpTop > myFp.tile.y + myFp.height - 1));
+          const columnOverlap =
+            exit.x >= fpLeft - 1 && exit.x <= fpRight + 1;
+          if (!between || !columnOverlap) return;
+
+          needsJog = true;
+          if (dirX > 0) {
+            jogX = Math.max(jogX, fpRight + 2);
+          } else {
+            jogX = Math.min(jogX, fpLeft - 2);
+          }
+        });
+
+        if (!needsJog) return exit.x;
+        if (jogX === exit.x) {
+          jogX = exit.x + dirX * 2;
+        }
+        return jogX;
+      };
+
+      ordered.forEach((cable, laneIndex) => {
+        const laneY = laneYAt(laneIndex);
+        const exit = exitTowardTrunk(cable);
+        const approach = approachPoint(cable, 0);
+        const targetX = cable.switchPortWorld.x;
+        const dropX = clearanceJogX(cable, exit, laneY);
+        const dirX = Math.sign(targetX - dropX) || Math.sign(switchCenter.x - leafCx) || 1;
+
+        let tiles: Coords[];
+
+        if (mode === 'DIAGONAL') {
+          // 1) drop to lane (with side jog if needed)
+          // 2) run parallel along the lane
+          // 3) 45° diagonal into the switch port
+          const dy = approach.y - laneY;
+          const diag = Math.max(0, Math.abs(dy));
+          const dirY = Math.sign(dy) || (trunkAbove ? -1 : 1);
+
+          const dropCol = dropX;
+          let runEndX = targetX - dirX * diag;
+          if (dirX > 0) {
+            runEndX = Math.max(runEndX, dropCol, bboxMaxX + 2);
+            if (runEndX > targetX) runEndX = Math.max(dropCol, targetX);
+          } else {
+            runEndX = Math.min(runEndX, dropCol, bboxMinX - 2);
+            if (runEndX < targetX) runEndX = Math.min(dropCol, targetX);
+          }
+
+          const body: Coords[] = [exit];
+          if (dropCol !== exit.x) {
+            body.push({ x: dropCol, y: exit.y });
+          }
+          body.push({ x: dropCol, y: laneY });
+
+          if (diag >= 2 && runEndX !== targetX) {
+            body.push({ x: runEndX, y: laneY });
+            body.push({ x: targetX, y: approach.y });
+          } else {
+            body.push({ x: targetX, y: laneY });
+            if (approach.y !== laneY) {
+              body.push({ ...approach });
+            }
+          }
+
+          tiles = body;
+        } else if (dropX === exit.x) {
+          tiles = [
+            exit,
+            { x: exit.x, y: laneY },
+            { x: targetX, y: laneY },
+            approach
+          ];
+        } else {
+          tiles = [
+            exit,
+            { x: dropX, y: exit.y },
+            { x: dropX, y: laneY },
+            { x: targetX, y: laneY },
+            approach
+          ];
+        }
+
+        routes[cable.connectorId] = cable.leafFirst
+          ? clean(tiles)
+          : clean([...tiles].reverse());
+      });
+      return;
+    }
+
+    // Vertical trunk: on the switch side of the leaves; exit toward that side.
+    const trunkRight = switchCenter.x >= leafCx;
+    const trunkBaseX = trunkRight ? bboxMaxX + 2 : bboxMinX - 2;
+    const laneXAt = (laneIndex: number) => {
+      return trunkRight ? trunkBaseX + laneIndex : trunkBaseX - laneIndex;
+    };
+
+    const exitTowardTrunkX = (cable: LaneCable): Coords => {
+      const fp = getFootprint(
+        itemById.get(cable.leafId)!,
+        modelItems,
+        modelItemMap
+      );
+      if (trunkRight) {
+        return { x: fp.tile.x + fp.width, y: cable.leafPortWorld.y };
+      }
+      return { x: fp.tile.x - 1, y: cable.leafPortWorld.y };
+    };
+
+    let sharedDiagV = 4;
+    if (mode === 'DIAGONAL') {
+      const avails = ordered.map((cable, laneIndex) => {
+        const laneX = laneXAt(laneIndex);
+        const exit = exitTowardTrunkX(cable);
+        return Math.max(0, Math.abs(laneX - exit.x));
+      });
+      const positive = avails.filter((value) => value > 0);
+      if (positive.length > 0) {
+        sharedDiagV = Math.max(2, Math.min(8, Math.min(...positive)));
+      }
+    }
+
+    ordered.forEach((cable, laneIndex) => {
+      const laneX = laneXAt(laneIndex);
+      const exit = exitTowardTrunkX(cable);
+      // Stack “below” the primary: each lane drops one tile further down.
+      const runY = exit.y + laneIndex;
+      const approach = approachPoint(cable, 0);
+      const targetY = cable.switchPortWorld.y;
+
+      let tiles: Coords[];
+      if (mode === 'DIAGONAL') {
+        const avail = Math.max(0, Math.abs(laneX - exit.x));
+        const d = Math.min(sharedDiagV, avail);
+        const dirX = Math.sign(laneX - exit.x) || (trunkRight ? 1 : -1);
+        const dirY = Math.sign(targetY - runY) || 1;
+
+        if (d < 1) {
+          tiles = [
+            exit,
+            { x: exit.x, y: runY },
+            { x: laneX, y: runY },
+            { x: laneX, y: targetY },
+            approach
+          ];
+        } else {
+          // Stub toward trunk, then parallel diagonal down/up.
+          const stubX = laneX - dirX * d;
+          let diagY = runY + dirY * d;
+          if (
+            (dirY > 0 && diagY > targetY) ||
+            (dirY < 0 && diagY < targetY)
+          ) {
+            diagY = targetY;
+          }
+          tiles = [
+            exit,
+            { x: exit.x, y: runY },
+            { x: stubX, y: runY },
+            { x: laneX, y: diagY },
+            { x: laneX, y: targetY },
+            approach
+          ];
+        }
+      } else {
+        tiles = [
+          exit,
+          { x: exit.x, y: runY },
+          { x: laneX, y: runY },
+          { x: laneX, y: targetY },
+          approach
+        ];
+      }
+
+      routes[cable.connectorId] = cable.leafFirst
+        ? clean(tiles)
+        : clean([...tiles].reverse());
+    });
+  });
+
+  return routes;
+};
 
 /**
  * "Wiązka" routing: nodes stay put; every leaf↔switch cable gets waypoints so

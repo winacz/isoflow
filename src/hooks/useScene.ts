@@ -44,9 +44,15 @@ import {
   diagonalBundleShape2dRoutes,
   getConnectorPathPreview,
   compactAlgorithmWaypoints,
+  getAnchorTile,
+  CoordsUtils,
   claudeSortSwapLeaves,
   claudeSortBundleRoutes,
-  type TidyInPlaceVariant
+  recalculateAllConnectorPaths,
+  parallelOffsetShape2dRoutes,
+  arrangeNodesWithinSelection,
+  type TidyInPlaceVariant,
+  type RoutingStyle
 } from 'src/utils';
 import {
   CONNECTOR_DEFAULTS,
@@ -560,16 +566,60 @@ export const useScene = () => {
           });
           if (endpointAnchors.length < 2) return;
 
-          const compactTiles = compactAlgorithmWaypoints(
-            routeTiles.length > 24
-              ? [routeTiles[0], routeTiles[routeTiles.length - 1]]
-              : routeTiles
-          );
+          // Route tiles are corridor waypoints (exit → bends → approach), NOT
+          // including port endpoints. Keep them all — slicing ends used to drop
+          // exit/approach and left diagonal chords that overlapped.
+          const sparse =
+            routeTiles.length > 10
+              ? compactAlgorithmWaypoints(routeTiles)
+              : routeTiles;
+
+          let startTile: Coords | null = null;
+          let endTile: Coords | null = null;
+          try {
+            startTile = getAnchorTile(
+              endpointAnchors[0],
+              viewForPath,
+              draft.model.items
+            );
+            endTile = getAnchorTile(
+              endpointAnchors[endpointAnchors.length - 1],
+              viewForPath,
+              draft.model.items
+            );
+          } catch {
+            // Ports may be temporarily invalid — keep raw mids.
+          }
+
+          const midTiles = sparse.filter((tile) => {
+            if (
+              startTile &&
+              CoordsUtils.isEqual(
+                { x: Math.round(tile.x), y: Math.round(tile.y) },
+                { x: Math.round(startTile.x), y: Math.round(startTile.y) }
+              )
+            ) {
+              return false;
+            }
+            if (
+              endTile &&
+              CoordsUtils.isEqual(
+                { x: Math.round(tile.x), y: Math.round(tile.y) },
+                { x: Math.round(endTile.x), y: Math.round(endTile.y) }
+              )
+            ) {
+              return false;
+            }
+            return true;
+          });
 
           const anchors = [
             endpointAnchors[0],
-            ...compactTiles.map((tile) => {
-              return { id: generateId(), ref: { tile } };
+            ...midTiles.map((tile) => {
+              return {
+                id: generateId(),
+                ref: { tile: { x: Math.round(tile.x), y: Math.round(tile.y) } }
+              };
             }),
             endpointAnchors[endpointAnchors.length - 1]
           ];
@@ -1205,6 +1255,256 @@ export const useScene = () => {
     ]
   );
 
+  /**
+   * Global re-route: shortest→longest with a shared cost map so cables avoid
+   * each other (stacks form naturally when avoidance is too expensive).
+   */
+  const recalculateAllRoutes = useCallback(() => {
+    const state = getState();
+    const view = getItemByIdOrThrow(state.model.views, currentViewId).value;
+    const list = view.connectors ?? [];
+    if (list.length === 0) return;
+
+    beginHistoryTransaction();
+
+    // Drop mid waypoints so the global engine owns the geometry.
+    let next: State = produce(state, (draft) => {
+      const draftView = getItemByIdOrThrow(draft.model.views, currentViewId);
+      const connectors = draft.model.views[draftView.index].connectors;
+      if (!connectors) return;
+      connectors.forEach((connector, index) => {
+        connectors[index] = {
+          ...connector,
+          anchors: stripToEndpointAnchors(connector.anchors)
+        };
+      });
+    });
+
+    const viewAfter = getItemByIdOrThrow(next.model.views, currentViewId).value;
+    const paths = recalculateAllConnectorPaths({
+      connectors: viewAfter.connectors ?? [],
+      view: viewAfter,
+      modelItems: next.model.items,
+      items: viewAfter.items ?? []
+    });
+
+    next = produce(next, (draft) => {
+      Object.entries(paths).forEach(([id, path]) => {
+        draft.scene.connectors[id] = { path };
+      });
+    });
+
+    setState(next, { skipHistory: true });
+    endHistoryTransaction();
+  }, [
+    beginHistoryTransaction,
+    endHistoryTransaction,
+    getState,
+    setState,
+    currentViewId
+  ]);
+
+  /**
+   * Arrange Selected Nodes — swap within bbox (SA), then global re-route.
+   */
+  const arrangeSelectedNodes = useCallback(
+    (ids: string[]) => {
+      if (ids.length < 2) return;
+
+      beginHistoryTransaction();
+
+      const state = getState();
+      const view = getItemByIdOrThrow(state.model.views, currentViewId).value;
+      const selectedItems = (view.items ?? []).filter((item) => {
+        return ids.includes(item.id);
+      });
+
+      const targets = arrangeNodesWithinSelection({
+        selectedItems,
+        allItems: view.items ?? [],
+        connectors: view.connectors ?? [],
+        iterations: 50
+      });
+
+      let next: State = produce(state, (draft) => {
+        const draftView = getItemByIdOrThrow(draft.model.views, currentViewId);
+        const items = draft.model.views[draftView.index].items;
+        if (!items) return;
+        Object.entries(targets).forEach(([id, tile]) => {
+          const entry = getItemByIdOrThrow(items, id);
+          items[entry.index] = { ...entry.value, tile };
+        });
+
+        // Strip mid WPs before global route.
+        const connectors = draft.model.views[draftView.index].connectors;
+        if (!connectors) return;
+        connectors.forEach((connector, index) => {
+          connectors[index] = {
+            ...connector,
+            anchors: stripToEndpointAnchors(connector.anchors)
+          };
+        });
+      });
+
+      const viewAfter = getItemByIdOrThrow(next.model.views, currentViewId).value;
+      const paths = recalculateAllConnectorPaths({
+        connectors: viewAfter.connectors ?? [],
+        view: viewAfter,
+        modelItems: next.model.items,
+        items: viewAfter.items ?? []
+      });
+
+      next = produce(next, (draft) => {
+        Object.entries(paths).forEach(([id, path]) => {
+          draft.scene.connectors[id] = { path };
+        });
+      });
+
+      setState(next, { skipHistory: true });
+      endHistoryTransaction();
+    },
+    [
+      beginHistoryTransaction,
+      endHistoryTransaction,
+      getState,
+      setState,
+      currentViewId
+    ]
+  );
+
+  /**
+   * "Porządkuj ścieżki":
+   * 1) same node order as "Porządkuj" (port/shortest-path slots, no SA swaps),
+   * 2) AUTO → restore default simple port↔port cables (same as idle layout);
+   *    ORTHOGONAL / DIAGONAL → parallel lanes (furthest first, next at +1).
+   */
+  const tidyPathsForItems = useCallback(
+    (ids: string[], style: 'AUTO' | 'ORTHOGONAL' | 'DIAGONAL') => {
+      if (ids.length === 0) return;
+
+      const useAuto = style === 'AUTO';
+      if (useAuto) {
+        uiActions.setSimplePaths(true);
+      } else {
+        uiActions.setRoutingStyle(style);
+        uiActions.setSimplePaths(false);
+      }
+
+      const state = getState();
+      const view = getItemByIdOrThrow(state.model.views, currentViewId).value;
+      const selectedItems = (view.items ?? []).filter((item) => {
+        return ids.includes(item.id);
+      });
+      if (selectedItems.length === 0) return;
+
+      const selectedSet = new Set(ids);
+      const touching = (view.connectors ?? []).filter((connector) => {
+        return connector.anchors.some((anchor) => {
+          return Boolean(anchor.ref.item && selectedSet.has(anchor.ref.item));
+        });
+      });
+      if (touching.length === 0 && selectedItems.length < 2) return;
+
+      beginHistoryTransaction();
+
+      // —— Phase A: identical to "Porządkuj" (port order / shortest crossings) ——
+      const tileTargets =
+        selectedItems.length >= 2
+          ? tidyShape2dItems({
+              selectedItems,
+              allItems: view.items ?? [],
+              modelItems: state.model.items,
+              connectors: view.connectors ?? []
+            })
+          : {};
+
+      let next: State = produce(state, (draft) => {
+        const draftView = getItemByIdOrThrow(draft.model.views, currentViewId);
+        const items = draft.model.views[draftView.index].items;
+        if (items) {
+          Object.entries(tileTargets).forEach(([id, tile]) => {
+            const entry = getItemByIdOrThrow(items, id);
+            items[entry.index] = { ...entry.value, tile };
+          });
+        }
+
+        const connectors = draft.model.views[draftView.index].connectors;
+        if (!connectors) return;
+        touching.forEach((connector) => {
+          const entry = getItemByIdOrThrow(connectors, connector.id);
+          connectors[entry.index] = {
+            ...entry.value,
+            anchors: stripToEndpointAnchors(entry.value.anchors)
+          };
+        });
+      });
+
+      if (useAuto) {
+        // Same geometry as idle simplePaths: port↔port preview only.
+        const touchingIds = new Set(
+          touching.map((connector) => {
+            return connector.id;
+          })
+        );
+        next = produce(next, (draft) => {
+          const draftView = getItemByIdOrThrow(
+            draft.model.views,
+            currentViewId
+          );
+          const connectors =
+            draft.model.views[draftView.index].connectors ?? [];
+          const viewForPath = {
+            ...draftView.value,
+            connectors,
+            items: draft.model.views[draftView.index].items
+          };
+          connectors.forEach((connector) => {
+            if (!touchingIds.has(connector.id)) return;
+            draft.scene.connectors[connector.id] = {
+              path: getConnectorPathPreview({
+                anchors: stripToEndpointAnchors(connector.anchors),
+                view: viewForPath,
+                modelItems: draft.model.items
+              })
+            };
+          });
+        });
+        setState(next, { skipHistory: true });
+        endHistoryTransaction();
+        return;
+      }
+
+      // —— Phase B: parallel lanes (furthest first, others at X/Y + 1) ——
+      const viewAfter = getItemByIdOrThrow(next.model.views, currentViewId).value;
+      const afterSelected = (viewAfter.items ?? []).filter((item) => {
+        return selectedSet.has(item.id);
+      });
+      const routes = parallelOffsetShape2dRoutes({
+        selectedItems: afterSelected,
+        allItems: viewAfter.items ?? [],
+        modelItems: next.model.items,
+        connectors: viewAfter.connectors ?? [],
+        mode: style
+      });
+
+      if (Object.keys(routes).length > 0) {
+        next = applyConnectorRoutes(next, viewAfter.connectors ?? [], routes);
+      }
+
+      setState(next, { skipHistory: true });
+      endHistoryTransaction();
+    },
+    [
+      applyConnectorRoutes,
+      beginHistoryTransaction,
+      endHistoryTransaction,
+      getState,
+      setState,
+      currentViewId,
+      uiActions
+    ]
+  );
+
   const createConnector = useCallback(
     (newConnector: Connector) => {
       const newState = reducers.view({
@@ -1401,6 +1701,9 @@ export const useScene = () => {
       runClaudeSortForItems,
       regenerateRoutesForItems,
       setSimplePathsMode,
+      recalculateAllRoutes,
+      arrangeSelectedNodes,
+      tidyPathsForItems,
       deleteViewItem,
       createConnector,
       updateConnector,
@@ -1442,6 +1745,9 @@ export const useScene = () => {
       runClaudeSortForItems,
       regenerateRoutesForItems,
       setSimplePathsMode,
+      recalculateAllRoutes,
+      arrangeSelectedNodes,
+      tidyPathsForItems,
       deleteViewItem,
       createConnector,
       updateConnector,

@@ -15,8 +15,7 @@ import { IconButton } from 'src/components/IconButton/IconButton';
 import { UiElement } from 'src/components/UiElement/UiElement';
 import { useScene } from 'src/hooks/useScene';
 import { TEXTBOX_DEFAULTS } from 'src/config';
-import { generateId, removeMidWaypointsByIds, isPlanProjection } from 'src/utils';
-import { AlgorithmsToolButton } from 'src/components/AlgorithmsPopup/AlgorithmsPopup';
+import { generateId, removeMidWaypointsByIds } from 'src/utils';
 
 export const ToolMenu = ({
   /** Render without card chrome — for embedding in the plan sidebar header. */
@@ -55,7 +54,6 @@ export const ToolMenu = ({
   });
 
   const isTwoD = projectionMode === 'TWO_D';
-  const isPlan = isPlanProjection(projectionMode);
   const isEditable = editorMode === 'EDITABLE';
 
   const onUndo = useCallback(() => {
@@ -216,7 +214,6 @@ export const ToolMenu = ({
         onClick={openAddMenu}
         isActive={mode.type === 'PLACE_ICON'}
       />
-      {isPlan && <AlgorithmsToolButton />}
       <IconButton
         name="Connector"
         Icon={<ConnectorIcon />}

@@ -4,16 +4,13 @@ import { generateId } from './common';
 import { ensureDeviceTemplateIcons } from './deviceTemplateStorage';
 import {
   ISOMETRIC_VIEW_NAME,
-  PLAN_2D_VIEW_NAME,
-  PLAN_2D_V2_VIEW_NAME,
-  build2Dv2SnapshotFromPlan
+  PLAN_2D_VIEW_NAME
 } from './plan2dv2';
 
 /** Modular tab role — drives UI + projection without hardcoding view names. */
 export const ViewKindEnum = {
   ISOMETRIC: 'ISOMETRIC',
-  PLAN_2D: 'PLAN_2D',
-  PLAN_2D_V2: 'PLAN_2D_V2'
+  PLAN_2D: 'PLAN_2D'
 } as const;
 
 export type ViewKind = keyof typeof ViewKindEnum;
@@ -26,8 +23,11 @@ export type ProjectTab = {
 };
 
 export const inferViewKind = (view: Pick<View, 'name' | 'kind'>): ViewKind => {
-  if (view.kind) return view.kind;
-  if (view.name === PLAN_2D_V2_VIEW_NAME) return ViewKindEnum.PLAN_2D_V2;
+  // Legacy PLAN_2D_V2 collapses into the modular PLAN_2D tab kind.
+  if (view.kind === 'ISOMETRIC') return ViewKindEnum.ISOMETRIC;
+  if (view.kind === 'PLAN_2D' || view.kind === 'PLAN_2D_V2') {
+    return ViewKindEnum.PLAN_2D;
+  }
   if (view.name === ISOMETRIC_VIEW_NAME) return ViewKindEnum.ISOMETRIC;
   if (view.name === PLAN_2D_VIEW_NAME) return ViewKindEnum.PLAN_2D;
   // Extra / custom plan-like views default to 2D.
@@ -38,8 +38,6 @@ export const projectionModeForKind = (kind: ViewKind): ProjectionMode => {
   switch (kind) {
     case ViewKindEnum.ISOMETRIC:
       return 'ISOMETRIC';
-    case ViewKindEnum.PLAN_2D_V2:
-      return 'TWO_D_V2';
     case ViewKindEnum.PLAN_2D:
     default:
       return 'TWO_D';
@@ -50,8 +48,6 @@ export const defaultLabelForKind = (kind: ViewKind, name: string): string => {
   switch (kind) {
     case ViewKindEnum.ISOMETRIC:
       return 'Isometric';
-    case ViewKindEnum.PLAN_2D_V2:
-      return '2Dv2';
     case ViewKindEnum.PLAN_2D:
       return name === PLAN_2D_VIEW_NAME ? '2D' : name;
     default:
@@ -65,8 +61,6 @@ export const defaultOrderForKind = (kind: ViewKind): number => {
       return 0;
     case ViewKindEnum.PLAN_2D:
       return 100;
-    case ViewKindEnum.PLAN_2D_V2:
-      return 200;
     default:
       return 50;
   }
@@ -97,7 +91,7 @@ export const emptyView = ({
 
 /**
  * Normalize views for modular project tabs (backward-compatible with old JSON).
- * Ensures Isometric / Plan / 2Dv2 kinds exist; stamps kind + order when missing.
+ * Ensures Isometric / Plan kinds exist; stamps kind + order when missing.
  */
 export const ensureProjectViews = <
   T extends { views: View[]; items?: InitialData['items'] }
@@ -130,40 +124,6 @@ export const ensureProjectViews = <
     ];
   }
 
-  if (!hasKind(ViewKindEnum.PLAN_2D_V2)) {
-    const plan =
-      views
-        .filter((view) => {
-          return inferViewKind(view) === ViewKindEnum.PLAN_2D;
-        })
-        .sort((a, b) => {
-          return (a.order ?? 0) - (b.order ?? 0);
-        })[0] ?? null;
-    const snapshot = plan
-      ? build2Dv2SnapshotFromPlan({
-          plan,
-          modelItems: model.items ?? []
-        })
-      : {
-          items: [],
-          rectangles: [],
-          connectors: [],
-          textBoxes: []
-        };
-    views = [
-      ...views,
-      {
-        ...emptyView({
-          name: PLAN_2D_V2_VIEW_NAME,
-          kind: ViewKindEnum.PLAN_2D_V2,
-          order: defaultOrderForKind(ViewKindEnum.PLAN_2D_V2)
-        }),
-        items: snapshot.items,
-        rectangles: snapshot.rectangles
-      }
-    ];
-  }
-
   if (!hasKind(ViewKindEnum.ISOMETRIC)) {
     views = [
       ...views,
@@ -175,7 +135,7 @@ export const ensureProjectViews = <
     ];
   }
 
-  // Canonical strip order: Isometric → 2D → 2Dv2 (extra 2D tabs sit between 2D and 2Dv2).
+  // Canonical strip order: Isometric → 2D (extra 2D tabs sit after 2D).
   const primaryPlan = views
     .filter((view) => {
       return inferViewKind(view) === ViewKindEnum.PLAN_2D;
@@ -200,12 +160,6 @@ export const ensureProjectViews = <
       return {
         ...view,
         order: defaultOrderForKind(ViewKindEnum.ISOMETRIC)
-      };
-    }
-    if (kind === ViewKindEnum.PLAN_2D_V2) {
-      return {
-        ...view,
-        order: defaultOrderForKind(ViewKindEnum.PLAN_2D_V2)
       };
     }
     if (kind === ViewKindEnum.PLAN_2D && view.id === primaryPlan?.id) {
@@ -245,7 +199,7 @@ export const getProjectTabs = (views: View[]): ProjectTab[] => {
     });
 };
 
-/** Primary Plan view (lowest-order PLAN_2D) — feeds 2Dv2 sync. */
+/** Primary Plan view (lowest-order PLAN_2D) */
 export const findPrimaryPlanView = (views: View[]): View | null => {
   const plans = views
     .filter((view) => {
@@ -290,12 +244,11 @@ export const createPlan2dTab = (views: View[], name?: string): View => {
   });
 };
 
-/** Blank project with the three default modular tabs. */
+/** Blank project with the modular tabs. */
 export const createEmptyProject = (
   title = 'Untitled project'
 ): InitialData => {
   const planId = generateId();
-  const v2Id = generateId();
   const isoId = generateId();
 
   return {
@@ -319,12 +272,6 @@ export const createEmptyProject = (
         name: PLAN_2D_VIEW_NAME,
         kind: ViewKindEnum.PLAN_2D,
         order: defaultOrderForKind(ViewKindEnum.PLAN_2D)
-      }),
-      emptyView({
-        id: v2Id,
-        name: PLAN_2D_V2_VIEW_NAME,
-        kind: ViewKindEnum.PLAN_2D_V2,
-        order: defaultOrderForKind(ViewKindEnum.PLAN_2D_V2)
       })
     ],
     view: isoId

@@ -7,11 +7,7 @@ import { useView } from 'src/hooks/useView';
 import { UiElement } from 'src/components/UiElement/UiElement';
 import {
   ViewKind,
-  ViewKindEnum,
-  build2Dv2SnapshotFromPlan,
   createPlan2dTab,
-  findPlanView,
-  findPlan2Dv2View,
   getProjectTabs,
   projectionModeForKind
 } from 'src/utils';
@@ -42,32 +38,6 @@ export const ViewModeTabs = () => {
     return getProjectTabs(views);
   }, [views]);
 
-  const sync2Dv2FromPlan = useCallback(() => {
-    const model = modelStore.getState();
-    const plan = findPlanView(model.views);
-    const v2 = findPlan2Dv2View(model.views);
-    if (!plan || !v2) return null;
-
-    const snapshot = build2Dv2SnapshotFromPlan({
-      plan,
-      modelItems: model.items
-    });
-
-    const nextViews = model.views.map((view) => {
-      if (view.id !== v2.id) return view;
-      return {
-        ...view,
-        items: snapshot.items,
-        connectors: snapshot.connectors,
-        rectangles: [],
-        textBoxes: []
-      };
-    });
-
-    modelActions.set({ views: nextViews });
-    return { ...model, views: nextViews };
-  }, [modelStore, modelActions]);
-
   const resetInteraction = useCallback(() => {
     uiStateActions.setItemControls(null);
     uiStateActions.setPortPipHover(null);
@@ -83,11 +53,7 @@ export const ViewModeTabs = () => {
       const mode = projectionModeForKind(kind);
       if (mode === projectionMode && viewId === activeViewId) return;
 
-      let nextModel = modelStore.getState();
-
-      if (kind === ViewKindEnum.PLAN_2D_V2) {
-        nextModel = sync2Dv2FromPlan() ?? nextModel;
-      }
+      const nextModel = modelStore.getState();
 
       const targetView = nextModel.views.find((view) => {
         return view.id === viewId;
@@ -99,10 +65,6 @@ export const ViewModeTabs = () => {
 
       uiStateActions.setProjectionMode(mode);
       resetInteraction();
-
-      if (kind === ViewKindEnum.PLAN_2D_V2) {
-        uiStateActions.setZoom(1);
-      }
     },
     [
       projectionMode,
@@ -110,7 +72,6 @@ export const ViewModeTabs = () => {
       uiStateActions,
       modelStore,
       changeView,
-      sync2Dv2FromPlan,
       resetInteraction
     ]
   );

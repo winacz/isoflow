@@ -297,6 +297,11 @@ export interface UiState {
    * Through-node dash coloring still applies.
    */
   simplePaths: boolean;
+  /**
+   * 2D connector path style for A* / geometric routing.
+   * ORTHOGONAL = 4-way, DIAGONAL = 8-way (√2 diagonal cost), STRAIGHT = port↔port.
+   */
+  routingStyle: 'ORTHOGONAL' | 'DIAGONAL' | 'STRAIGHT';
   /** Whether the Workshop view is currently active. */
   isWorkshopOpen: boolean;
   /**
@@ -365,6 +370,7 @@ export interface UiStateActions {
   setVlan1CableColor: (color: string | null) => void;
   setSimplePaths: (enabled: boolean) => void;
   toggleSimplePaths: () => void;
+  setRoutingStyle: (style: UiState['routingStyle']) => void;
   setWorkshopOpen: (isWorkshopOpen: boolean) => void;
   setRightSidebarOpen: (isOpen: boolean) => void;
   toggleRightSidebar: () => void;

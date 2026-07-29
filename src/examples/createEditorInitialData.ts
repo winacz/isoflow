@@ -3,9 +3,7 @@ import { DEFAULT_COLOR, SHAPES_2D } from 'src/config';
 import {
   generateId,
   ensureDeviceTemplateIcons,
-  build2Dv2SnapshotFromPlan,
   PLAN_2D_VIEW_NAME,
-  PLAN_2D_V2_VIEW_NAME,
   ISOMETRIC_VIEW_NAME,
   ViewKindEnum,
   defaultOrderForKind
@@ -15,8 +13,7 @@ import { createStartingTopology2d } from './startingTopology2d';
 
 export {
   ISOMETRIC_VIEW_NAME,
-  PLAN_2D_VIEW_NAME,
-  PLAN_2D_V2_VIEW_NAME
+  PLAN_2D_VIEW_NAME
 } from 'src/utils';
 
 /**
@@ -30,7 +27,6 @@ export const createEditorInitialData = (): InitialData => {
 
   const isometricViewId = isoView?.id ?? generateId();
   const planViewId = planView?.id ?? generateId();
-  const plan2Dv2ViewId = generateId();
 
   const deviceTemplates = plan.deviceTemplates ?? [];
 
@@ -78,10 +74,6 @@ export const createEditorInitialData = (): InitialData => {
     rectangles: planView?.rectangles ?? [],
     textBoxes: []
   };
-  const v2Snapshot = build2Dv2SnapshotFromPlan({
-    plan: planAsView,
-    modelItems: plan.items ?? []
-  });
 
   return {
     title: plan.title ?? isometricDemo.title ?? 'Isoflow',
@@ -94,16 +86,6 @@ export const createEditorInitialData = (): InitialData => {
     deviceTemplates,
     views: [
       planAsView,
-      {
-        id: plan2Dv2ViewId,
-        name: PLAN_2D_V2_VIEW_NAME,
-        kind: ViewKindEnum.PLAN_2D_V2,
-        order: defaultOrderForKind(ViewKindEnum.PLAN_2D_V2),
-        items: v2Snapshot.items,
-        connectors: [],
-        rectangles: v2Snapshot.rectangles,
-        textBoxes: []
-      },
       {
         id: isometricViewId,
         name: ISOMETRIC_VIEW_NAME,

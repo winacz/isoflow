@@ -1,11 +1,13 @@
 import React, { memo, useMemo } from 'react';
 import { useTheme, Box } from '@mui/material';
-import OpenWithOutlinedIcon from '@mui/icons-material/OpenWithOutlined';
+import SwapHorizOutlinedIcon from '@mui/icons-material/SwapHorizOutlined';
+import SwapVertOutlinedIcon from '@mui/icons-material/SwapVertOutlined';
 import { TILE_SIZE_2D, getShape2dPortIfaceName } from 'src/config';
 import {
   connectorPathTileToGlobal,
   getAnchorTile,
   findWaypointSegmentAtTile,
+  listOrthoSegmentHandles,
   splitConnectorPathByNodeBodies,
   buildConnectorSvgPathD,
   getConnectorRelationSummary,
@@ -16,6 +18,7 @@ import {
   TRUNK_MISMATCH_COLOR,
   CONNECTOR_JUMP_RADIUS_TILES,
   simplifyTilesForDraw,
+  CoordsUtils,
   type ConnectorJump
 } from 'src/utils';
 import { Circle } from 'src/components/Circle/Circle';
@@ -30,7 +33,7 @@ interface Props {
   connector: ReturnType<typeof useScene>['connectors'][0];
   jumps?: ConnectorJump[];
   isSelected?: boolean;
-  /** Emphasize line (e.g. linked to selected node) without showing waypoints */
+  /** Emphasize line (e.g. linked to selected node); also shows mid waypoints */
   isFocused?: boolean;
   /** Stronger than focus — stack handle hover target */
   isHighlighted?: boolean;
@@ -207,19 +210,26 @@ export const Connector2d = memo(({
     });
   }, [globalTiles, items, modelItems, endpointItemIds, softDim]);
 
-  const anchorPositions = useMemo(() => {
-    if (!isSelected) return [];
+  const showWaypoints = Boolean(isSelected || isFocused);
 
-    return connector.anchors.map((anchor) => {
-      const position = getAnchorTile(anchor, currentView, modelItems);
-      return {
-        id: anchor.id,
-        locked: Boolean(anchor.locked && anchor.ref.tile),
-        x: (position.x - bounds.minX) * TILE_SIZE_2D + TILE_SIZE_2D / 2,
-        y: (position.y - bounds.minY) * TILE_SIZE_2D + TILE_SIZE_2D / 2
-      };
-    });
-  }, [currentView, connector.anchors, bounds, isSelected, modelItems]);
+  /** Mid-tile "węzły" — grab handles (ports are endpoints, not shown here). */
+  const anchorPositions = useMemo(() => {
+    if (!showWaypoints) return [];
+
+    return connector.anchors
+      .filter((anchor) => {
+        return Boolean(anchor.ref.tile);
+      })
+      .map((anchor) => {
+        const position = getAnchorTile(anchor, currentView, modelItems);
+        return {
+          id: anchor.id,
+          locked: Boolean(anchor.locked && anchor.ref.tile),
+          x: (position.x - bounds.minX) * TILE_SIZE_2D + TILE_SIZE_2D / 2,
+          y: (position.y - bounds.minY) * TILE_SIZE_2D + TILE_SIZE_2D / 2
+        };
+      });
+  }, [currentView, connector.anchors, bounds, showWaypoints, modelItems]);
 
   const selectedWaypointPositions = useMemo(() => {
     if (selectedWaypointIds.length === 0) return [];
@@ -241,7 +251,7 @@ export const Connector2d = memo(({
   }, [selectedWaypointIds, connector.anchors, bounds]);
 
   const hoveredSegmentHandle = useMemo(() => {
-    if (!isSelected || !mouseTile) return null;
+    if (!isSelected || !mouseTile || connector.locked) return null;
 
     const segment = findWaypointSegmentAtTile({
       connectorId: connector.id,
@@ -253,16 +263,35 @@ export const Connector2d = memo(({
     if (!segment) return null;
 
     return {
-      id: segment.existingWaypointIds.join(':'),
-      x: (segment.mid.x - bounds.minX) * TILE_SIZE_2D + TILE_SIZE_2D / 2,
-      y: (segment.mid.y - bounds.minY) * TILE_SIZE_2D + TILE_SIZE_2D / 2
+      id: segment.existingWaypointIds.join(':') || 'port:port',
+      mid: segment.mid,
+      axis: segment.axis
     };
-  }, [isSelected, connector, mouseTile, bounds]);
+  }, [isSelected, connector, mouseTile]);
+
+  const segmentHandles = useMemo(() => {
+    if (!isSelected || connector.locked) return [];
+
+    return listOrthoSegmentHandles({
+      anchors: connector.anchors,
+      path: connector.path
+    }).map((handle) => {
+      return {
+        id: handle.id,
+        axis: handle.axis,
+        x: (handle.mid.x - bounds.minX) * TILE_SIZE_2D + TILE_SIZE_2D / 2,
+        y: (handle.mid.y - bounds.minY) * TILE_SIZE_2D + TILE_SIZE_2D / 2,
+        active:
+          hoveredSegmentHandle != null &&
+          CoordsUtils.isEqual(handle.mid, hoveredSegmentHandle.mid)
+      };
+    });
+  }, [isSelected, connector, bounds, hoveredSegmentHandle]);
 
   const connectorWidthPx = useMemo(() => {
-    const base = (TILE_SIZE_2D / 100) * connector.width * 1.25;
+    const base = (TILE_SIZE_2D / 100) * connector.width * 1.85;
     // Untagged links read clearer when slightly heavier
-    return isUntaggedLink ? base * 1.45 : base;
+    return isUntaggedLink ? base * 1.35 : base;
   }, [connector.width, isUntaggedLink]);
 
   const solidDashArray = useMemo(() => {
@@ -438,26 +467,31 @@ export const Connector2d = memo(({
           const lockedColor = '#ea580c';
           const stroke = anchor.locked
             ? lockedColor
-            : theme.palette.common.black;
+            : isSelected
+              ? theme.palette.common.black
+              : theme.palette.grey[700];
+          // Larger grab targets — easier to drag mid-path "węzły".
+          const outer = isSelected ? (anchor.locked ? 16 : 14) : 12;
+          const inner = isSelected ? (anchor.locked ? 11 : 10) : 8.5;
           return (
             <g key={anchor.id}>
               <Circle
                 tile={anchor}
-                radius={anchor.locked ? 12 : 10}
+                radius={outer}
                 fill={anchor.locked ? lockedColor : theme.palette.common.white}
-                fillOpacity={anchor.locked ? 0.28 : 0.7}
+                fillOpacity={anchor.locked ? 0.28 : isSelected ? 0.75 : 0.6}
               />
               <Circle
                 tile={anchor}
-                radius={anchor.locked ? 8 : 7}
+                radius={inner}
                 stroke={stroke}
                 fill={theme.palette.common.white}
-                strokeWidth={anchor.locked ? 3.5 : 3}
+                strokeWidth={isSelected ? (anchor.locked ? 3.5 : 3) : 2.75}
               />
               {anchor.locked && (
                 <Circle
                   tile={anchor}
-                  radius={3.5}
+                  radius={4}
                   fill={lockedColor}
                   fillOpacity={1}
                 />
@@ -469,13 +503,13 @@ export const Connector2d = memo(({
           <g key={`wp-sel-${anchor.id}`}>
             <Circle
               tile={anchor}
-              radius={9}
+              radius={12}
               fill={theme.palette.primary.main}
               fillOpacity={0.25}
             />
             <Circle
               tile={anchor}
-              radius={6}
+              radius={8}
               stroke={theme.palette.primary.main}
               fill={theme.palette.common.white}
               strokeWidth={3}
@@ -484,39 +518,49 @@ export const Connector2d = memo(({
         ))}
       </Svg>
 
-      {hoveredSegmentHandle && (
-        <Box
-          sx={{
-            position: 'absolute',
-            left: hoveredSegmentHandle.x,
-            top: hoveredSegmentHandle.y,
-            // Counter SceneLayer zoom + grow when zoomed out (same idea as stack handles)
-            transform: `translate(-50%, -50%) scale(${Math.min(
-              1.5,
-              Math.max(1, Math.pow(1 / Math.max(zoom, 0.12), 0.35))
-            ) / Math.max(zoom, 0.08)})`,
-            transformOrigin: 'center center',
-            width: 24,
-            height: 24,
-            borderRadius: '4px',
-            bgcolor: theme.palette.common.white,
-            border: `1.5px solid ${handleColor}`,
-            boxShadow: '0 1px 4px rgba(0,0,0,0.2)',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            pointerEvents: 'none',
-            zIndex: 3
-          }}
-        >
-          <OpenWithOutlinedIcon
+      {segmentHandles.map((handle) => {
+        const size = handle.active ? 24 : 18;
+        const iconSize = handle.active ? 16 : 12;
+        const Icon =
+          handle.axis === 'H' ? SwapVertOutlinedIcon : SwapHorizOutlinedIcon;
+        return (
+          <Box
+            key={handle.id}
             sx={{
-              fontSize: 16,
-              color: handleColor
+              position: 'absolute',
+              left: handle.x,
+              top: handle.y,
+              // Counter SceneLayer zoom + grow when zoomed out (same idea as stack handles)
+              transform: `translate(-50%, -50%) scale(${Math.min(
+                1.5,
+                Math.max(1, Math.pow(1 / Math.max(zoom, 0.12), 0.35))
+              ) / Math.max(zoom, 0.08)})`,
+              transformOrigin: 'center center',
+              width: size,
+              height: size,
+              borderRadius: '4px',
+              bgcolor: theme.palette.common.white,
+              border: `${handle.active ? 1.5 : 1}px solid ${handleColor}`,
+              boxShadow: handle.active
+                ? '0 1px 4px rgba(0,0,0,0.2)'
+                : '0 1px 2px rgba(0,0,0,0.12)',
+              opacity: handle.active ? 1 : 0.72,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              pointerEvents: 'none',
+              zIndex: handle.active ? 3 : 2
             }}
-          />
-        </Box>
-      )}
+          >
+            <Icon
+              sx={{
+                fontSize: iconSize,
+                color: handleColor
+              }}
+            />
+          </Box>
+        );
+      })}
     </Box>
   );
 });

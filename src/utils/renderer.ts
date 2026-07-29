@@ -1063,13 +1063,19 @@ interface GetConnectorPath {
   modelItems?: { id: string; icon?: string }[];
   /** Prefer 90° routing (no diagonal steps). */
   orthogonal?: boolean;
+  /** Optional shared cable-avoidance costs (global `${x},${y}` keys). */
+  costMap?: Map<string, number>;
+  /** Apply RJ45 exit bias on the first segment. */
+  portExitPenalty?: boolean;
 }
 
 export const getConnectorPath = ({
   anchors,
   view,
   modelItems,
-  orthogonal = false
+  orthogonal = false,
+  costMap,
+  portExitPenalty = false
 }: GetConnectorPath): {
   tiles: Coords[];
   rectangle: Rect;
@@ -1117,6 +1123,26 @@ export const getConnectorPath = ({
     };
     const segmentSize = getBoundingBoxSize(segmentArea);
 
+    let localCost: Map<string, number> | undefined;
+    if (costMap && costMap.size > 0) {
+      localCost = new Map();
+      const { lowX, lowY, highX, highY } = segmentSorted;
+      for (let gx = lowX; gx <= highX; gx += 1) {
+        for (let gy = lowY; gy <= highY; gy += 1) {
+          const penalty = costMap.get(`${gx},${gy}`);
+          if (!penalty) continue;
+          const local = normalisePositionFromOrigin({
+            position: { x: gx, y: gy },
+            origin: segmentOrigin
+          });
+          localCost.set(
+            `${Math.round(local.x)},${Math.round(local.y)}`,
+            penalty
+          );
+        }
+      }
+    }
+
     const segmentPath = findPath({
       from: normalisePositionFromOrigin({
         position: fromGlobal,
@@ -1127,7 +1153,9 @@ export const getConnectorPath = ({
         origin: segmentOrigin
       }),
       gridSize: segmentSize,
-      orthogonal
+      orthogonal,
+      costMap: localCost,
+      portExitPenalty: portExitPenalty && i === 1
     }).map((tile) => {
       const global = CoordsUtils.subtract(segmentOrigin, tile);
       return toPathLocal(global);
@@ -1206,8 +1234,8 @@ export const materializeAlgorithmConnectorPath = ({
 };
 
 /**
- * Drag-time path: only the consecutive anchor tiles (no A* / no L-fill).
- * Cheap O(anchors) preview — call getConnectorPath on mouseup for the real route.
+ * Path through anchors for 2D / drag preview.
+ * Each leg is H/V (axis fill) or 45°+stub — never a free-angle chord.
  */
 export const getConnectorPathPreview = ({
   anchors,
@@ -1240,15 +1268,29 @@ export const getConnectorPathPreview = ({
     to: { x: sorted.lowX, y: sorted.lowY }
   };
 
-  const tiles: Coords[] = [];
-  anchorPosition.forEach((position) => {
-    const local = normalisePositionFromOrigin({
-      position,
+  const toPathLocal = (global: Coords): Coords => {
+    return normalisePositionFromOrigin({
+      position: global,
       origin: rectangle.from
     });
-    const prev = tiles[tiles.length - 1];
-    if (prev && CoordsUtils.isEqual(prev, local)) return;
-    tiles.push(local);
+  };
+
+  let globalTiles: Coords[] = [];
+  for (let i = 1; i < anchorPosition.length; i += 1) {
+    const from = anchorPosition[i - 1];
+    const to = anchorPosition[i];
+    const segment =
+      from.x === to.x || from.y === to.y
+        ? axisAlignedLineTiles(from, to)
+        : buildDiagonalAwareTiles(from, to);
+    globalTiles =
+      globalTiles.length === 0
+        ? segment
+        : [...globalTiles, ...segment.slice(1)];
+  }
+
+  const tiles = globalTiles.map((position) => {
+    return toPathLocal(position);
   });
 
   return { tiles, rectangle };

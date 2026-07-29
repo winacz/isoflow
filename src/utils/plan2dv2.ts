@@ -21,7 +21,6 @@ import {
 } from './patchPanel';
 
 export const PLAN_2D_VIEW_NAME = 'Plan';
-export const PLAN_2D_V2_VIEW_NAME = '2Dv2';
 export const ISOMETRIC_VIEW_NAME = 'Isometric';
 
 /** Switches (templates + builtin) and cabinets — not PCs / hosts. */
@@ -73,38 +72,6 @@ export const findPlanView = (views: View[]): View | null => {
   return findPlan2dViewByName(views, PLAN_2D_VIEW_NAME);
 };
 
-export const findPlan2Dv2View = (views: View[]): View | null => {
-  const byKind = views.find((view) => {
-    return view.kind === 'PLAN_2D_V2';
-  });
-  if (byKind) return byKind;
-  return findPlan2dViewByName(views, PLAN_2D_V2_VIEW_NAME);
-};
-
-/**
- * Copy Plan layout into a 2Dv2 snapshot: all nodes + areas, no cables.
- * Link state (connected RJ45) is still resolved from Plan connectors at render time.
- */
-export const build2Dv2SnapshotFromPlan = ({
-  plan
-}: {
-  plan: View;
-  /** Kept for call-site compatibility; items are no longer filtered by type. */
-  modelItems?: ModelItem[];
-}): {
-  items: ViewItem[];
-  rectangles: Rectangle[];
-  connectors: Connector[];
-  textBoxes: NonNullable<View['textBoxes']>;
-} => {
-  return {
-    items: [...(plan.items ?? [])],
-    rectangles: [...(plan.rectangles ?? [])],
-    connectors: [],
-    textBoxes: []
-  };
-};
-
 export type PeerEndpoint = {
   itemId: string;
   portId: string | null;
@@ -112,7 +79,7 @@ export type PeerEndpoint = {
 
 /**
  * Other end of a cable attached to `itemId`+`portId` in `connectors`
- * (usually the Plan view — 2Dv2 has no connectors of its own).
+ * (usually the Plan view).
  */
 export const findPeerEndpoint = ({
   connectors,
