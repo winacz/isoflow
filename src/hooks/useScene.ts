@@ -1205,6 +1205,15 @@ export const useScene = () => {
     ]
   );
 
+  /** Soft compat for leftover Algorithms UI — no-op after routing restore. */
+  const recalculateAllRoutes = useCallback(() => {
+    // Restored path tooling does not use the occupancy A* recalculate pass.
+  }, []);
+
+  const arrangeSelectedNodes = useCallback((_ids: string[]) => {
+    // Restored path tooling does not use arrangeNodesWithinSelection.
+  }, []);
+
   const createConnector = useCallback(
     (newConnector: Connector) => {
       const newState = reducers.view({
@@ -1401,6 +1410,8 @@ export const useScene = () => {
       runClaudeSortForItems,
       regenerateRoutesForItems,
       setSimplePathsMode,
+      recalculateAllRoutes,
+      arrangeSelectedNodes,
       deleteViewItem,
       createConnector,
       updateConnector,
@@ -1442,6 +1453,8 @@ export const useScene = () => {
       runClaudeSortForItems,
       regenerateRoutesForItems,
       setSimplePathsMode,
+      recalculateAllRoutes,
+      arrangeSelectedNodes,
       deleteViewItem,
       createConnector,
       updateConnector,

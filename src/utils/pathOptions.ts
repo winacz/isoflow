@@ -38,6 +38,19 @@ export const isSimplePathsEnabled = () => {
   return simplePathsEnabled;
 };
 
+/** Soft compat for leftover Algorithms UI / routingEngine stubs. */
+export type RoutingStyle = 'ORTHOGONAL' | 'DIAGONAL' | 'STRAIGHT';
+
+let routingStyle: RoutingStyle = 'ORTHOGONAL';
+
+export const setRoutingStyleEnabled = (style: RoutingStyle) => {
+  routingStyle = style;
+};
+
+export const getRoutingStyle = (): RoutingStyle => {
+  return routingStyle;
+};
+
 /** Lock a tile to horizontal or vertical movement from `origin`. */
 export const axisLockTile = (tile: Coords, origin: Coords): Coords => {
   const dx = Math.abs(tile.x - origin.x);

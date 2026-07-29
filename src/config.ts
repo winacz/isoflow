@@ -584,7 +584,8 @@ export const INITIAL_UI_STATE = {
     }
   },
   vlan1CableColor: null as string | null,
-  simplePaths: false
+  simplePaths: false,
+  routingStyle: 'ORTHOGONAL' as const
 };
 export const INITIAL_SCENE_STATE = {
   connectors: {},

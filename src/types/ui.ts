@@ -297,6 +297,10 @@ export interface UiState {
    * Through-node dash coloring still applies.
    */
   simplePaths: boolean;
+  /**
+   * Soft compat for leftover Algorithms UI (no-op with restored path tooling).
+   */
+  routingStyle: 'ORTHOGONAL' | 'DIAGONAL' | 'STRAIGHT';
   /** Whether the Workshop view is currently active. */
   isWorkshopOpen: boolean;
   /**
@@ -365,6 +369,7 @@ export interface UiStateActions {
   setVlan1CableColor: (color: string | null) => void;
   setSimplePaths: (enabled: boolean) => void;
   toggleSimplePaths: () => void;
+  setRoutingStyle: (style: UiState['routingStyle']) => void;
   setWorkshopOpen: (isWorkshopOpen: boolean) => void;
   setRightSidebarOpen: (isOpen: boolean) => void;
   toggleRightSidebar: () => void;

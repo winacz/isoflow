@@ -1,7 +1,6 @@
 /**
- * Algorithms UI removed — connections are direct point↔point only.
- * Stack badges for overlapping cables remain in ConnectorStackBadges.
- * This module is kept as a no-op stub so old imports do not break.
+ * Algorithms UI removed — connections use the restored 75f221e path tooling
+ * (MultiNodeControls / Porządkuj). Kept as a no-op stub so old imports do not break.
  */
 
 export const AlgorithmsToolButton = () => {
