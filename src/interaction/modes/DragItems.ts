@@ -1208,7 +1208,11 @@ export const DragItems: ModeActions = {
           });
         });
         const excludeIds = [...moveIds];
-        const gridStep = getGridSnapStep(uiState.gridStyle);
+        // Floor "rack" grid is 1U×1U (9 tiles) — only for cabinets aligning to
+        // the rack floor. Hosts / phones / switches must snap to the 1-tile
+        // plan grid or a short drag jumps them by ~9 cells and wrecks the layout.
+        const rackFloorStep = getGridSnapStep(uiState.gridStyle);
+        const planStep = { x: 1, y: 1 };
 
         const finalTiles: Record<string, Coords> = { ...live.tiles };
         const patches: Record<
@@ -1251,7 +1255,7 @@ export const DragItems: ModeActions = {
           let resolvedTile: Coords;
           if (willBeMounted) {
             // Cabinet slots are exact 1U positions — never apply RACK floor grid.
-            resolvedTile = snapTile2dToGrid(liveTile, { x: 1, y: 1 });
+            resolvedTile = snapTile2dToGrid(liveTile, planStep);
           } else {
             const size = getModelItemSize(modelItem ?? {}) ??
               getShape2dSize(modelItem?.icon ?? '') ?? {
@@ -1261,7 +1265,8 @@ export const DragItems: ModeActions = {
             const childIds = isCabinet
               ? getMountedChildren(id, scene.items).map((child) => child.id)
               : [];
-            const desired = snapTile2dToGrid(liveTile, gridStep);
+            const snapStep = isCabinet ? rackFloorStep : planStep;
+            const desired = snapTile2dToGrid(liveTile, snapStep);
             const itemsForCollision = scene.items.map((item) => {
               return {
                 ...item,
@@ -1271,7 +1276,7 @@ export const DragItems: ModeActions = {
             resolvedTile =
               resolveShape2dDragOrigin({
                 desired,
-                current: liveTile,
+                current: snapTile2dToGrid(liveTile, planStep),
                 size,
                 items: itemsForCollision,
                 modelItems: freshModel.items,
