@@ -154,6 +154,28 @@ export const axisAlignedLineTiles = (from: Coords, to: Coords): Coords[] => {
   ];
 };
 
+/**
+ * Ortho L that prefers a sideways run first whenever the target is not on the
+ * same column — exit right/left at source Y, then vertical. Only when targets
+ * share X do we dive vertically first.
+ */
+export const sideFirstOrthoTiles = (from: Coords, to: Coords): Coords[] => {
+  const a = { x: Math.round(from.x), y: Math.round(from.y) };
+  const b = { x: Math.round(to.x), y: Math.round(to.y) };
+
+  if (a.x === b.x || a.y === b.y) {
+    return axisAlignedLineTiles(a, b);
+  }
+
+  // Always sideways-first when there is any horizontal delta (user: "w prawo").
+  const bend = { x: b.x, y: a.y };
+
+  return [
+    ...axisAlignedLineTiles(a, bend),
+    ...axisAlignedLineTiles(bend, b).slice(1)
+  ];
+};
+
 /** Full orthogonal tile path using at most two elbows (L or U). */
 export const buildOrthogonalTiles = (
   from: Coords,

@@ -1,13 +1,9 @@
 import React, { memo, useMemo } from 'react';
 import { useTheme, Box } from '@mui/material';
-import SwapHorizOutlinedIcon from '@mui/icons-material/SwapHorizOutlined';
-import SwapVertOutlinedIcon from '@mui/icons-material/SwapVertOutlined';
 import { TILE_SIZE_2D, getShape2dPortIfaceName } from 'src/config';
 import {
   connectorPathTileToGlobal,
   getAnchorTile,
-  findWaypointSegmentAtTile,
-  listOrthoSegmentHandles,
   splitConnectorPathByNodeBodies,
   buildConnectorSvgPathD,
   getConnectorRelationSummary,
@@ -18,7 +14,6 @@ import {
   TRUNK_MISMATCH_COLOR,
   CONNECTOR_JUMP_RADIUS_TILES,
   simplifyTilesForDraw,
-  CoordsUtils,
   type ConnectorJump
 } from 'src/utils';
 import { Circle } from 'src/components/Circle/Circle';
@@ -60,14 +55,6 @@ export const Connector2d = memo(({
   const connector = useConnector(_connector.id);
   const modelItems = useModelStore((state) => {
     return state.items;
-  });
-  // Mouse only when selected (segment hover handle) — locked cables stay fixed.
-  const mouseTile = useUiStateStore((state) => {
-    return isSelected && !connector.locked ? state.mouse.position.tile : null;
-  });
-  // Zoom for segment drag handle (selected cable only).
-  const zoom = useUiStateStore((state) => {
-    return isSelected && !connector.locked ? state.zoom : 1;
   });
   const selectedWaypointIds = useUiStateStore((state) => {
     return state.selectedWaypointIds;
@@ -249,44 +236,6 @@ export const Connector2d = memo(({
         };
       });
   }, [selectedWaypointIds, connector.anchors, bounds]);
-
-  const hoveredSegmentHandle = useMemo(() => {
-    if (!isSelected || !mouseTile || connector.locked) return null;
-
-    const segment = findWaypointSegmentAtTile({
-      connectorId: connector.id,
-      anchors: connector.anchors,
-      path: connector.path,
-      tile: mouseTile
-    });
-
-    if (!segment) return null;
-
-    return {
-      id: segment.existingWaypointIds.join(':') || 'port:port',
-      mid: segment.mid,
-      axis: segment.axis
-    };
-  }, [isSelected, connector, mouseTile]);
-
-  const segmentHandles = useMemo(() => {
-    if (!isSelected || connector.locked) return [];
-
-    return listOrthoSegmentHandles({
-      anchors: connector.anchors,
-      path: connector.path
-    }).map((handle) => {
-      return {
-        id: handle.id,
-        axis: handle.axis,
-        x: (handle.mid.x - bounds.minX) * TILE_SIZE_2D + TILE_SIZE_2D / 2,
-        y: (handle.mid.y - bounds.minY) * TILE_SIZE_2D + TILE_SIZE_2D / 2,
-        active:
-          hoveredSegmentHandle != null &&
-          CoordsUtils.isEqual(handle.mid, hoveredSegmentHandle.mid)
-      };
-    });
-  }, [isSelected, connector, bounds, hoveredSegmentHandle]);
 
   const connectorWidthPx = useMemo(() => {
     const base = (TILE_SIZE_2D / 100) * connector.width * 1.85;
@@ -517,50 +466,6 @@ export const Connector2d = memo(({
           </g>
         ))}
       </Svg>
-
-      {segmentHandles.map((handle) => {
-        const size = handle.active ? 24 : 18;
-        const iconSize = handle.active ? 16 : 12;
-        const Icon =
-          handle.axis === 'H' ? SwapVertOutlinedIcon : SwapHorizOutlinedIcon;
-        return (
-          <Box
-            key={handle.id}
-            sx={{
-              position: 'absolute',
-              left: handle.x,
-              top: handle.y,
-              // Counter SceneLayer zoom + grow when zoomed out (same idea as stack handles)
-              transform: `translate(-50%, -50%) scale(${Math.min(
-                1.5,
-                Math.max(1, Math.pow(1 / Math.max(zoom, 0.12), 0.35))
-              ) / Math.max(zoom, 0.08)})`,
-              transformOrigin: 'center center',
-              width: size,
-              height: size,
-              borderRadius: '4px',
-              bgcolor: theme.palette.common.white,
-              border: `${handle.active ? 1.5 : 1}px solid ${handleColor}`,
-              boxShadow: handle.active
-                ? '0 1px 4px rgba(0,0,0,0.2)'
-                : '0 1px 2px rgba(0,0,0,0.12)',
-              opacity: handle.active ? 1 : 0.72,
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              pointerEvents: 'none',
-              zIndex: handle.active ? 3 : 2
-            }}
-          >
-            <Icon
-              sx={{
-                fontSize: iconSize,
-                color: handleColor
-              }}
-            />
-          </Box>
-        );
-      })}
     </Box>
   );
 });

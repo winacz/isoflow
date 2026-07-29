@@ -349,8 +349,9 @@ export const MultiNodeControls = () => {
                 sx={{ fontSize: 10, color: 'text.secondary', mt: 0.75 }}
               >
                 Pion/poziom: przy sobie → z odstępem → max 5. Siatka: przy
-                sobie → z odstępem. Ścieżki: jak „Porządkuj”, potem auto
-                (domyślne proste kable) → orto / diago w równoległych torach.
+                sobie → z odstępem. Ścieżki: najpierw zamiana node’ów
+                miejscami, potem auto (A* + occupancy: bez nakładań /
+                przecięć) → orto / diago.
               </Typography>
             </Box>
 

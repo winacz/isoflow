@@ -13,24 +13,46 @@ const MAX_ASTAR_CELLS = 24_000;
 
 /**
  * Extra g-cost for a tile already used by another cable.
- * High enough that A* prefers a parallel lane over stacking.
+ * High enough that A* prefers a parallel lane over stacking / crossing.
  */
-export const CABLE_TILE_PENALTY = 80;
+export const CABLE_TILE_PENALTY = 250;
 
-/** Soft buffer on orthogonal neighbours of a claimed cable tile. */
-export const CABLE_NEIGHBOR_PENALTY = 10;
+/**
+ * Soft buffer on orthogonal neighbours of a claimed cable tile.
+ * Keep near-zero so parallel corridors stay attractive.
+ */
+export const CABLE_NEIGHBOR_PENALTY = 2;
 
 /** Hard obstacle cost for tiles under device bodies (ports stay clear). */
 export const NODE_TILE_PENALTY = 1000;
 
+/**
+ * Cost for traversing an edge already used by another cable.
+ * Dominant anti-stacking signal — forces a 1-tile parallel offset.
+ */
+export const SHARED_EDGE_PENALTY = 500;
+
+/**
+ * Extra cost when entering a cable tile on a perpendicular step
+ * (orthogonal crossing through an occupied corridor).
+ */
+export const CROSSING_PENALTY = 350;
+
 /** Extra g-cost when the step changes direction (kills zigzags). */
-export const BEND_PENALTY = 15;
+export const BEND_PENALTY = 12;
 
 /** Orthogonal stub length leaving / entering a port before free routing. */
 export const FAN_OUT_LENGTH = 2;
 
 /** Penalty for leaving a port upward (world −Y) during fan-out / early steps. */
 const PORT_UP_PENALTY = 20;
+
+/** Undirected edge key in the same space as costMap tiles. */
+export const pathEdgeKey = (a: Coords, b: Coords): string => {
+  const aKey = `${a.x},${a.y}`;
+  const bKey = `${b.x},${b.y}`;
+  return aKey < bKey ? `${aKey}|${bKey}` : `${bKey}|${aKey}`;
+};
 
 export type FindPathArgs = {
   gridSize: Size;
@@ -46,10 +68,19 @@ export type FindPathArgs = {
    */
   costMap?: Map<string, number>;
   /**
+   * Extra g-cost per undirected edge (`pathEdgeKey`). Shared-edge occupancy.
+   */
+  edgeCostMap?: Map<string, number>;
+  /**
    * When true, fan-out and early steps prefer world-DOWN / LEFT / RIGHT.
    * Local grid uses origin−global, so world +Y ⇒ local −Y.
    */
   portExitPenalty?: boolean;
+  /**
+   * Fan-out toward the other endpoint (sideways-first when Δx dominates).
+   * Overrides the RJ45-down bias — used by AUTO occupancy packing.
+   */
+  preferSideFirst?: boolean;
   /** Skip forced fan-out (internal / via segments). */
   skipFanOut?: boolean;
 };
@@ -86,14 +117,22 @@ const DIAG_DIRS: ReadonlyArray<readonly [number, number]> = [
 /**
  * Pick an orthogonal exit/entry direction in LOCAL segment space.
  * Prefers world-DOWN (local −Y), then toward the other endpoint on X, then up.
+ * When `preferSideFirst`, always exit toward the destination (Δx before Δy).
  */
 export const pickOrthoFanDir = (
   from: Coords,
   toward: Coords,
-  preferPortExit: boolean
+  preferPortExit: boolean,
+  preferSideFirst = false
 ): { dx: number; dy: number } => {
   const dx = Math.sign(toward.x - from.x);
   const dy = Math.sign(toward.y - from.y);
+
+  if (preferSideFirst) {
+    if (dx !== 0) return { dx, dy: 0 };
+    if (dy !== 0) return { dx: 0, dy };
+    return { dx: 1, dy: 0 };
+  }
 
   if (preferPortExit) {
     // local −Y = world DOWN (RJ45 usually on the bottom edge)
@@ -188,6 +227,7 @@ const findPathAStar = ({
   to,
   routingStyle,
   costMap,
+  edgeCostMap,
   portExitPenalty = false
 }: {
   gridSize: Size;
@@ -195,6 +235,7 @@ const findPathAStar = ({
   to: Coords;
   routingStyle: 'ORTHOGONAL' | 'DIAGONAL';
   costMap?: Map<string, number>;
+  edgeCostMap?: Map<string, number>;
   portExitPenalty?: boolean;
 }): Coords[] | null => {
   const width = Math.max(1, Math.round(gridSize.width));
@@ -327,6 +368,25 @@ const findPathAStar = ({
       const stepCost = dx !== 0 && dy !== 0 ? Math.SQRT2 : 1;
       let extra = costMap?.get(keyOf(nx, ny)) ?? 0;
 
+      // Shared-edge occupancy — dominant anti-stacking cost.
+      if (edgeCostMap && edgeCostMap.size > 0) {
+        const ek = pathEdgeKey(
+          { x: cur.x, y: cur.y },
+          { x: nx, y: ny }
+        );
+        const edgePenalty = edgeCostMap.get(ek) ?? 0;
+        extra += edgePenalty;
+
+        // Crossing: entering an occupied corridor tile on a perpendicular step.
+        // Horizontal move across a vertical-claimed tile (and vice versa).
+        if (edgePenalty === 0 && extra > 0 && (dx === 0 || dy === 0)) {
+          const tileCost = costMap?.get(keyOf(nx, ny)) ?? 0;
+          if (tileCost >= CABLE_TILE_PENALTY * 0.5) {
+            extra += CROSSING_PENALTY;
+          }
+        }
+      }
+
       // Bend penalty — prefer long straight runs.
       const hasPrevDir = cur.dirX !== 0 || cur.dirY !== 0;
       if (hasPrevDir && (cur.dirX !== dx || cur.dirY !== dy)) {
@@ -388,7 +448,9 @@ export const findPath = ({
   orthogonal = false,
   routingStyle: styleOverride,
   costMap,
+  edgeCostMap,
   portExitPenalty = false,
+  preferSideFirst = false,
   skipFanOut = false,
   gridSize
 }: FindPathArgs): Coords[] => {
@@ -424,8 +486,18 @@ export const findPath = ({
   let suffix: Coords[] = [];
 
   if (!skipFanOut) {
-    const outDir = pickOrthoFanDir(fromTile, toTile, portExitPenalty || true);
-    const inDir = pickOrthoFanDir(toTile, fromTile, portExitPenalty || true);
+    const outDir = pickOrthoFanDir(
+      fromTile,
+      toTile,
+      preferSideFirst ? false : portExitPenalty || true,
+      preferSideFirst
+    );
+    const inDir = pickOrthoFanDir(
+      toTile,
+      fromTile,
+      preferSideFirst ? false : portExitPenalty || true,
+      preferSideFirst
+    );
 
     const outWalk = walkOrtho(fromTile, outDir, FAN_OUT_LENGTH, bounds);
     const inWalk = walkOrtho(toTile, inDir, FAN_OUT_LENGTH, bounds);
@@ -451,7 +523,8 @@ export const findPath = ({
     to: routeTo,
     routingStyle: style === 'DIAGONAL' ? 'DIAGONAL' : 'ORTHOGONAL',
     costMap,
-    portExitPenalty
+    edgeCostMap,
+    portExitPenalty: preferSideFirst ? false : portExitPenalty
   });
 
   if (astar && astar.length > 0) {

@@ -3,8 +3,10 @@ import {
   CABLE_NEIGHBOR_PENALTY,
   CABLE_TILE_PENALTY,
   NODE_TILE_PENALTY,
+  SHARED_EDGE_PENALTY,
   buildStraightFanPath,
-  findPath
+  findPath,
+  pathEdgeKey
 } from './pathfinder';
 import {
   getRoutingStyle,
@@ -34,41 +36,69 @@ export type ConnectorPathResult = {
   rectangle: { from: Coords; to: Coords };
 };
 
+/** Shared occupancy for sequential cable packing (tiles + undirected edges). */
+export type OccupancyGrid = {
+  tiles: Map<string, number>;
+  edges: Map<string, number>;
+};
+
+/** Extra search pad so A* can detour around occupied corridors. */
+export const AUTO_SEARCH_PAD: Coords = { x: 12, y: 12 };
+
 const euclid = (a: Coords, b: Coords) => {
   const dx = a.x - b.x;
   const dy = a.y - b.y;
   return Math.sqrt(dx * dx + dy * dy);
 };
 
+export const createOccupancyGrid = (): OccupancyGrid => ({
+  tiles: new Map(),
+  edges: new Map()
+});
+
 /**
- * Mark a routed cable on the shared cost map.
+ * Mark a routed cable on the shared occupancy grid.
  * Endpoints (ports) stay cheap so other cables can still terminate there.
- * Neighbours get a softer buffer so parallel runs keep ~1 tile gap.
+ * Neighbours get a soft buffer; edges get a hard shared-edge penalty.
  */
 export const markPathOnCostMap = (
-  costMap: Map<string, number>,
+  costMap: Map<string, number> | OccupancyGrid,
   globalTiles: Coords[],
   penalty = CABLE_TILE_PENALTY,
-  neighborPenalty = CABLE_NEIGHBOR_PENALTY
+  neighborPenalty = CABLE_NEIGHBOR_PENALTY,
+  edgePenalty = SHARED_EDGE_PENALTY
 ) => {
+  const tiles = costMap instanceof Map ? costMap : costMap.tiles;
+  const edges = costMap instanceof Map ? null : costMap.edges;
+
   globalTiles.forEach((tile, index) => {
     const isEndpoint = index === 0 || index === globalTiles.length - 1;
-    if (isEndpoint) return;
+    if (!isEndpoint) {
+      const k = `${Math.round(tile.x)},${Math.round(tile.y)}`;
+      tiles.set(k, (tiles.get(k) ?? 0) + penalty);
 
-    const k = `${Math.round(tile.x)},${Math.round(tile.y)}`;
-    costMap.set(k, (costMap.get(k) ?? 0) + penalty);
+      if (neighborPenalty > 0) {
+        const orthos: Coords[] = [
+          { x: tile.x + 1, y: tile.y },
+          { x: tile.x - 1, y: tile.y },
+          { x: tile.x, y: tile.y + 1 },
+          { x: tile.x, y: tile.y - 1 }
+        ];
+        orthos.forEach((n) => {
+          const nk = `${Math.round(n.x)},${Math.round(n.y)}`;
+          tiles.set(nk, (tiles.get(nk) ?? 0) + neighborPenalty);
+        });
+      }
+    }
 
-    // Orthogonal neighbours only — keeps parallel lanes preferred over diagonal squeeze.
-    const orthos: Coords[] = [
-      { x: tile.x + 1, y: tile.y },
-      { x: tile.x - 1, y: tile.y },
-      { x: tile.x, y: tile.y + 1 },
-      { x: tile.x, y: tile.y - 1 }
-    ];
-    orthos.forEach((n) => {
-      const nk = `${Math.round(n.x)},${Math.round(n.y)}`;
-      costMap.set(nk, (costMap.get(nk) ?? 0) + neighborPenalty);
-    });
+    if (edges && index > 0) {
+      const prev = globalTiles[index - 1];
+      const ek = pathEdgeKey(
+        { x: Math.round(prev.x), y: Math.round(prev.y) },
+        { x: Math.round(tile.x), y: Math.round(tile.y) }
+      );
+      edges.set(ek, (edges.get(ek) ?? 0) + edgePenalty);
+    }
   });
 };
 
@@ -82,12 +112,13 @@ export const seedNodeObstacles = ({
   modelItems,
   clearTiles
 }: {
-  costMap: Map<string, number>;
+  costMap: Map<string, number> | OccupancyGrid;
   items: ViewItem[];
   modelItems: { id: string; icon?: string; portCount?: number }[];
   /** Tiles that must remain routable (connector endpoints / ports). */
   clearTiles?: Set<string>;
 }) => {
+  const tiles = costMap instanceof Map ? costMap : costMap.tiles;
   const modelById = new Map(modelItems.map((item) => [item.id, item]));
 
   items.forEach((item) => {
@@ -114,14 +145,14 @@ export const seedNodeObstacles = ({
         const k = `${gx},${gy}`;
         if (portKeys.has(k)) continue;
         if (clearTiles?.has(k)) continue;
-        costMap.set(k, Math.max(costMap.get(k) ?? 0, NODE_TILE_PENALTY));
+        tiles.set(k, Math.max(tiles.get(k) ?? 0, NODE_TILE_PENALTY));
       }
     }
   });
 };
 
-const pathRectangle = (anchorPosition: Coords[]) => {
-  const searchArea = getBoundingBox(anchorPosition, CONNECTOR_SEARCH_OFFSET);
+const pathRectangle = (anchorPosition: Coords[], pad: Coords) => {
+  const searchArea = getBoundingBox(anchorPosition, pad);
   const sorted = sortByPosition(searchArea);
   return {
     from: { x: sorted.highX, y: sorted.highY },
@@ -146,7 +177,7 @@ const buildStraightPathResult = ({
   const a = getAnchorTile(ends[0], view, modelItems);
   const b = getAnchorTile(ends[ends.length - 1], view, modelItems);
   const globalTiles = buildStraightFanPath(a, b, true);
-  const rectangle = pathRectangle(globalTiles);
+  const rectangle = pathRectangle(globalTiles, CONNECTOR_SEARCH_OFFSET);
   const tiles = globalTiles.map((tile) => {
     return normalisePositionFromOrigin({
       position: tile,
@@ -156,8 +187,85 @@ const buildStraightPathResult = ({
   return { tiles, rectangle };
 };
 
+const projectCostMapsToLocal = ({
+  occupancy,
+  segmentSorted,
+  segmentOrigin
+}: {
+  occupancy?: OccupancyGrid | Map<string, number>;
+  segmentSorted: { lowX: number; lowY: number; highX: number; highY: number };
+  segmentOrigin: Coords;
+}): { localTiles?: Map<string, number>; localEdges?: Map<string, number> } => {
+  if (!occupancy) return {};
+
+  const sourceTiles =
+    occupancy instanceof Map ? occupancy : occupancy.tiles;
+  const sourceEdges =
+    occupancy instanceof Map ? undefined : occupancy.edges;
+
+  if (sourceTiles.size === 0 && (!sourceEdges || sourceEdges.size === 0)) {
+    return {};
+  }
+
+  const localTiles = new Map<string, number>();
+  const { lowX, lowY, highX, highY } = segmentSorted;
+  for (let gx = lowX; gx <= highX; gx += 1) {
+    for (let gy = lowY; gy <= highY; gy += 1) {
+      const penalty = sourceTiles.get(`${gx},${gy}`);
+      if (!penalty) continue;
+      const local = normalisePositionFromOrigin({
+        position: { x: gx, y: gy },
+        origin: segmentOrigin
+      });
+      localTiles.set(`${Math.round(local.x)},${Math.round(local.y)}`, penalty);
+    }
+  }
+
+  let localEdges: Map<string, number> | undefined;
+  if (sourceEdges && sourceEdges.size > 0) {
+    localEdges = new Map();
+    sourceEdges.forEach((penalty, key) => {
+      const [aStr, bStr] = key.split('|');
+      const [ax, ay] = aStr.split(',').map(Number);
+      const [bx, by] = bStr.split(',').map(Number);
+      if (
+        ax < lowX - 1 ||
+        ax > highX + 1 ||
+        ay < lowY - 1 ||
+        ay > highY + 1 ||
+        bx < lowX - 1 ||
+        bx > highX + 1 ||
+        by < lowY - 1 ||
+        by > highY + 1
+      ) {
+        return;
+      }
+      const la = normalisePositionFromOrigin({
+        position: { x: ax, y: ay },
+        origin: segmentOrigin
+      });
+      const lb = normalisePositionFromOrigin({
+        position: { x: bx, y: by },
+        origin: segmentOrigin
+      });
+      localEdges!.set(
+        pathEdgeKey(
+          { x: Math.round(la.x), y: Math.round(la.y) },
+          { x: Math.round(lb.x), y: Math.round(lb.y) }
+        ),
+        penalty
+      );
+    });
+  }
+
+  return {
+    localTiles: localTiles.size > 0 ? localTiles : undefined,
+    localEdges: localEdges && localEdges.size > 0 ? localEdges : undefined
+  };
+};
+
 /**
- * Build a connector path using the active routing style + shared cost map.
+ * Build a connector path using the active routing style + shared occupancy.
  * Path tiles are stored in path-local coordinates (same as getConnectorPath).
  */
 export const getConnectorPathWithCostMap = ({
@@ -165,17 +273,26 @@ export const getConnectorPathWithCostMap = ({
   view,
   modelItems,
   costMap,
+  occupancy,
   routingStyle,
-  portExitPenalty = true
+  portExitPenalty = true,
+  preferSideFirst = false,
+  searchPad = CONNECTOR_SEARCH_OFFSET
 }: {
   anchors: Connector['anchors'];
   view: View;
   modelItems?: { id: string; icon?: string }[];
+  /** @deprecated Prefer `occupancy` — still accepted as tile-only map. */
   costMap?: Map<string, number>;
+  occupancy?: OccupancyGrid;
   routingStyle?: RoutingStyle;
   portExitPenalty?: boolean;
+  preferSideFirst?: boolean;
+  searchPad?: Coords;
 }): ConnectorPathResult => {
   const style = routingStyle ?? getRoutingStyle();
+  const grid: OccupancyGrid | Map<string, number> | undefined =
+    occupancy ?? costMap;
 
   if (anchors.length < 2) {
     throw new Error(
@@ -191,7 +308,7 @@ export const getConnectorPathWithCostMap = ({
     return getAnchorTile(anchor, view, modelItems);
   });
 
-  const rectangle = pathRectangle(anchorPosition);
+  const rectangle = pathRectangle(anchorPosition, searchPad);
 
   const toPathLocal = (global: Coords): Coords => {
     return normalisePositionFromOrigin({
@@ -206,10 +323,7 @@ export const getConnectorPathWithCostMap = ({
     const fromGlobal = anchorPosition[i - 1];
     const toGlobal = anchorPosition[i];
 
-    const segmentArea = getBoundingBox(
-      [fromGlobal, toGlobal],
-      CONNECTOR_SEARCH_OFFSET
-    );
+    const segmentArea = getBoundingBox([fromGlobal, toGlobal], searchPad);
     const segmentSorted = sortByPosition(segmentArea);
     const segmentOrigin = {
       x: segmentSorted.highX,
@@ -217,25 +331,11 @@ export const getConnectorPathWithCostMap = ({
     };
     const segmentSize = getBoundingBoxSize(segmentArea);
 
-    let localCost: Map<string, number> | undefined;
-    if (costMap && costMap.size > 0) {
-      localCost = new Map();
-      const { lowX, lowY, highX, highY } = segmentSorted;
-      for (let gx = lowX; gx <= highX; gx += 1) {
-        for (let gy = lowY; gy <= highY; gy += 1) {
-          const penalty = costMap.get(`${gx},${gy}`);
-          if (!penalty) continue;
-          const local = normalisePositionFromOrigin({
-            position: { x: gx, y: gy },
-            origin: segmentOrigin
-          });
-          localCost.set(
-            `${Math.round(local.x)},${Math.round(local.y)}`,
-            penalty
-          );
-        }
-      }
-    }
+    const { localTiles, localEdges } = projectCostMapsToLocal({
+      occupancy: grid,
+      segmentSorted,
+      segmentOrigin
+    });
 
     const isFirstSegment = i === 1;
     const isLastSegment = i === anchorPosition.length - 1;
@@ -253,8 +353,12 @@ export const getConnectorPathWithCostMap = ({
       }),
       gridSize: segmentSize,
       routingStyle: style,
-      costMap: localCost,
-      portExitPenalty: portExitPenalty && isFirstSegment,
+      costMap: localTiles,
+      edgeCostMap: localEdges,
+      portExitPenalty: preferSideFirst
+        ? false
+        : portExitPenalty && isFirstSegment,
+      preferSideFirst,
       skipFanOut: !useFanOut && anchorPosition.length > 2
     }).map((tile) => {
       const global = CoordsUtils.subtract(segmentOrigin, tile);
@@ -281,17 +385,22 @@ export const recalculateAllConnectorPaths = ({
   view,
   modelItems,
   routingStyle,
-  items
+  items,
+  preferSideFirst = false,
+  searchPad
 }: {
   connectors: Connector[];
   view: View;
   modelItems: { id: string; icon?: string; portCount?: number }[];
   routingStyle?: RoutingStyle;
   items?: ViewItem[];
+  preferSideFirst?: boolean;
+  searchPad?: Coords;
 }): Record<string, ConnectorPathResult> => {
   const style = routingStyle ?? getRoutingStyle();
-  const globalCostMap = new Map<string, number>();
+  const occupancy = createOccupancyGrid();
   const results: Record<string, ConnectorPathResult> = {};
+  const pad = searchPad ?? (preferSideFirst ? AUTO_SEARCH_PAD : CONNECTOR_SEARCH_OFFSET);
 
   const ranked = connectors
     .map((connector) => {
@@ -318,7 +427,7 @@ export const recalculateAllConnectorPaths = ({
   });
 
   seedNodeObstacles({
-    costMap: globalCostMap,
+    costMap: occupancy,
     items: items ?? view.items ?? [],
     modelItems,
     clearTiles
@@ -336,9 +445,11 @@ export const recalculateAllConnectorPaths = ({
             anchors,
             view,
             modelItems,
-            costMap: globalCostMap,
+            occupancy,
             routingStyle: style,
-            portExitPenalty: true
+            portExitPenalty: !preferSideFirst,
+            preferSideFirst,
+            searchPad: pad
           });
 
     results[connector.id] = path;
@@ -346,15 +457,15 @@ export const recalculateAllConnectorPaths = ({
     const globalTiles = path.tiles.map((tile) => {
       return connectorPathTileToGlobal(tile, path.rectangle.from);
     });
-    markPathOnCostMap(globalCostMap, globalTiles);
+    markPathOnCostMap(occupancy, globalTiles);
   });
 
   return results;
 };
 
 /**
- * Route a subset of cables (ortho/diag) with a shared cost map so paths do not
- * share tiles. Other cables' existing scene paths are seeded as soft obstacles.
+ * Route a subset of cables with a shared occupancy grid so paths do not
+ * share tiles/edges. Other cables' existing scene paths are seeded as obstacles.
  * Returns global tile polylines suitable for `applyConnectorRoutes`.
  */
 export const recalculateConnectorPathsForIds = ({
@@ -364,7 +475,9 @@ export const recalculateConnectorPathsForIds = ({
   modelItems,
   routingStyle,
   items,
-  existingPaths
+  existingPaths,
+  preferSideFirst = false,
+  searchPad
 }: {
   connectorIds: string[];
   connectors: Connector[];
@@ -374,6 +487,8 @@ export const recalculateConnectorPathsForIds = ({
   items?: ViewItem[];
   /** Scene connector paths for cables that stay put (soft obstacles). */
   existingPaths?: Record<string, { path?: ConnectorPathResult } | undefined>;
+  preferSideFirst?: boolean;
+  searchPad?: Coords;
 }): Record<string, Coords[]> => {
   const style = routingStyle ?? getRoutingStyle();
   const targetIds = new Set(connectorIds);
@@ -382,7 +497,8 @@ export const recalculateConnectorPathsForIds = ({
   });
   if (targets.length === 0) return {};
 
-  const globalCostMap = new Map<string, number>();
+  const occupancy = createOccupancyGrid();
+  const pad = searchPad ?? (preferSideFirst ? AUTO_SEARCH_PAD : CONNECTOR_SEARCH_OFFSET);
 
   // Seed obstacles from cables we are not re-routing.
   if (existingPaths) {
@@ -393,7 +509,7 @@ export const recalculateConnectorPathsForIds = ({
       const globalTiles = path.tiles.map((tile) => {
         return connectorPathTileToGlobal(tile, path.rectangle.from);
       });
-      markPathOnCostMap(globalCostMap, globalTiles);
+      markPathOnCostMap(occupancy, globalTiles);
     });
   }
 
@@ -408,7 +524,7 @@ export const recalculateConnectorPathsForIds = ({
   });
 
   seedNodeObstacles({
-    costMap: globalCostMap,
+    costMap: occupancy,
     items: items ?? view.items ?? [],
     modelItems,
     clearTiles
@@ -443,16 +559,18 @@ export const recalculateConnectorPathsForIds = ({
             anchors,
             view,
             modelItems,
-            costMap: globalCostMap,
+            occupancy,
             routingStyle: style,
-            portExitPenalty: true
+            portExitPenalty: !preferSideFirst,
+            preferSideFirst,
+            searchPad: pad
           });
 
     const globalTiles = path.tiles.map((tile) => {
       return connectorPathTileToGlobal(tile, path.rectangle.from);
     });
     routes[connector.id] = globalTiles;
-    markPathOnCostMap(globalCostMap, globalTiles);
+    markPathOnCostMap(occupancy, globalTiles);
   });
 
   return routes;
@@ -466,15 +584,21 @@ export const routeConnectorPath = ({
   view,
   modelItems,
   costMap,
+  occupancy,
   routingStyle,
-  orthogonal = false
+  orthogonal = false,
+  preferSideFirst = false,
+  searchPad
 }: {
   anchors: Connector['anchors'];
   view: View;
   modelItems?: { id: string; icon?: string }[];
   costMap?: Map<string, number>;
+  occupancy?: OccupancyGrid;
   routingStyle?: RoutingStyle;
   orthogonal?: boolean;
+  preferSideFirst?: boolean;
+  searchPad?: Coords;
 }): ConnectorPathResult => {
   const style =
     orthogonal || getRoutingStyle() === 'ORTHOGONAL'
@@ -485,13 +609,17 @@ export const routeConnectorPath = ({
     return buildStraightPathResult({ anchors, view, modelItems });
   }
 
-  if (costMap && costMap.size > 0) {
+  if ((occupancy && (occupancy.tiles.size > 0 || occupancy.edges.size > 0)) ||
+      (costMap && costMap.size > 0)) {
     return getConnectorPathWithCostMap({
       anchors,
       view,
       modelItems,
       costMap,
-      routingStyle: style
+      occupancy,
+      routingStyle: style,
+      preferSideFirst,
+      searchPad
     });
   }
 
@@ -500,6 +628,6 @@ export const routeConnectorPath = ({
     view,
     modelItems,
     orthogonal: style === 'ORTHOGONAL' || orthogonal,
-    portExitPenalty: true
+    portExitPenalty: !preferSideFirst
   });
 };

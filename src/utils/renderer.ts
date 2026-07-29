@@ -48,7 +48,8 @@ import {
 import { isPlanProjection } from './projection';
 import {
   axisAlignedLineTiles,
-  buildDiagonalAwareTiles
+  buildDiagonalAwareTiles,
+  sideFirstOrthoTiles
 } from './pathOptions';
 import { useScene } from 'src/hooks/useScene';
 
@@ -1235,7 +1236,8 @@ export const materializeAlgorithmConnectorPath = ({
 
 /**
  * Path through anchors for 2D / drag preview.
- * Each leg is H/V (axis fill) or 45°+stub — never a free-angle chord.
+ * H/V legs stay axis-filled; exact 45° legs use diagonal fill; other bends
+ * use sideways-first ortho L (exit right/left before diving).
  */
 export const getConnectorPathPreview = ({
   anchors,
@@ -1279,10 +1281,14 @@ export const getConnectorPathPreview = ({
   for (let i = 1; i < anchorPosition.length; i += 1) {
     const from = anchorPosition[i - 1];
     const to = anchorPosition[i];
+    const dx = Math.abs(to.x - from.x);
+    const dy = Math.abs(to.y - from.y);
     const segment =
       from.x === to.x || from.y === to.y
         ? axisAlignedLineTiles(from, to)
-        : buildDiagonalAwareTiles(from, to);
+        : dx === dy
+          ? buildDiagonalAwareTiles(from, to)
+          : sideFirstOrthoTiles(from, to);
     globalTiles =
       globalTiles.length === 0
         ? segment

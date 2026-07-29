@@ -18,7 +18,8 @@ import {
   getShape2dSize,
   getShape2dPorts
 } from 'src/config';
-import { isShape2dPlacementFree, snapTile2dToGrid } from './renderer';
+import { isShape2dPlacementFree, snapTile2dToGrid, isTileInShape2dBounds } from './renderer';
+import { axisAlignedLineTiles, buildDiagonalAwareTiles } from './pathOptions';
 import { isDeviceTemplateId } from './deviceTemplateRegistry';
 
 /** Next grid-aligned coordinate at or above `value`. */
@@ -523,11 +524,12 @@ const collectTidyEdges = ({
 /**
  * "Porządkuj": only permute selected nodes among their existing slots
  * (same footprint). Never invents new positions — so repeated clicks cannot
- * stack nodes.
+ * stack nodes / flip a horizontal row into a column.
  *
- * 1) Leaves of the same switch: assign slots by X to switch-port order
- *    (uncross the star using only current positions as slots).
- * 2) Same-footprint 2-opt swaps to cut any remaining straight-line crossings.
+ * 1) Leaves of the same switch: assign existing slots along the row/column
+ *    dominant axis to switch-port order (uncross the star).
+ * 2) Same-footprint search (exhaustive for tiny groups, else 2-opt) minimizing
+ *    straight-line crossings first, then Manhattan wire length.
  */
 export const tidyShape2dItems = ({
   selectedItems,
@@ -578,6 +580,7 @@ export const tidyShape2dItems = ({
     leafId: string;
     switchId: string;
     portWorldX: number;
+    portWorldY: number;
     sizeKey: string;
   };
 
@@ -616,6 +619,7 @@ export const tidyShape2dItems = ({
       leafId,
       switchId,
       portWorldX: switchTile.x + port.tile.x,
+      portWorldY: switchTile.y + port.tile.y,
       sizeKey: `${size.width}x${size.height}`
     });
   });
@@ -629,96 +633,198 @@ export const tidyShape2dItems = ({
     starGroups.set(key, group);
   });
 
+  const pointFor = (endpoint: TidyEdgeEndpoint): Coords | null => {
+    const tile = tiles.get(endpoint.itemId);
+    if (!tile) return null;
+
+    if (endpoint.portLocal) {
+      return {
+        x: tile.x + endpoint.portLocal.x,
+        y: tile.y + endpoint.portLocal.y
+      };
+    }
+
+    const size = sizeOf(endpoint.itemId);
+    return {
+      x: tile.x + size.width / 2,
+      y: tile.y + size.height / 2
+    };
+  };
+
+  const totalWireLength = () => {
+    return edges.reduce((sum, edge) => {
+      const pa = pointFor(edge.a);
+      const pb = pointFor(edge.b);
+      if (!pa || !pb) return sum;
+      return sum + Math.abs(pa.x - pb.x) + Math.abs(pa.y - pb.y);
+    }, 0);
+  };
+
+  /**
+   * Soft penalty: tiles of the straight/45° link that sit inside a foreign
+   * node body. Used only for slot search — drawing still goes through nodes.
+   */
+  const THROUGH_NODE_TILE_PENALTY = 3;
+
+  const totalThroughNodeTiles = () => {
+    let count = 0;
+
+    edges.forEach((edge) => {
+      const pa = pointFor(edge.a);
+      const pb = pointFor(edge.b);
+      if (!pa || !pb) return;
+
+      const from = { x: Math.round(pa.x), y: Math.round(pa.y) };
+      const to = { x: Math.round(pb.x), y: Math.round(pb.y) };
+      const pathTiles =
+        from.x === to.x || from.y === to.y
+          ? axisAlignedLineTiles(from, to)
+          : buildDiagonalAwareTiles(from, to);
+
+      const exclude = new Set([edge.a.itemId, edge.b.itemId]);
+
+      pathTiles.forEach((tile) => {
+        allItems.forEach((item) => {
+          if (exclude.has(item.id)) return;
+          const origin = tiles.get(item.id) ?? item.tile;
+          if (isTileInShape2dBounds(tile, origin, sizeOf(item.id))) {
+            count += 1;
+          }
+        });
+      });
+    });
+
+    return count;
+  };
+
+  const totalCrossings = () => {
+    const points = edges
+      .map((edge) => {
+        const pa = pointFor(edge.a);
+        const pb = pointFor(edge.b);
+        return pa && pb ? ([pa, pb] as const) : null;
+      })
+      .filter((entry): entry is readonly [Coords, Coords] => {
+        return Boolean(entry);
+      });
+
+    let count = 0;
+    for (let i = 0; i < points.length; i += 1) {
+      for (let j = i + 1; j < points.length; j += 1) {
+        const [a1, a2] = points[i];
+        const [b1, b2] = points[j];
+        // Shared endpoint is a join, not a crossing.
+        if (
+          (a1.x === b1.x && a1.y === b1.y) ||
+          (a1.x === b2.x && a1.y === b2.y) ||
+          (a2.x === b1.x && a2.y === b1.y) ||
+          (a2.x === b2.x && a2.y === b2.y)
+        ) {
+          continue;
+        }
+        if (segmentsIntersect(a1, a2, b1, b2)) {
+          count += 1;
+        }
+      }
+    }
+    return count;
+  };
+
+  /**
+   * Prefer zero crossings, then avoid running through other node bodies,
+   * then shortest straight links. Drawing is unchanged — this is slot search only.
+   */
+  const cost = () => {
+    return (
+      totalCrossings() * 10000 +
+      totalThroughNodeTiles() * THROUGH_NODE_TILE_PENALTY +
+      totalWireLength()
+    );
+  };
+
   starGroups.forEach((group) => {
     if (group.length < 2) return;
 
-    // Existing slots (current leaf tiles), ordered left→right.
-    const slots = group
-      .map((link) => {
-        return { ...tiles.get(link.leafId)! };
-      })
-      .sort((a, b) => {
-        if (a.x !== b.x) return a.x - b.x;
-        return a.y - b.y;
-      });
+    // Existing slots (current leaf tiles) — keep the same set of positions.
+    const slots = group.map((link) => {
+      return { ...tiles.get(link.leafId)! };
+    });
+    const xs = slots.map((slot) => slot.x);
+    const ys = slots.map((slot) => slot.y);
+    const spanX = Math.max(...xs) - Math.min(...xs);
+    const spanY = Math.max(...ys) - Math.min(...ys);
+    // Horizontal row → order by X; vertical column → by Y (never reshape).
+    const vertical = spanY > spanX;
 
-    // Leaves ordered by the switch port they connect to.
+    const sortedSlots = [...slots].sort((a, b) => {
+      if (vertical) {
+        if (a.y !== b.y) return a.y - b.y;
+        return a.x - b.x;
+      }
+      if (a.x !== b.x) return a.x - b.x;
+      return a.y - b.y;
+    });
+
+    // Leaves ordered by the switch port they connect to (same axis).
     const orderedLeaves = [...group].sort((a, b) => {
+      if (vertical) {
+        if (a.portWorldY !== b.portWorldY) return a.portWorldY - b.portWorldY;
+        if (a.portWorldX !== b.portWorldX) return a.portWorldX - b.portWorldX;
+        return a.leafId.localeCompare(b.leafId);
+      }
       if (a.portWorldX !== b.portWorldX) return a.portWorldX - b.portWorldX;
+      if (a.portWorldY !== b.portWorldY) return a.portWorldY - b.portWorldY;
       return a.leafId.localeCompare(b.leafId);
     });
 
     orderedLeaves.forEach((link, index) => {
-      tiles.set(link.leafId, { ...slots[index] });
+      tiles.set(link.leafId, { ...sortedSlots[index] });
     });
+
+    // Tiny stars: try every leaf↔slot assignment, keep best cost.
+    if (group.length <= 7) {
+      const leafIds = orderedLeaves.map((link) => link.leafId);
+      const slotCopies = sortedSlots.map((slot) => ({ ...slot }));
+      let bestCost = cost();
+      let bestAssign = leafIds.map((id) => ({
+        id,
+        tile: { ...tiles.get(id)! }
+      }));
+
+      const permute = (start: number) => {
+        if (start >= leafIds.length) {
+          leafIds.forEach((id, index) => {
+            tiles.set(id, { ...slotCopies[index] });
+          });
+          const candidate = cost();
+          if (candidate < bestCost) {
+            bestCost = candidate;
+            bestAssign = leafIds.map((id) => ({
+              id,
+              tile: { ...tiles.get(id)! }
+            }));
+          }
+          return;
+        }
+        for (let i = start; i < leafIds.length; i += 1) {
+          const tmp = leafIds[start];
+          leafIds[start] = leafIds[i];
+          leafIds[i] = tmp;
+          permute(start + 1);
+          leafIds[i] = leafIds[start];
+          leafIds[start] = tmp;
+        }
+      };
+
+      permute(0);
+      bestAssign.forEach(({ id, tile }) => {
+        tiles.set(id, tile);
+      });
+    }
   });
 
-  // --- Phase 2: 2-opt same-size swaps for remaining crossings ---
+  // --- Phase 2: 2-opt same-size swaps for remaining crossings / length ---
   if (edges.length > 0 && selectedItems.length >= 2) {
-    const pointFor = (endpoint: TidyEdgeEndpoint): Coords | null => {
-      const tile = tiles.get(endpoint.itemId);
-      if (!tile) return null;
-
-      if (endpoint.portLocal) {
-        return {
-          x: tile.x + endpoint.portLocal.x,
-          y: tile.y + endpoint.portLocal.y
-        };
-      }
-
-      const size = sizeOf(endpoint.itemId);
-      return {
-        x: tile.x + size.width / 2,
-        y: tile.y + size.height / 2
-      };
-    };
-
-    const totalWireLength = () => {
-      return edges.reduce((sum, edge) => {
-        const pa = pointFor(edge.a);
-        const pb = pointFor(edge.b);
-        if (!pa || !pb) return sum;
-        return sum + Math.abs(pa.x - pb.x) + Math.abs(pa.y - pb.y);
-      }, 0);
-    };
-
-    const totalCrossings = () => {
-      const points = edges
-        .map((edge) => {
-          const pa = pointFor(edge.a);
-          const pb = pointFor(edge.b);
-          return pa && pb ? ([pa, pb] as const) : null;
-        })
-        .filter((entry): entry is readonly [Coords, Coords] => {
-          return Boolean(entry);
-        });
-
-      let count = 0;
-      for (let i = 0; i < points.length; i += 1) {
-        for (let j = i + 1; j < points.length; j += 1) {
-          const [a1, a2] = points[i];
-          const [b1, b2] = points[j];
-          // Shared endpoint is a join, not a crossing.
-          if (
-            (a1.x === b1.x && a1.y === b1.y) ||
-            (a1.x === b2.x && a1.y === b2.y) ||
-            (a2.x === b1.x && a2.y === b1.y) ||
-            (a2.x === b2.x && a2.y === b2.y)
-          ) {
-            continue;
-          }
-          if (segmentsIntersect(a1, a2, b1, b2)) {
-            count += 1;
-          }
-        }
-      }
-      return count;
-    };
-
-    const cost = () => {
-      return totalCrossings() * 10000 + totalWireLength();
-    };
-
     const swapGroups = new Map<string, string[]>();
     selectedItems.forEach((item) => {
       const size = sizeOf(item.id);
@@ -732,7 +838,7 @@ export const tidyShape2dItems = ({
     let improved = true;
     let guard = 0;
 
-    while (improved && guard < 80) {
+    while (improved && guard < 120) {
       improved = false;
       guard += 1;
 

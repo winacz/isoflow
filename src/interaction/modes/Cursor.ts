@@ -439,6 +439,84 @@ const findTileWaypointAt = (
   return null;
 };
 
+/** True while idle hover shows ns/ew-resize over a draggable cable segment. */
+let segmentHoverCursor = false;
+
+const updateIdleSegmentCursor = ({
+  uiState,
+  scene,
+  model
+}: {
+  uiState: Parameters<ModeActionsAction>[0]['uiState'];
+  scene: ReturnType<typeof useScene>;
+  model: Parameters<ModeActionsAction>[0]['model'];
+}) => {
+  if (!isPlanProjection(uiState.projectionMode)) return;
+  if (uiState.mode.type !== 'CURSOR' || uiState.mode.mousedownItem) return;
+
+  const selectedConnectorId =
+    uiState.itemControls?.type === 'CONNECTOR'
+      ? uiState.itemControls.id
+      : null;
+
+  if (!selectedConnectorId) {
+    if (segmentHoverCursor) {
+      setWindowCursor('default');
+      segmentHoverCursor = false;
+    }
+    return;
+  }
+
+  const tile = uiState.mouse.position.tile;
+
+  // Waypoints keep the default cursor (grab is for the WP itself).
+  if (resolveWaypointAtTile(tile, scene)) {
+    if (segmentHoverCursor) {
+      setWindowCursor('default');
+      segmentHoverCursor = false;
+    }
+    return;
+  }
+
+  const sceneConnector = scene.connectors.find((con) => {
+    return con.id === selectedConnectorId;
+  });
+  const freshConnector = model.actions
+    .get()
+    .views.find((view) => {
+      return view.id === uiState.view;
+    })
+    ?.connectors?.find((con) => {
+      return con.id === selectedConnectorId;
+    });
+
+  if (!sceneConnector || sceneConnector.locked || freshConnector?.locked) {
+    if (segmentHoverCursor) {
+      setWindowCursor('default');
+      segmentHoverCursor = false;
+    }
+    return;
+  }
+
+  const segment = findWaypointSegmentAtTile({
+    connectorId: selectedConnectorId,
+    anchors: freshConnector?.anchors ?? sceneConnector.anchors,
+    path: sceneConnector.path,
+    tile
+  });
+
+  if (segment) {
+    setWindowCursor(segment.axis === 'H' ? 'ns-resize' : 'ew-resize');
+    segmentHoverCursor = true;
+    return;
+  }
+
+  if (segmentHoverCursor) {
+    setWindowCursor('default');
+    segmentHoverCursor = false;
+  }
+};
+
 const isTileOnDeviceBody = (
   tile: Coords,
   scene: ReturnType<typeof useScene>,
@@ -765,7 +843,12 @@ export const Cursor: ModeActions = {
     }
   },
   mousemove: ({ scene, uiState, model }) => {
-    if (uiState.mode.type !== 'CURSOR' || !hasMovedTile(uiState.mouse)) return;
+    if (uiState.mode.type !== 'CURSOR') return;
+
+    // Segment drag affordance: double-arrow cursor on H/V spans (no handle UI).
+    updateIdleSegmentCursor({ uiState, scene, model });
+
+    if (!hasMovedTile(uiState.mouse)) return;
 
     // 2D: drag from an empty port → start connector tool from that port
     if (

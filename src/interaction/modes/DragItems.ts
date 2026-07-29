@@ -756,7 +756,13 @@ const dragItems = (
       );
     } else if (item.type === 'CONNECTOR_ANCHOR') {
       const connectors = options?.connectors ?? scene.connectors;
-      const connector = getAnchorParent(item.id, connectors);
+      let connector: Connector;
+      try {
+        connector = getAnchorParent(item.id, connectors);
+      } catch {
+        // Anchor was stripped/replaced by a sync (e.g. simplePaths) mid-drag.
+        return;
+      }
       const target = connector.anchors.find((a) => {
         return a.id === item.id;
       });
@@ -1455,7 +1461,7 @@ export const DragItems: ModeActions = {
               }
             });
           });
-          touched.forEach((connectorId) => {
+          [...touched].sort().forEach((connectorId, laneIndex) => {
             const connector = freshConnectors.find((candidate) => {
               return candidate.id === connectorId;
             });
@@ -1463,7 +1469,7 @@ export const DragItems: ModeActions = {
             scene.updateConnector(
               connectorId,
               { anchors: connector.anchors },
-              { overlapResolve: 'off' }
+              { laneIndex }
             );
           });
         }
@@ -1502,8 +1508,8 @@ export const DragItems: ModeActions = {
           }
         });
 
-        touched.forEach((connectorId) => {
-          // Rebuild final A* from current anchors. Do NOT strip waypoints /
+        [...touched].sort().forEach((connectorId, laneIndex) => {
+          // Rebuild path from current anchors. Do NOT strip waypoints /
           // rematerialize — that would rewrite the route past locked vias.
           const connector = scene.connectors.find((candidate) => {
             return candidate.id === connectorId;
@@ -1512,7 +1518,7 @@ export const DragItems: ModeActions = {
           scene.updateConnector(
             connectorId,
             { anchors: connector.anchors },
-            { overlapResolve: 'off' }
+            { laneIndex }
           );
         });
       }

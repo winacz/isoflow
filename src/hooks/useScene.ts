@@ -49,6 +49,7 @@ import {
   claudeSortSwapLeaves,
   claudeSortBundleRoutes,
   recalculateAllConnectorPaths,
+  recalculateConnectorPathsForIds,
   parallelOffsetShape2dRoutes,
   arrangeNodesWithinSelection,
   type TidyInPlaceVariant,
@@ -1374,9 +1375,10 @@ export const useScene = () => {
 
   /**
    * "Porządkuj ścieżki":
-   * 1) same node order as "Porządkuj" (port/shortest-path slots, no SA swaps),
-   * 2) AUTO → restore default simple port↔port cables (same as idle layout);
-   *    ORTHOGONAL / DIAGONAL → parallel lanes (furthest first, next at +1).
+   * 1) swap selected nodes among their current slots only (keep row/column
+   *    footprint) to minimise crossings then wire length,
+   * 2) AUTO → simple port↔port cables with lane separation;
+   *    ORTHOGONAL / DIAGONAL → parallel lanes.
    */
   const tidyPathsForItems = useCallback(
     (ids: string[], style: 'AUTO' | 'ORTHOGONAL' | 'DIAGONAL') => {
@@ -1384,7 +1386,10 @@ export const useScene = () => {
 
       const useAuto = style === 'AUTO';
       if (useAuto) {
-        uiActions.setSimplePaths(true);
+        // Occupancy A* materializes mid WPs — keep simplePaths off so sync
+        // does not strip them. Orthogonal style matches the cost-map router.
+        uiActions.setRoutingStyle('ORTHOGONAL');
+        uiActions.setSimplePaths(false);
       } else {
         uiActions.setRoutingStyle(style);
         uiActions.setSimplePaths(false);
@@ -1440,35 +1445,33 @@ export const useScene = () => {
       });
 
       if (useAuto) {
-        // Same geometry as idle simplePaths: port↔port preview only.
-        const touchingIds = new Set(
-          touching.map((connector) => {
-            return connector.id;
-          })
-        );
-        next = produce(next, (draft) => {
-          const draftView = getItemByIdOrThrow(
-            draft.model.views,
-            currentViewId
-          );
-          const connectors =
-            draft.model.views[draftView.index].connectors ?? [];
-          const viewForPath = {
-            ...draftView.value,
-            connectors,
-            items: draft.model.views[draftView.index].items
-          };
-          connectors.forEach((connector) => {
-            if (!touchingIds.has(connector.id)) return;
-            draft.scene.connectors[connector.id] = {
-              path: getConnectorPathPreview({
-                anchors: stripToEndpointAnchors(connector.anchors),
-                view: viewForPath,
-                modelItems: draft.model.items
-              })
-            };
-          });
+        // Occupancy-grid A*: shared-edge / crossing penalties + side-first
+        // exit. Packs shortest→longest, marks each route on the grid so the
+        // next cable prefers a parallel corridor instead of stacking.
+        const viewAfter = getItemByIdOrThrow(
+          next.model.views,
+          currentViewId
+        ).value;
+        const touchingIds = touching.map((connector) => connector.id);
+        const routes = recalculateConnectorPathsForIds({
+          connectorIds: touchingIds,
+          connectors: viewAfter.connectors ?? [],
+          view: viewAfter,
+          modelItems: next.model.items,
+          routingStyle: 'ORTHOGONAL',
+          items: viewAfter.items ?? [],
+          existingPaths: next.scene.connectors,
+          preferSideFirst: true
         });
+
+        if (Object.keys(routes).length > 0) {
+          next = applyConnectorRoutes(
+            next,
+            viewAfter.connectors ?? [],
+            routes
+          );
+        }
+
         setState(next, { skipHistory: true });
         endHistoryTransaction();
         return;
@@ -1529,6 +1532,8 @@ export const useScene = () => {
         /** Cheap orthogonal preview during drag — finalize on mouseup. */
         fastPath?: boolean;
         simplePaths?: boolean;
+        /** Fan-out index when syncing many cables after a node move. */
+        laneIndex?: number;
       }
     ) => {
       const newState = reducers.view({

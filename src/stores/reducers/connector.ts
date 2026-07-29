@@ -7,6 +7,7 @@ import {
   getAllAnchors,
   resolveConnectorAnchorsAgainstOthers,
   resolveOrthogonalDetourAfterWaypointRemoval,
+  separatePreviewPathFromOthers,
   collectOtherConnectorPaths,
   withOrthogonalPath,
   dedupeTileWaypoints,
@@ -113,26 +114,65 @@ export const syncConnector = (
     let anchors = connector.value.anchors;
     const isTwoDView = viewUsesShape2d(view.value.items, draft.model.items);
 
-    // 2D plan: direct port↔port when simplePaths / ignoreWaypoints; otherwise
-    // keep mid tile bends from "Porządkuj ścieżki" (preview through anchors).
+    // 2D plan: simplePaths uses port↔port only when there are no mid tile
+    // waypoints. Once dodge/tidy (or the user) inserts WPs, keep them so
+    // sync does not destroy IDs mid-drag.
     if (isTwoDView) {
+      const hasMidTileWaypoints = anchors.some((anchor, index) => {
+        return (
+          index > 0 &&
+          index < anchors.length - 1 &&
+          Boolean(anchor.ref.tile)
+        );
+      });
       const forceDirect =
         Boolean(options?.ignoreWaypoints) ||
-        (options?.simplePaths ?? isSimplePathsEnabled());
+        ((options?.simplePaths ?? isSimplePathsEnabled()) &&
+          !hasMidTileWaypoints);
+      let pathAnchors = forceDirect
+        ? getItemEndpointAnchors(anchors)
+        : anchors;
+
       if (forceDirect) {
-        anchors = getItemEndpointAnchors(anchors);
         const connectors = draft.model.views[view.index].connectors;
         if (connectors) {
           connectors[connector.index] = {
             ...connector.value,
-            anchors
+            anchors: pathAnchors
           };
+        }
+      }
+
+      if (!options?.fastPath) {
+        const otherPaths = collectOtherConnectorPaths(
+          draft.scene.connectors,
+          connector.value.id
+        );
+        if (otherPaths.length > 0) {
+          const separated = separatePreviewPathFromOthers({
+            anchors: pathAnchors,
+            view: view.value,
+            modelItems: draft.model.items,
+            otherPaths,
+            laneIndex: options?.laneIndex ?? 0,
+            removedTile: options?.removedTile
+          });
+          if (separated !== pathAnchors) {
+            pathAnchors = separated;
+            const connectors = draft.model.views[view.index].connectors;
+            if (connectors) {
+              connectors[connector.index] = {
+                ...connector.value,
+                anchors: pathAnchors
+              };
+            }
+          }
         }
       }
 
       draft.scene.connectors[connector.value.id] = {
         path: getConnectorPathPreview({
-          anchors,
+          anchors: pathAnchors,
           view: view.value,
           modelItems: draft.model.items
         })
@@ -252,6 +292,7 @@ export type UpdateConnectorPayload = {
   materializeBends?: boolean;
   fastPath?: boolean;
   simplePaths?: boolean;
+  laneIndex?: number;
 } & Partial<Connector>;
 
 export const updateConnector = (
@@ -263,6 +304,7 @@ export const updateConnector = (
     materializeBends,
     fastPath,
     simplePaths,
+    laneIndex,
     ...updates
   }: UpdateConnectorPayload,
   { state, viewId }: ViewReducerContext
@@ -302,7 +344,8 @@ export const updateConnector = (
           ignoreWaypoints,
           materializeBends,
           fastPath,
-          simplePaths
+          simplePaths,
+          laneIndex
         }
       );
 
