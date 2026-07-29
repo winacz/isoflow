@@ -375,19 +375,11 @@ const dragItems = (
     if (options.freePlacement) {
       // Always publish the latest live tiles (even when back at origin) so
       // the transient store cannot keep a stale offset.
-      // Quantize to 1/4 tile to cut React/connector churn during pixel-smooth drag.
-      const quantized: Record<string, Coords> = {};
-      Object.entries(nextTiles).forEach(([id, tile]) => {
-        quantized[id] = {
-          x: Math.round(tile.x * 4) / 4,
-          y: Math.round(tile.y * 4) / 4
-        };
-      });
       if (
-        Object.keys(quantized).length > 0 ||
+        Object.keys(nextTiles).length > 0 ||
         Object.keys(nextMount).length > 0
       ) {
-        useNodeDragStore.getState().setLive(quantized, nextMount);
+        useNodeDragStore.getState().setLive(nextTiles, nextMount);
       }
       return;
     }
@@ -1357,9 +1349,14 @@ export const DragItems: ModeActions = {
           return !CoordsUtils.isEqual(origin, next);
         });
 
-        // Rebuild final A* for cables attached to moved nodes only.
-        // Do NOT run Test/Porządkuj here — that freezes the tab on multi-node drags.
-        if (didMove) {
+        // Same as the "Test" button: Porządkuj + Mój algorytm after a move.
+        // Then finalize every touched cable so leftover fastPath previews
+        // (e.g. trunks skipped by an older hub filter) become real routes.
+        if (didMove && !uiState.simplePaths) {
+          scene.runTestLayoutForItems(draggedIds);
+        }
+
+        {
           const freshView = model.actions.get().views.find((candidate) => {
             return candidate.id === uiState.view;
           });

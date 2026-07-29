@@ -1,6 +1,6 @@
+import PF from 'pathfinding';
 import { Size, Coords } from 'src/types';
 import {
-  buildDiagonalAwareTiles,
   buildOrthogonalTiles,
   getOrthogonalHint,
   isOrthogonalPathRequested
@@ -14,14 +14,8 @@ interface Args {
   orthogonal?: boolean;
 }
 
-/**
- * Tile path between two points.
- *
- * Uses geometric fills (orthogonal L/U or smooth diagonal+stub). An empty-grid
- * A* used to emit orthogonal staircases that render as zigzags through tile
- * centres — that pathfinder is intentionally not used here.
- */
 export const findPath = ({
+  gridSize,
   from,
   to,
   orthogonal = false
@@ -41,5 +35,34 @@ export const findPath = ({
     return buildOrthogonalTiles(fromTile, toTile, getOrthogonalHint());
   }
 
-  return buildDiagonalAwareTiles(fromTile, toTile);
+  const width = Math.max(1, Math.round(gridSize.width));
+  const height = Math.max(1, Math.round(gridSize.height));
+  const clampedFrom = {
+    x: Math.min(width - 1, Math.max(0, fromTile.x)),
+    y: Math.min(height - 1, Math.max(0, fromTile.y))
+  };
+  const clampedTo = {
+    x: Math.min(width - 1, Math.max(0, toTile.x)),
+    y: Math.min(height - 1, Math.max(0, toTile.y))
+  };
+
+  const grid = new PF.Grid(width, height);
+  const finder = new PF.AStarFinder({
+    heuristic: PF.Heuristic.manhattan,
+    diagonalMovement: PF.DiagonalMovement.Always
+  });
+  const path = finder.findPath(
+    clampedFrom.x,
+    clampedFrom.y,
+    clampedTo.x,
+    clampedTo.y,
+    grid
+  );
+
+  return path.map((tile) => {
+    return {
+      x: tile[0],
+      y: tile[1]
+    };
+  });
 };

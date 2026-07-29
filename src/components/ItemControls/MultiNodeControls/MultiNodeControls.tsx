@@ -11,9 +11,7 @@ import {
   ScienceOutlined,
   StraightOutlined,
   AutoAwesomeOutlined,
-  AccountTreeOutlined,
-  CallSplitOutlined,
-  DeviceHubOutlined
+  AccountTreeOutlined
 } from '@mui/icons-material';
 import { useScene } from 'src/hooks/useScene';
 import { useUiStateStore } from 'src/stores/uiStateStore';
@@ -64,8 +62,6 @@ export const MultiNodeControls = () => {
     runTestLayoutForItems,
     runSmartLayoutForItems,
     runSmartLayout2ForItems,
-    runSmartLayout3ForItems,
-    runSmartLayout4ForItems,
     regenerateRoutesForItems,
     setSimplePathsMode
   } = useScene();
@@ -198,32 +194,6 @@ export const MultiNodeControls = () => {
             color="secondary"
           >
             Smart Layout 2
-          </Button>
-          <Button
-            size="small"
-            variant="outlined"
-            startIcon={<CallSplitOutlined />}
-            onClick={() => {
-              runSmartLayout3ForItems(selectedItemIds);
-            }}
-            disabled={simplePaths || count < 1}
-            sx={actionBtnSx}
-            color="secondary"
-          >
-            Smart Layout 3
-          </Button>
-          <Button
-            size="small"
-            variant="outlined"
-            startIcon={<DeviceHubOutlined />}
-            onClick={() => {
-              runSmartLayout4ForItems(selectedItemIds);
-            }}
-            disabled={simplePaths || count < 1}
-            sx={actionBtnSx}
-            color="secondary"
-          >
-            Smart Layout 4
           </Button>
           <Button
             size="small"

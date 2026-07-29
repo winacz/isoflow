@@ -405,8 +405,7 @@ const mousedown: ModeActionsAction = ({
       tile,
       point: tilePoint,
       scene,
-      modelItems: model.items,
-      stickyHover: uiState.shape2dPortHover
+      modelItems: model.items
     });
 
     const onDeviceBody = isTileOnDeviceBody(tile, scene, model.items);
@@ -419,9 +418,12 @@ const mousedown: ModeActionsAction = ({
     const togglePort =
       Boolean(portHit) &&
       (uiState.mouse.ctrlKey || uiState.mouse.metaKey);
-    // Jack hit always wins over the cable under the same tile so port click
-    // opens device/port settings (relation HUD still follows the attached cable).
-    const portBlocksCable = Boolean(portHit);
+    // Port settings win when there is no cable on this tile, or when Ctrl/Cmd
+    // multi-selects ports (including already-connected ones).
+    // Plain click on a cable+port tile still selects the cable.
+    const portBlocksCable = Boolean(
+      portHit && (!connectorAtTile || togglePort)
+    );
 
     if (portBlocksCable && portHit) {
       // Clicking a port opens the device panel on that port's settings.
@@ -657,8 +659,7 @@ export const Cursor: ModeActions = {
       const portHit = getShape2dPortAtTile({
         tile: uiState.mouse.mousedown.tile,
         scene,
-        modelItems: model.items,
-        stickyHover: uiState.shape2dPortHover
+        modelItems: model.items
       });
 
       if (
@@ -1082,8 +1083,7 @@ export const Cursor: ModeActions = {
       tile,
       point: tilePoint,
       scene,
-      modelItems: model.items,
-      stickyHover: uiState.shape2dPortHover
+      modelItems: model.items
     });
     if (portHit) return;
 

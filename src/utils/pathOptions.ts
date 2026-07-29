@@ -38,7 +38,6 @@ export const isSimplePathsEnabled = () => {
   return simplePathsEnabled;
 };
 
-/** Soft compat for leftover Algorithms UI / routingEngine stubs. */
 export type RoutingStyle = 'ORTHOGONAL' | 'DIAGONAL' | 'STRAIGHT';
 
 let routingStyle: RoutingStyle = 'ORTHOGONAL';
@@ -50,6 +49,7 @@ export const setRoutingStyleEnabled = (style: RoutingStyle) => {
 export const getRoutingStyle = (): RoutingStyle => {
   return routingStyle;
 };
+
 
 /** Lock a tile to horizontal or vertical movement from `origin`. */
 export const axisLockTile = (tile: Coords, origin: Coords): Coords => {
@@ -117,40 +117,33 @@ export const computeOrthogonalHelpers = (
 
 /** Axis-aligned tile strip from `from` to `to` (inclusive). */
 export const axisAlignedLineTiles = (from: Coords, to: Coords): Coords[] => {
-  const a = { x: Math.round(from.x), y: Math.round(from.y) };
-  const b = { x: Math.round(to.x), y: Math.round(to.y) };
-
-  if (a.x === b.x && a.y === b.y) {
-    return [{ ...a }];
+  if (from.x === to.x && from.y === to.y) {
+    return [{ ...from }];
   }
 
-  if (a.x === b.x) {
-    const step = a.y <= b.y ? 1 : -1;
+  if (from.x === to.x) {
+    const step = from.y <= to.y ? 1 : -1;
     const tiles: Coords[] = [];
-    const maxSteps = Math.abs(b.y - a.y) + 2;
-    for (let i = 0, y = a.y; i < maxSteps; i += 1, y += step) {
-      tiles.push({ x: a.x, y });
-      if (y === b.y) break;
+    for (let y = from.y; y !== to.y + step; y += step) {
+      tiles.push({ x: from.x, y });
     }
     return tiles;
   }
 
-  if (a.y === b.y) {
-    const step = a.x <= b.x ? 1 : -1;
+  if (from.y === to.y) {
+    const step = from.x <= to.x ? 1 : -1;
     const tiles: Coords[] = [];
-    const maxSteps = Math.abs(b.x - a.x) + 2;
-    for (let i = 0, x = a.x; i < maxSteps; i += 1, x += step) {
-      tiles.push({ x, y: a.y });
-      if (x === b.x) break;
+    for (let x = from.x; x !== to.x + step; x += step) {
+      tiles.push({ x, y: from.y });
     }
     return tiles;
   }
 
   // Fallback L (should be rare when helpers are applied first)
-  const bend = { x: a.x, y: b.y };
+  const bend = { x: from.x, y: to.y };
   return [
-    ...axisAlignedLineTiles(a, bend),
-    ...axisAlignedLineTiles(bend, b).slice(1)
+    ...axisAlignedLineTiles(from, bend),
+    ...axisAlignedLineTiles(bend, to).slice(1)
   ];
 };
 
@@ -179,11 +172,6 @@ export const buildOrthogonalTiles = (
   return tiles;
 };
 
-/**
- * Smooth 2D cable segment: true 45° diagonal while both axes need to move,
- * then a straight stub. Never builds an orthogonal "staircase" zigzag.
- * (Empty-grid A* used to produce sawtooth polylines through tile centres.)
- */
 export const buildDiagonalAwareTiles = (from: Coords, to: Coords): Coords[] => {
   const a = { x: Math.round(from.x), y: Math.round(from.y) };
   const b = { x: Math.round(to.x), y: Math.round(to.y) };
@@ -225,6 +213,7 @@ export const buildDiagonalAwareTiles = (from: Coords, to: Coords): Coords[] => {
  * Drop micro stair-step waypoints from algorithm output. Keeps major elbows
  * (legs of length ≥ 2). If the list is still noisy, keep only first + last.
  */
+
 export const compactAlgorithmWaypoints = (tiles: Coords[]): Coords[] => {
   if (tiles.length <= 2) {
     return tiles.map((tile) => {
@@ -272,6 +261,7 @@ export const compactAlgorithmWaypoints = (tiles: Coords[]): Coords[] => {
  * Render-time cleanup: dense stair-step paths → smooth geometric line;
  * normal paths → corners only (SVG draws clean segments between elbows).
  */
+
 export const simplifyTilesForDraw = (tiles: Coords[]): Coords[] => {
   if (tiles.length < 3) return tiles;
 
@@ -311,3 +301,4 @@ export const simplifyTilesForDraw = (tiles: Coords[]): Coords[] => {
   corners.push({ ...tiles[tiles.length - 1] });
   return corners;
 };
+

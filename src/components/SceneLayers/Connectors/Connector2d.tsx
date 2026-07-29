@@ -15,7 +15,6 @@ import {
   TRUNK_RAINBOW_COLORS,
   TRUNK_MISMATCH_COLOR,
   CONNECTOR_JUMP_RADIUS_TILES,
-  simplifyTilesForDraw,
   type ConnectorJump
 } from 'src/utils';
 import { Circle } from 'src/components/Circle/Circle';
@@ -120,9 +119,7 @@ export const Connector2d = memo(({
   });
 
   const livePath = useMemo(() => {
-    // During node drag, skip per-frame path rebuilds (many cables × many
-    // mousemove events freezes the tab). Mouseup rebuilds final routes.
-    if (softDim || !liveDragKey) return null;
+    if (!liveDragKey) return null;
 
     const tileOverrides = useNodeDragStore.getState().tiles;
     try {
@@ -135,17 +132,15 @@ export const Connector2d = memo(({
     } catch {
       return null;
     }
-  }, [softDim, liveDragKey, connector.anchors, currentView, modelItems]);
+  }, [liveDragKey, connector.anchors, currentView, modelItems]);
 
   const pathTiles = livePath?.tiles ?? connector.path.tiles;
   const pathFrom = livePath?.rectangle.from ?? connector.path.rectangle.from;
 
   const globalTiles = useMemo(() => {
-    return simplifyTilesForDraw(
-      pathTiles.map((tile) => {
-        return connectorPathTileToGlobal(tile, pathFrom);
-      })
-    );
+    return pathTiles.map((tile) => {
+      return connectorPathTileToGlobal(tile, pathFrom);
+    });
   }, [pathTiles, pathFrom]);
 
   const bounds = useMemo(() => {
