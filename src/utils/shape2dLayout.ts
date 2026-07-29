@@ -1665,19 +1665,25 @@ const pathUsesBusyEdge = (path: Coords[], used: Set<string>) => {
 
 /** Orthogonal L/U fill between two tiles (inclusive). */
 const orthoFill = (from: Coords, to: Coords, horizontalFirst: boolean) => {
-  const tiles: Coords[] = [{ ...from }];
-  let x = from.x;
-  let y = from.y;
+  const start = { x: Math.round(from.x), y: Math.round(from.y) };
+  const end = { x: Math.round(to.x), y: Math.round(to.y) };
+  const tiles: Coords[] = [{ ...start }];
+  let x = start.x;
+  let y = start.y;
+  let guard = 0;
+  const maxSteps = 800;
 
   const runX = () => {
-    while (x !== to.x) {
-      x += Math.sign(to.x - x);
+    while (guard < maxSteps && x !== end.x) {
+      guard += 1;
+      x += Math.sign(end.x - x);
       tiles.push({ x, y });
     }
   };
   const runY = () => {
-    while (y !== to.y) {
-      y += Math.sign(to.y - y);
+    while (guard < maxSteps && y !== end.y) {
+      guard += 1;
+      y += Math.sign(end.y - y);
       tiles.push({ x, y });
     }
   };
@@ -2016,36 +2022,49 @@ export const diagonalFanShape2dRoutes = ({
      * port with a short vertical stub → cables never stack near the nodes.
      */
     const buildLaneRoute = (cable: FanCable, k: number): Coords[] => {
-      const start = { ...cable.hubPort };
-      const end = { ...cable.leafPort };
+      // Integer tiles only — fractional ports/centers make bare `!==` walks loop forever.
+      const start = {
+        x: Math.round(cable.hubPort.x),
+        y: Math.round(cable.hubPort.y)
+      };
+      const end = {
+        x: Math.round(cable.leafPort.x),
+        y: Math.round(cable.leafPort.y)
+      };
       const laneY = end.y + laneDirY * k;
 
       const path: Coords[] = [{ ...start }];
       let cur = { ...start };
+      const maxSteps = 800;
+      let guard = 0;
+
+      const stepToward = (from: number, to: number) => {
+        const s = Math.sign(to - from);
+        return s === 0 ? 0 : s;
+      };
 
       // Diagonal toward (leaf column, lane row).
-      let guard = 0;
-      while (guard < 800 && cur.x !== end.x && cur.y !== laneY) {
+      while (guard < maxSteps && cur.x !== end.x && cur.y !== laneY) {
         guard += 1;
         cur = {
-          x: cur.x + Math.sign(end.x - cur.x),
-          y: cur.y + Math.sign(laneY - cur.y)
+          x: cur.x + stepToward(cur.x, end.x),
+          y: cur.y + stepToward(cur.y, laneY)
         };
         path.push({ ...cur });
       }
-      // Straighten onto the lane row.
-      while (cur.y !== laneY) {
-        cur = { x: cur.x, y: cur.y + Math.sign(laneY - cur.y) };
+      while (guard < maxSteps && cur.y !== laneY) {
+        guard += 1;
+        cur = { x: cur.x, y: cur.y + stepToward(cur.y, laneY) };
         path.push({ ...cur });
       }
-      // Horizontal magistrala along the lane row to the leaf column.
-      while (cur.x !== end.x) {
-        cur = { x: cur.x + Math.sign(end.x - cur.x), y: cur.y };
+      while (guard < maxSteps && cur.x !== end.x) {
+        guard += 1;
+        cur = { x: cur.x + stepToward(cur.x, end.x), y: cur.y };
         path.push({ ...cur });
       }
-      // Short stub into the leaf port (none for lane 0).
-      while (cur.y !== end.y) {
-        cur = { x: cur.x, y: cur.y + Math.sign(end.y - cur.y) };
+      while (guard < maxSteps && cur.y !== end.y) {
+        guard += 1;
+        cur = { x: cur.x, y: cur.y + stepToward(cur.y, end.y) };
         path.push({ ...cur });
       }
 
@@ -2504,32 +2523,34 @@ export const channelRoute = ({ selectedItems, allItems, modelItems, connectors }
   };
 
   const buildLaneRoute = (start: Coords, end: Coords, laneIndex: number, maxLanes: number): Coords[] => {
+    const from = { x: Math.round(start.x), y: Math.round(start.y) };
+    const to = { x: Math.round(end.x), y: Math.round(end.y) };
     // Determine vertical direction from start to end
-    const dirY = end.y >= start.y ? 1 : -1;
+    const dirY = to.y >= from.y ? 1 : -1;
     // Lane Y is assigned sequentially away from the destination node port 
-    const laneY = end.y + (dirY * (laneIndex + 1));
+    const laneY = to.y + (dirY * (laneIndex + 1));
     
-    const path: Coords[] = [{...start}];
-    let cur = {...start};
+    const path: Coords[] = [{...from}];
+    let cur = {...from};
     
     // Go vertical to lane
     let guard = 0;
     while (cur.y !== laneY && guard < 800) {
-       cur.y += Math.sign(laneY - cur.y);
+       cur = { x: cur.x, y: cur.y + Math.sign(laneY - cur.y) };
        path.push({...cur});
        guard++;
     }
     
     // Go horizontal to destination column
-    while (cur.x !== end.x && guard < 800) {
-       cur.x += Math.sign(end.x - cur.x);
+    while (cur.x !== to.x && guard < 800) {
+       cur = { x: cur.x + Math.sign(to.x - cur.x), y: cur.y };
        path.push({...cur});
        guard++;
     }
     
     // Go vertical to destination port
-    while (cur.y !== end.y && guard < 800) {
-       cur.y += Math.sign(end.y - cur.y);
+    while (cur.y !== to.y && guard < 800) {
+       cur = { x: cur.x, y: cur.y + Math.sign(to.y - cur.y) };
        path.push({...cur});
        guard++;
     }

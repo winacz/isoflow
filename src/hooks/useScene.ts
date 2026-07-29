@@ -609,7 +609,7 @@ export const useScene = () => {
           Object.entries(targets).forEach(([id, tile]) => {
             const newState = reducers.view({
               action: 'UPDATE_VIEWITEM',
-              payload: { id, tile },
+              payload: { id, tile, skipConnectorSync: true },
               ctx: { viewId: currentViewId, state: getState() }
             });
             setState(newState, { skipHistory: true });
