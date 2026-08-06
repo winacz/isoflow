@@ -15,7 +15,14 @@ import { IconButton } from 'src/components/IconButton/IconButton';
 import { UiElement } from 'src/components/UiElement/UiElement';
 import { useScene } from 'src/hooks/useScene';
 import { TEXTBOX_DEFAULTS } from 'src/config';
-import { generateId, removeMidWaypointsByIds } from 'src/utils';
+import {
+  generateId,
+  removeMidWaypointsByIds,
+  isPlan2dCanvas,
+  supportsConnectorTools,
+  supportsDrawingConnections,
+  connectorModeForProjection
+} from 'src/utils';
 
 export const ToolMenu = ({
   /** Render without card chrome — for embedding in the plan sidebar header. */
@@ -53,8 +60,11 @@ export const ToolMenu = ({
     return state.mouse.position.tile;
   });
 
-  const isTwoD = projectionMode === 'TWO_D';
+  const isTwoD = isPlan2dCanvas(projectionMode);
   const isEditable = editorMode === 'EDITABLE';
+  // v3 hides the classic waypoint/sorting tooling but draws its own cables.
+  const hasConnectorTools = supportsConnectorTools(projectionMode);
+  const canDrawConnections = supportsDrawingConnections(projectionMode);
 
   const onUndo = useCallback(() => {
     if (!isEditable || !canUndo) return;
@@ -92,6 +102,7 @@ export const ToolMenu = ({
       if (
         !isDelete ||
         !isTwoD ||
+        !hasConnectorTools ||
         selectedWaypointIds.length === 0 ||
         e.ctrlKey ||
         e.metaKey ||
@@ -130,6 +141,7 @@ export const ToolMenu = ({
   }, [
     isEditable,
     isTwoD,
+    hasConnectorTools,
     undo,
     selectedWaypointIds,
     connectors,
@@ -214,19 +226,28 @@ export const ToolMenu = ({
         onClick={openAddMenu}
         isActive={mode.type === 'PLACE_ICON'}
       />
-      <IconButton
-        name="Connector"
-        Icon={<ConnectorIcon />}
-        onClick={() => {
-          uiStateStoreActions.setMode({
-            type: 'CONNECTOR',
-            id: null,
-            showCursor: true
-          });
-          uiStateStoreActions.setItemControls(null);
-        }}
-        isActive={mode.type === 'CONNECTOR'}
-      />
+      {canDrawConnections && (
+        <IconButton
+          name="Connector"
+          Icon={<ConnectorIcon />}
+          onClick={() => {
+            const type = connectorModeForProjection(projectionMode);
+            uiStateStoreActions.setMode(
+              type === 'CONNECTOR_V3'
+                ? {
+                    type,
+                    id: null,
+                    start: null,
+                    preview: null,
+                    showCursor: true
+                  }
+                : { type, id: null, showCursor: true }
+            );
+            uiStateStoreActions.setItemControls(null);
+          }}
+          isActive={mode.type === 'CONNECTOR' || mode.type === 'CONNECTOR_V3'}
+        />
+      )}
       {!isTwoD && (
         <IconButton
           name="Rectangle"

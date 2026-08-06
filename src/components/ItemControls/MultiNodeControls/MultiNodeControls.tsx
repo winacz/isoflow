@@ -15,8 +15,11 @@ import {
 } from '@mui/icons-material';
 import { useScene } from 'src/hooks/useScene';
 import { useUiStateStore } from 'src/stores/uiStateStore';
-import { TIDY_IN_PLACE_VARIANTS } from 'src/utils';
+import { TIDY_IN_PLACE_VARIANTS, supportsConnectorTools, normalizeDeviceColorInput, parseDeviceColor } from 'src/utils';
+import { AutoLayoutControls } from 'src/components/ItemControls/AutoLayoutControls/AutoLayoutControls';
 import { ControlsContainer } from '../components/ControlsContainer';
+import { useModelStore } from 'src/stores/modelStore';
+import { ColorPicker } from 'src/components/ColorSelector/ColorPicker';
 
 const TIDY_IN_PLACE_LABELS: Record<string, string> = {
   bundleTidy: 'porządkuj wiązką',
@@ -54,6 +57,11 @@ export const MultiNodeControls = () => {
   const clearSelectedItemIds = useUiStateStore((state) => {
     return state.actions.clearSelectedItemIds;
   });
+  const projectionMode = useUiStateStore((state) => {
+    return state.projectionMode;
+  });
+  // 2D v3 keeps nodes + ports only — no cable routing / sorting tools.
+  const hasConnectorTools = supportsConnectorTools(projectionMode);
   const {
     layoutViewItems,
     tidyItems,
@@ -63,7 +71,10 @@ export const MultiNodeControls = () => {
     runSmartLayoutForItems,
     runSmartLayout2ForItems,
     regenerateRoutesForItems,
-    setSimplePathsMode
+    setSimplePathsMode,
+    updateModelItem,
+    beginHistoryTransaction,
+    endHistoryTransaction
   } = useScene();
 
   // Cycle algorithms on every press ("porządkuj w wybranym miejscu").
@@ -73,8 +84,24 @@ export const MultiNodeControls = () => {
   const count = selectedItemIds.length;
   const multi = count >= 2;
 
+  const modelItems = useModelStore((state) => state.items);
+
+  const selectedModelItems = React.useMemo(() => {
+    return selectedItemIds
+      .map(id => modelItems.find(m => m.id === id))
+      .filter((m): m is NonNullable<typeof m> => Boolean(m));
+  }, [selectedItemIds, modelItems]);
+  
+  const commonColor = React.useMemo(() => {
+    if (selectedModelItems.length === 0) return '#ffffff00';
+    const firstColor = selectedModelItems[0]?.color?.trim() || '#ffffff00';
+    const allSame = selectedModelItems.every(m => (m.color?.trim() || '#ffffff00') === firstColor);
+    return allSame ? firstColor : ''; // empty string for mixed colors
+  }, [selectedModelItems]);
+
   return (
     <ControlsContainer>
+      {hasConnectorTools && <AutoLayoutControls />}
       <Box sx={{ px: 1.25, pt: 1, pb: 1.25 }}>
         <Typography
           sx={{
@@ -145,56 +172,60 @@ export const MultiNodeControls = () => {
           >
             Porządkuj
           </Button>
-          <Button
-            size="small"
-            variant="outlined"
-            startIcon={<TimelineOutlined />}
-            onClick={() => {
-              routeDiagonalFanForItems(selectedItemIds);
-            }}
-            disabled={simplePaths || count < 1}
-            sx={actionBtnSx}
-          >
-            Mój algorytm
-          </Button>
-          <Button
-            size="small"
-            variant="outlined"
-            startIcon={<ScienceOutlined />}
-            onClick={() => {
-              runTestLayoutForItems(selectedItemIds);
-            }}
-            disabled={simplePaths || count < 1}
-            sx={actionBtnSx}
-          >
-            Test
-          </Button>
-          <Button
-            size="small"
-            variant="outlined"
-            startIcon={<AutoAwesomeOutlined />}
-            onClick={() => {
-              runSmartLayoutForItems(selectedItemIds);
-            }}
-            disabled={simplePaths || count < 1}
-            sx={actionBtnSx}
-            color="secondary"
-          >
-            Smart Layout
-          </Button>
-          <Button
-            size="small"
-            variant="outlined"
-            startIcon={<AccountTreeOutlined />}
-            onClick={() => {
-              runSmartLayout2ForItems(selectedItemIds);
-            }}
-            disabled={simplePaths || count < 1}
-            sx={actionBtnSx}
-            color="secondary"
-          >
-            Smart Layout 2
-          </Button>
+          {hasConnectorTools && (
+            <>
+              <Button
+                size="small"
+                variant="outlined"
+                startIcon={<TimelineOutlined />}
+                onClick={() => {
+                  routeDiagonalFanForItems(selectedItemIds);
+                }}
+                disabled={simplePaths || count < 1}
+                sx={actionBtnSx}
+              >
+                Mój algorytm
+              </Button>
+              <Button
+                size="small"
+                variant="outlined"
+                startIcon={<ScienceOutlined />}
+                onClick={() => {
+                  runTestLayoutForItems(selectedItemIds);
+                }}
+                disabled={simplePaths || count < 1}
+                sx={actionBtnSx}
+              >
+                Test
+              </Button>
+              <Button
+                size="small"
+                variant="outlined"
+                startIcon={<AutoAwesomeOutlined />}
+                onClick={() => {
+                  runSmartLayoutForItems(selectedItemIds);
+                }}
+                disabled={simplePaths || count < 1}
+                sx={actionBtnSx}
+                color="secondary"
+              >
+                Smart Layout
+              </Button>
+              <Button
+                size="small"
+                variant="outlined"
+                startIcon={<AccountTreeOutlined />}
+                onClick={() => {
+                  runSmartLayout2ForItems(selectedItemIds);
+                }}
+                disabled={simplePaths || count < 1}
+                sx={actionBtnSx}
+                color="secondary"
+              >
+                Smart Layout 2
+              </Button>
+            </>
+          )}
           <Button
             size="small"
             variant="outlined"
@@ -217,29 +248,33 @@ export const MultiNodeControls = () => {
           >
             Porządkuj w miejscu ({TIDY_IN_PLACE_LABELS[nextVariant]})
           </Button>
-          <Button
-            size="small"
-            variant={simplePaths ? 'contained' : 'outlined'}
-            startIcon={<StraightOutlined />}
-            onClick={() => {
-              setSimplePathsMode(!simplePaths);
-            }}
-            sx={actionBtnSx}
-          >
-            {simplePaths ? 'Włącz obliczanie' : 'Wyłącz obliczanie'}
-          </Button>
-          <Button
-            size="small"
-            variant="outlined"
-            startIcon={<RouteOutlined />}
-            onClick={() => {
-              regenerateRoutesForItems(selectedItemIds);
-            }}
-            disabled={count < 1}
-            sx={actionBtnSx}
-          >
-            Generuj nowe trasy
-          </Button>
+          {hasConnectorTools && (
+            <>
+              <Button
+                size="small"
+                variant={simplePaths ? 'contained' : 'outlined'}
+                startIcon={<StraightOutlined />}
+                onClick={() => {
+                  setSimplePathsMode(!simplePaths);
+                }}
+                sx={actionBtnSx}
+              >
+                {simplePaths ? 'Włącz obliczanie' : 'Wyłącz obliczanie'}
+              </Button>
+              <Button
+                size="small"
+                variant="outlined"
+                startIcon={<RouteOutlined />}
+                onClick={() => {
+                  regenerateRoutesForItems(selectedItemIds);
+                }}
+                disabled={count < 1}
+                sx={actionBtnSx}
+              >
+                Generuj nowe trasy
+              </Button>
+            </>
+          )}
           <Button
             size="small"
             color="inherit"
@@ -252,6 +287,62 @@ export const MultiNodeControls = () => {
           </Button>
         </Stack>
       </Box>
+
+      {count > 0 && (
+        <Box sx={{ borderTop: '1px solid', borderColor: 'divider', px: 1.25, pt: 1.25, pb: 1.5 }}>
+          <Typography
+            sx={{
+              fontSize: 10,
+              fontWeight: 600,
+              letterSpacing: 0.6,
+              color: 'text.secondary',
+              textTransform: 'uppercase',
+              mb: 1
+            }}
+          >
+            Personalizacja
+          </Typography>
+          
+          <Box sx={{ mt: 1 }}>
+            <Typography
+              sx={{
+                fontSize: 10,
+                fontWeight: 600,
+                letterSpacing: 0.4,
+                color: 'text.secondary',
+                textTransform: 'uppercase',
+                mb: 0.75
+              }}
+            >
+              Kolor tła
+            </Typography>
+            <Stack direction="row" alignItems="center" spacing={1.5}>
+              <ColorPicker
+                format="hex8"
+                value={commonColor}
+                onChange={(color) => {
+                  const normalized = normalizeDeviceColorInput(color);
+                  beginHistoryTransaction();
+                  selectedItemIds.forEach(id => {
+                    updateModelItem(id, { color: normalized });
+                  });
+                  endHistoryTransaction();
+                }}
+              />
+              <Typography
+                sx={{
+                  fontSize: 9,
+                  color: 'text.secondary',
+                  lineHeight: 1,
+                  userSelect: 'none'
+                }}
+              >
+                {commonColor === '' ? 'Mieszany' : `${Math.round((parseDeviceColor(commonColor).alpha) * 100)}%`}
+              </Typography>
+            </Stack>
+          </Box>
+        </Box>
+      )}
     </ControlsContainer>
   );
 };

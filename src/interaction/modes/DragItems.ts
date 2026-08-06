@@ -44,7 +44,8 @@ import {
   getPanScrollFromDelta,
   getDragEdgeScrollVelocity,
   isDragEdgeVelocityActive,
-  DRAG_EDGE_DELAY_MS
+  DRAG_EDGE_DELAY_MS,
+  isPlan2dCanvas
 } from 'src/utils';
 import { getShape2dSize, getModelItemSize } from 'src/config';
 import { useCabinetSnapStore } from 'src/stores/cabinetSnapStore';
@@ -80,7 +81,7 @@ const clearDragSession = () => {
 
 const scheduleDragEdgeScroll = (state: State) => {
   if (state.uiState.mode.type !== 'DRAG_ITEMS') return;
-  if (state.uiState.projectionMode !== 'TWO_D') return;
+  if (!isPlan2dCanvas(state.uiState.projectionMode)) return;
 
   edgeLastScreen = { ...state.uiState.mouse.position.screen };
   edgeDragState = state;
@@ -998,7 +999,7 @@ export const DragItems: ModeActions = {
       return view.id === uiState.view;
     });
 
-    const isTwoD = uiState.projectionMode === 'TWO_D';
+    const isTwoD = isPlan2dCanvas(uiState.projectionMode);
     const orthogonal =
       isTwoD && uiState.mouse.shiftKey && isConnectorPathDrag(mode.items);
 
@@ -1188,7 +1189,7 @@ export const DragItems: ModeActions = {
     useCabinetSnapStore.getState().clear();
     if (
       uiState.mode.type === 'DRAG_ITEMS' &&
-      uiState.projectionMode === 'TWO_D'
+      isPlan2dCanvas(uiState.projectionMode)
     ) {
       const mode = uiState.mode;
       const freshModel = model.actions.get();
@@ -1218,10 +1219,10 @@ export const DragItems: ModeActions = {
           });
         });
         const excludeIds = [...moveIds];
-        // Floor "rack" grid is 1U×1U (9 tiles) — only for cabinets aligning to
-        // the rack floor. Hosts / phones / switches must snap to the 1-tile
-        // plan grid or a short drag jumps them by ~9 cells and wrecks the layout.
-        const rackFloorStep = getGridSnapStep(uiState.gridStyle);
+        // Every free device aligns to the active floor grid, so a hand-placed
+        // device lands on the same lattice Auto-Układ uses. Only devices
+        // mounted inside a cabinet keep the exact 1-tile slot maths below.
+        const floorStep = getGridSnapStep(uiState.gridStyle);
         const planStep = { x: 1, y: 1 };
 
         const finalTiles: Record<string, Coords> = { ...live.tiles };
@@ -1275,8 +1276,7 @@ export const DragItems: ModeActions = {
             const childIds = isCabinet
               ? getMountedChildren(id, scene.items).map((child) => child.id)
               : [];
-            const snapStep = isCabinet ? rackFloorStep : planStep;
-            const desired = snapTile2dToGrid(liveTile, snapStep);
+            const desired = snapTile2dToGrid(liveTile, floorStep);
             const itemsForCollision = scene.items.map((item) => {
               return {
                 ...item,
@@ -1285,8 +1285,11 @@ export const DragItems: ModeActions = {
             });
             resolvedTile =
               resolveShape2dDragOrigin({
+                // Same lattice as `desired`: the collision fallback slides
+                // along one axis from here, so a 1-tile `current` would drop
+                // the device back off the grid it was just snapped to.
                 desired,
-                current: snapTile2dToGrid(liveTile, planStep),
+                current: snapTile2dToGrid(liveTile, floorStep),
                 size,
                 items: itemsForCollision,
                 modelItems: freshModel.items,

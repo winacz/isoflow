@@ -28,8 +28,31 @@ export const ColorPicker = ({
       format={format}
       value={value}
       onChange={onChange}
-      InputProps={{ disableUnderline: true, type: 'hidden' }}
+      InputProps={{ disableUnderline: true }}
       Adornment={ColorButtonElement}
+      sx={{
+        width: 40,
+        height: 40,
+        '& .MuiInputBase-root': {
+          padding: 0,
+          width: '100%',
+          height: '100%',
+          alignItems: 'center',
+          justifyContent: 'center'
+        },
+        '& .MuiInputBase-input': {
+          display: 'none'
+        },
+        '& .MuiInputAdornment-root': {
+          margin: 0,
+          width: '100%',
+          height: '100%',
+          maxHeight: 'none',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center'
+        }
+      }}
       {...rest}
     />
   );

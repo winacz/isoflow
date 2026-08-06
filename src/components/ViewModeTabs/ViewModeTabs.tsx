@@ -108,6 +108,7 @@ export const ViewModeTabs = () => {
                 px: 2,
                 py: 1,
                 minWidth: 'auto',
+                whiteSpace: 'nowrap',
                 fontWeight: 600,
                 color: (isActive && !isWorkshopOpen) ? 'grey.200' : 'grey.500',
                 bgcolor: (isActive && !isWorkshopOpen) ? 'primary.light' : undefined

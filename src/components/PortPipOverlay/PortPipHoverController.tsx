@@ -93,9 +93,8 @@ export const PortPipHoverController = () => {
       return;
     }
 
-    const plan = findPlanView(model.views);
     const peer = resolvePortPipPeer({
-      connectors: plan?.connectors,
+      connectors: mockScene.connectors,
       modelItems: model.items,
       itemId: portHit.itemId,
       portId: portHit.portId

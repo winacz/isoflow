@@ -558,6 +558,11 @@ export const INITIAL_UI_STATE = {
       theme: 'light' as const,
       backgroundColor: null as string | null,
       gridColor: null as string | null
+    },
+    TWO_D_V3: {
+      theme: 'light' as const,
+      backgroundColor: null as string | null,
+      gridColor: null as string | null
     }
   },
   viewTransformByMode: {
@@ -576,6 +581,13 @@ export const INITIAL_UI_STATE = {
       }
     },
     TWO_D_V2: {
+      zoom: 1,
+      scroll: {
+        position: CoordsUtils.zero(),
+        offset: CoordsUtils.zero()
+      }
+    },
+    TWO_D_V3: {
       zoom: 1,
       scroll: {
         position: CoordsUtils.zero(),

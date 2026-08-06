@@ -6,6 +6,7 @@ import {
 import { UiElement } from 'src/components/UiElement/UiElement';
 import { IconButton } from 'src/components/IconButton/IconButton';
 import { useUiStateStore } from 'src/stores/uiStateStore';
+import { isPlan2dCanvas, projectionPrefsKey } from 'src/utils';
 
 /** Toggle light / dark canvas for the active projection mode (iso ⟂ 2D). */
 export const CanvasThemeToggle = () => {
@@ -13,14 +14,14 @@ export const CanvasThemeToggle = () => {
     return state.projectionMode;
   });
   const canvasTheme = useUiStateStore((state) => {
-    const key = projectionMode === 'TWO_D' ? 'TWO_D' : 'ISOMETRIC';
+    const key = projectionPrefsKey(projectionMode);
     return state.canvasByMode[key].theme;
   });
   const toggleCanvasTheme = useUiStateStore((state) => {
     return state.actions.toggleCanvasTheme;
   });
   const isDark = canvasTheme === 'dark';
-  const isTwoD = projectionMode === 'TWO_D';
+  const isTwoD = isPlan2dCanvas(projectionMode);
 
   return (
     <UiElement>

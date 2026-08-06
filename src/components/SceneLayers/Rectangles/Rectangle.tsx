@@ -2,7 +2,7 @@ import React from 'react';
 import { useScene } from 'src/hooks/useScene';
 import { IsoTileArea } from 'src/components/IsoTileArea/IsoTileArea';
 import { TileArea2d } from 'src/components/SceneLayers/Rectangles/TileArea2d';
-import { getColorVariant } from 'src/utils';
+import { getColorVariant, isPlan2dCanvas } from 'src/utils';
 import { useColor } from 'src/hooks/useColor';
 import { useUiStateStore } from 'src/stores/uiStateStore';
 
@@ -23,7 +23,7 @@ export const Rectangle = ({
   const projectionMode = useUiStateStore((state) => {
     return state.projectionMode;
   });
-  const isTwoD = projectionMode === 'TWO_D';
+  const isTwoD = isPlan2dCanvas(projectionMode);
   const fillOpacity = opacity ?? DEFAULT_OPACITY;
   const stroke = locked
     ? '#ea580c'

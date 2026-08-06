@@ -8,19 +8,14 @@ import { CoordsUtils } from './CoordsUtils';
 import { generateId } from './common';
 import { connectorPathTileToGlobal, getAnchorTile, getConnectorPath } from './renderer';
 import { computeOrthogonalHelpers, withOrthogonalPath } from './pathOptions';
+import { edgeKey } from './routeGeometry';
 
 type ModelItemRef = { id: string; icon?: string };
 
 const MAX_RESOLVE_ITERS = 8;
 const MAX_SNAP_RADIUS = 5;
 
-export const edgeKey = (a: Coords, b: Coords): string => {
-  if (a.x < b.x || (a.x === b.x && a.y <= b.y)) {
-    return `${a.x},${a.y}|${b.x},${b.y}`;
-  }
-
-  return `${b.x},${b.y}|${a.x},${a.y}`;
-};
+export { edgeKey } from './routeGeometry';
 
 export const pathEdges = (tiles: Coords[]): Set<string> => {
   const edges = new Set<string>();

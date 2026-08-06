@@ -2,6 +2,7 @@ import React, { useMemo } from 'react';
 import { Box } from '@mui/material';
 import { useUiStateStore } from 'src/stores/uiStateStore';
 import { TILE_SIZE_2D } from 'src/config';
+import { isPlan2dCanvas } from 'src/utils';
 
 /**
  * 2D marquee rectangle while dragging a selection on empty canvas.
@@ -17,7 +18,7 @@ export const MarqueeSelection = () => {
 
   const rect = useMemo(() => {
     if (
-      projectionMode !== 'TWO_D' ||
+      !isPlan2dCanvas(projectionMode) ||
       mode.type !== 'CURSOR' ||
       !mode.marquee
     ) {

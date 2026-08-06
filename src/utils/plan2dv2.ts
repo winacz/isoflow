@@ -21,6 +21,7 @@ import {
 } from './patchPanel';
 
 export const PLAN_2D_VIEW_NAME = 'Plan';
+export const PLAN_2D_V3_VIEW_NAME = 'Plan v3';
 export const ISOMETRIC_VIEW_NAME = 'Isometric';
 
 /** Switches (templates + builtin) and cabinets — not PCs / hosts. */

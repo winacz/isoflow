@@ -2,6 +2,7 @@ import React, { useCallback } from 'react';
 import { useRectangle } from 'src/hooks/useRectangle';
 import { AnchorPosition } from 'src/types';
 import { useUiStateStore } from 'src/stores/uiStateStore';
+import { isPlan2dCanvas } from 'src/utils';
 import { TransformControls } from './TransformControls';
 import { TransformControls2d } from './TransformControls2d';
 
@@ -17,7 +18,7 @@ export const RectangleTransformControls = ({ id }: Props) => {
   const projectionMode = useUiStateStore((state) => {
     return state.projectionMode;
   });
-  const isTwoD = projectionMode === 'TWO_D';
+  const isTwoD = isPlan2dCanvas(projectionMode);
 
   const onAnchorMouseDown = useCallback(
     (key: AnchorPosition) => {

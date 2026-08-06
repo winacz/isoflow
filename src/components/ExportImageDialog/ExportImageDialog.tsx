@@ -23,7 +23,8 @@ import {
   downloadFile as downloadFileUtil,
   base64ToBlob,
   generateGenericFilename,
-  modelFromModelStore
+  modelFromModelStore,
+  isPlan2dCanvas
 } from 'src/utils';
 import { ModelStore } from 'src/types';
 import { useDiagramUtils } from 'src/hooks/useDiagramUtils';
@@ -102,7 +103,7 @@ export const ExportImageDialog = ({ onClose, quality = 1.5 }: Props) => {
   };
 
   const defaultBg =
-    projectionMode === 'TWO_D'
+    isPlan2dCanvas(projectionMode)
       ? '#f6faff'
       : customVars.customPalette.diagramBg;
 

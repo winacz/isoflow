@@ -469,17 +469,17 @@ export const getMismatchPortIdsForItem = ({
  */
 export const getPeerHighlightedPortIdsForItem = ({
   itemId,
-  selectedItemId,
+  selectedItemIds,
   focusedPortIds,
   connectors
 }: {
   itemId: string;
-  selectedItemId: string | null;
+  selectedItemIds: string[];
   focusedPortIds?: ReadonlySet<string> | string[] | null;
   connectors: { anchors: { ref: { item?: string; port?: string } }[] }[];
 }): Set<string> => {
   const portIds = new Set<string>();
-  if (!selectedItemId || selectedItemId === itemId) return portIds;
+  if (!selectedItemIds || selectedItemIds.length === 0 || selectedItemIds.includes(itemId)) return portIds;
 
   const focused =
     !focusedPortIds || focusedPortIds instanceof Set
@@ -492,12 +492,15 @@ export const getPeerHighlightedPortIdsForItem = ({
     });
     if (ends.length < 2) return;
 
-    const local = ends.find((anchor) => {
-      return anchor.ref.item === selectedItemId;
+    const locals = ends.filter((anchor) => {
+      return anchor.ref.item && selectedItemIds.includes(anchor.ref.item);
     });
-    if (!local?.ref.port) return;
+    if (locals.length === 0) return;
 
-    if (focused && focused.size > 0 && !focused.has(local.ref.port)) return;
+    if (focused && focused.size > 0) {
+      const touchesFocused = locals.some(local => local.ref.port && focused.has(local.ref.port));
+      if (!touchesFocused) return;
+    }
 
     ends.forEach((anchor) => {
       if (anchor.ref.item === itemId && anchor.ref.port) {

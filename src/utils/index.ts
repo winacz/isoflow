@@ -14,6 +14,7 @@ export * from './connectorElbowSnap';
 export * from './connectorBendWaypoints';
 export * from './exportOptions';
 export * from './vlanColors';
+export * from './routeGeometry';
 export * from './shape2dLayout';
 export * from './routingEngine';
 export * from './layoutEngine';
@@ -34,8 +35,11 @@ export * from './projection';
 export * from './plan2dv2';
 export * from './projectTabs';
 export * from './htmlExportHover';
-export * from './offscreenPlanRenderer';
 export * from './cloneModelItem';
+export * from './clonePlanView';
 export * from './vlanIpHint';
-export * from './exportAsHtml';
-export * from './exportAsPdf';
+
+// NOT re-exported here on purpose: offscreenPlanRenderer, exportAsHtml and
+// exportAsPdf render React. Re-exporting them made every consumer of this
+// barrel (including src/config.ts and src/schemas) pull in the entire app,
+// creating an import cycle that left React undefined. Import them directly.

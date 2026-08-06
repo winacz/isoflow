@@ -9,6 +9,8 @@ import { Nodes } from 'src/components/SceneLayers/Nodes/Nodes';
 import { NodeDescriptionLabels } from 'src/components/SceneLayers/Nodes/NodeDescriptionLabels';
 import { Rectangles } from 'src/components/SceneLayers/Rectangles/Rectangles';
 import { Connectors } from 'src/components/SceneLayers/Connectors/Connectors';
+import { ConnectorV3Preview } from 'src/components/SceneLayers/ConnectorV3Preview/ConnectorV3Preview';
+import { V3DensityGroupsOverlay } from 'src/components/V3DensityGroups/V3DensityGroupsOverlay';
 import { ConnectorStackBadges } from 'src/components/SceneLayers/Connectors/ConnectorStackBadges';
 import { WaypointGuides } from 'src/components/SceneLayers/Connectors/WaypointGuides';
 import { ConnectorLabels } from 'src/components/SceneLayers/ConnectorLabels/ConnectorLabels';
@@ -105,6 +107,7 @@ export const Renderer = ({ showGrid, backgroundColor }: RendererProps) => {
 
   const isTwoD = isPlanProjection(projectionMode);
   const isTwoDV2 = projectionMode === 'TWO_D_V2';
+  const isTwoDV3 = projectionMode === 'TWO_D_V3';
   const isClassic2d = projectionMode === 'TWO_D';
 
   const iconByItemId = useMemo(() => {
@@ -128,26 +131,30 @@ export const Renderer = ({ showGrid, backgroundColor }: RendererProps) => {
   }, [isTwoD, items, iconByItemId]);
 
   const visibleConnectors = useMemo(() => {
-    // Schematic 2Dv2 never draws cables (PiP uses Plan connectors instead).
+    // Schematic 2Dv2 never draws cables — its PiP borrows Plan connectors.
     if (isTwoDV2) return [];
+
+    // v3 owns plan cables the same way classic 2D does; each tab only ever
+    // draws the connectors of its own view, so there is no cross-talk.
+    const planCanvas = isClassic2d || isTwoDV3;
 
     return connectors.filter((connector) => {
       const itemIds = getConnectorItemIds(connector);
 
       if (itemIds.length === 0) {
-        return isClassic2d;
+        return planCanvas;
       }
 
       const allPlan = itemIds.every(isPlanItem);
       const anyPlan = itemIds.some(isPlanItem);
 
-      if (isClassic2d) {
+      if (planCanvas) {
         return allPlan;
       }
 
       return !anyPlan;
     });
-  }, [connectors, isTwoDV2, isClassic2d, iconByItemId]);
+  }, [connectors, isTwoDV2, isTwoDV3, isClassic2d, iconByItemId]);
 
   return (
     <Box
@@ -232,9 +239,15 @@ export const Renderer = ({ showGrid, backgroundColor }: RendererProps) => {
           <MarqueeSelection />
         </SceneLayer>
       )}
-      {isClassic2d && (
+      {(isClassic2d || isTwoDV3) && (
         <SceneLayer order={2} sx={{ pointerEvents: 'none' }}>
           <Connectors connectors={visibleConnectors} />
+        </SceneLayer>
+      )}
+      {isTwoDV3 && (
+        <SceneLayer order={5} sx={{ pointerEvents: 'none' }}>
+          <ConnectorV3Preview />
+          <V3DensityGroupsOverlay />
         </SceneLayer>
       )}
       {isClassic2d && (

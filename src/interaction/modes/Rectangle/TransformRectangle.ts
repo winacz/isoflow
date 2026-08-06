@@ -2,7 +2,8 @@ import {
   getItemByIdOrThrow,
   getBoundingBox,
   convertBoundsToNamedAnchors,
-  hasMovedTile
+  hasMovedTile,
+  isPlan2dCanvas
 } from 'src/utils';
 import { ModeActions, AnchorPosition, Coords } from 'src/types';
 
@@ -134,7 +135,7 @@ export const TransformRectangle: ModeActions = {
     ).value;
     const anchor = uiState.mode.selectedAnchor;
     const mouse = uiState.mouse.position.tile;
-    const isTwoD = uiState.projectionMode === 'TWO_D';
+    const isTwoD = isPlan2dCanvas(uiState.projectionMode);
 
     // Mid-edge drag — axis-aligned rectangle only.
     if (

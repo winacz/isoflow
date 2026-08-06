@@ -7,7 +7,8 @@ import {
   TILE_SIZE_2D,
   getModelItemSize,
   isShape2dIcon,
-  clampNodeLabelScale
+  clampNodeLabelScale,
+  SHAPE_2D_CABINET_ID
 } from 'src/config';
 import {
   getTilePosition,
@@ -41,13 +42,16 @@ interface Props {
   selectionTone?: 'normal' | 'highlighted' | 'dimmed';
   /** Opacity used when selectionTone is dimmed (softer while dragging). */
   dimmedOpacity?: number;
+  /** Pixel translation so scaled highlighted nodes do not overlap. */
+  repelOffset?: { x: number; y: number };
 }
 
 export const Node = React.memo(({
   node,
   order,
   selectionTone = 'normal',
-  dimmedOpacity = 0.7
+  dimmedOpacity = 0.7,
+  repelOffset
 }: Props) => {
   const modelItem = useModelItem(node.id);
   const { connectors: sceneConnectors } = useScene();
@@ -106,22 +110,20 @@ export const Node = React.memo(({
   const focusedPortIds = useUiStateStore((state) => {
     return state.focusedPortIds;
   });
-  const itemControls = useUiStateStore((state) => {
-    return state.itemControls;
+  const selectedItemIds = useUiStateStore((state) => {
+    return state.selectedItemIds;
   });
-  const selectedItemId =
-    itemControls?.type === 'ITEM' ? itemControls.id : null;
   const nodeFocusedPortIds =
-    selectedItemId === node.id ? focusedPortIds : null;
+    selectedItemIds.includes(node.id) ? focusedPortIds : null;
 
   const peerHighlightPortIds = useMemo(() => {
     return getPeerHighlightedPortIdsForItem({
       itemId: node.id,
-      selectedItemId,
-      focusedPortIds: selectedItemId ? focusedPortIds : null,
+      selectedItemIds,
+      focusedPortIds: selectedItemIds.length > 0 && selectedItemIds.includes(node.id) ? focusedPortIds : null,
       connectors
     });
-  }, [node.id, selectedItemId, focusedPortIds, connectors]);
+  }, [node.id, selectedItemIds, focusedPortIds, connectors]);
 
   const vlanBorderColor = useMemo(() => {
     return getSinglePortNodeVlanBorderColor({
@@ -150,8 +152,23 @@ export const Node = React.memo(({
   const shape2dPortHover = useUiStateStore((state) => {
     return state.shape2dPortHover;
   });
-  const hoveredPortId =
-    shape2dPortHover?.itemId === node.id ? shape2dPortHover.portId : null;
+
+  const hoveredPortId = useMemo(() => {
+    if (!shape2dPortHover) return null;
+    if (shape2dPortHover.itemId === node.id) return shape2dPortHover.portId;
+
+    const peerPorts = getPeerHighlightedPortIdsForItem({
+      itemId: node.id,
+      selectedItemIds: [shape2dPortHover.itemId],
+      focusedPortIds: [shape2dPortHover.portId],
+      connectors
+    });
+
+    if (peerPorts.size > 0) {
+      return Array.from(peerPorts)[0];
+    }
+    return null;
+  }, [shape2dPortHover, node.id, connectors]);
 
   const { iconComponent } = useIcon(
     modelItem.icon,
@@ -322,7 +339,7 @@ export const Node = React.memo(({
 
   return (
     <Box
-      className="isoflow-node"
+      className={`isoflow-node ${selectionTone === 'highlighted' ? 'isoflow-node-highlighted' : ''}`}
       data-node-id={node.id}
       sx={{
         position: 'absolute',
@@ -333,11 +350,23 @@ export const Node = React.memo(({
           : selectionTone === 'highlighted'
             ? 'drop-shadow(0 0 6px rgba(37, 99, 235, 0.65)) drop-shadow(0 2px 6px rgba(37, 99, 235, 0.4))'
             : undefined,
-        transition: 'opacity 0.15s ease, filter 0.15s ease'
+        transition: 'opacity 0.15s ease, filter 0.15s ease, z-index 0s',
+        '&:hover': {
+          zIndex: order + 20000
+        }
       }}
     >
       <Box
-        sx={{ position: 'absolute' }}
+        sx={{
+          position: 'absolute',
+          transform:
+            selectionTone === 'highlighted' &&
+            modelItem.icon !== SHAPE_2D_CABINET_ID
+              ? `translate(${repelOffset?.x ?? 0}px, ${repelOffset?.y ?? 0}px) scale(1.15)`
+              : 'none',
+          transformOrigin: '0 0',
+          transition: 'transform 0.15s ease'
+        }}
         style={{
           left: position.x,
           top: position.y

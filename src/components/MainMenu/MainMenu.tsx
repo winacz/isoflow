@@ -25,10 +25,13 @@ import {
   exportAsJSON,
   buildProjectSnapshot,
   generateProjectFilename,
-  exportAsInteractivePdf,
   isPlanProjection,
+  isPlan2dCanvas,
   projectionPrefsKey
 } from 'src/utils';
+// Direct import: exportAsPdf renders React, so it is deliberately kept out of
+// the `src/utils` barrel to stop non-UI modules pulling in the whole app.
+import { exportAsInteractivePdf } from 'src/utils/exportAsPdf';
 import { useInitialDataManager } from 'src/hooks/useInitialDataManager';
 import { useModelStore, useModelStoreApi } from 'src/stores/modelStore';
 import { useScene } from 'src/hooks/useScene';
@@ -200,7 +203,7 @@ export const MainMenu = () => {
 
   const onClearCanvas = useCallback(() => {
     const confirmed = window.confirm(
-      projectionMode === 'TWO_D'
+      isPlan2dCanvas(projectionMode)
         ? 'Clear the entire 2D canvas? This cannot be undone.'
         : 'Clear the canvas? This will reset the diagram and cannot be undone.'
     );
@@ -209,7 +212,7 @@ export const MainMenu = () => {
       return;
     }
 
-    if (projectionMode === 'TWO_D') {
+    if (isPlan2dCanvas(projectionMode)) {
       clearView();
       uiStateActions.setItemControls(null);
       uiStateActions.setMode({

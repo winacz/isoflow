@@ -56,7 +56,8 @@ import {
   mergeDeviceTemplatesWithLibrary,
   ensureDeviceTemplateIcons,
   syncDeviceTemplateCache,
-  isDeviceTemplateId
+  isDeviceTemplateId,
+  supportsConnectorTools
 } from 'src/utils';
 
 const CATEGORY_ORDER = [
@@ -435,6 +436,9 @@ export const ShapeSelectionControls = () => {
   const uiStateActions = useUiStateStore((state) => {
     return state.actions;
   });
+  const projectionMode = useUiStateStore((state) => {
+    return state.projectionMode;
+  });
   const mode = useUiStateStore((state) => {
     return state.mode;
   });
@@ -632,8 +636,10 @@ export const ShapeSelectionControls = () => {
               Urządzenia
             </Typography>
             <Alert severity="info">
-              Wybierz urządzenie, potem kliknij na canvas. Connector łączy
-              porty RJ45.
+              Wybierz urządzenie, potem kliknij na canvas.
+              {supportsConnectorTools(projectionMode)
+                ? ' Connector łączy porty RJ45.'
+                : ''}
             </Alert>
           </Stack>
         </Section>

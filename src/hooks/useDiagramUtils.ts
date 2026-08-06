@@ -5,7 +5,8 @@ import { Size, Coords } from 'src/types';
 import {
   getUnprojectedBounds as getUnprojectedBoundsUtil,
   getFitToViewParams as getFitToViewParamsUtil,
-  CoordsUtils
+  CoordsUtils,
+  isPlan2dCanvas
 } from 'src/utils';
 import { useScene } from 'src/hooks/useScene';
 import { useResizeObserver } from './useResizeObserver';
@@ -55,7 +56,7 @@ export const useDiagramUtils = () => {
   const fitToView = useCallback(async () => {
     // Sidebar covers the right edge in 2D — fit into the free canvas only.
     const sidebarW =
-      projectionMode === 'TWO_D' && itemControls
+      isPlan2dCanvas(projectionMode) && itemControls
         ? Math.min(340, Math.max(290, Math.round(rendererSize.width * 0.22)))
         : 0;
     const viewport = {

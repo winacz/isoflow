@@ -9,7 +9,8 @@ import {
   setWindowCursor,
   BLACK_CROSSHAIR_CURSOR,
   SHAPE_2D_PORT_SNAP_DISTANCE,
-  isShape2dPortUnavailable
+  isShape2dPortUnavailable,
+  supportsConnectorTools
 } from 'src/utils';
 import {
   ModeActions,
@@ -137,6 +138,16 @@ export const Connector: ModeActions = {
   },
   mousedown: ({ uiState, scene, model, isRendererInteraction }) => {
     if (uiState.mode.type !== 'CONNECTOR' || !isRendererInteraction) return;
+
+    // 2D v3 ships no cable tooling — fall back to the cursor instead.
+    if (!supportsConnectorTools(uiState.projectionMode)) {
+      uiState.actions.setMode({
+        type: 'CURSOR',
+        showCursor: true,
+        mousedownItem: null
+      });
+      return;
+    }
 
     const startRef = resolveAnchorRef({ uiState, scene, model });
 

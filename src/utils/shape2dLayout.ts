@@ -20,6 +20,24 @@ import {
 } from 'src/config';
 import { isShape2dPlacementFree, snapTile2dToGrid } from './renderer';
 import { isDeviceTemplateId } from './deviceTemplateRegistry';
+import {
+  cleanRouteTiles,
+  edgeKey,
+  markPathEdges,
+  orthoFill,
+  pathBendWaypoints,
+  pathUsesBusyEdge
+} from './routeGeometry';
+
+// Hoisted to routeGeometry.ts so the Auto-Układ engine shares this geometry.
+export {
+  cleanRouteTiles,
+  edgeKey,
+  markPathEdges,
+  orthoFill,
+  pathBendWaypoints,
+  pathUsesBusyEdge
+} from './routeGeometry';
 
 /** Next grid-aligned coordinate at or above `value`. */
 const ceilToStep = (value: number, step: number): number => {
@@ -142,11 +160,23 @@ const sortHorizontal = (items: Footprint[]) => {
   });
 };
 
+/**
+ * Advance a packing cursor by `size` (+ gap), rounded up to whole grid cells
+ * so the next item starts on a grid line. With gap 0 this packs items as
+ * tightly as the grid allows — adjacent, no visual spacing.
+ */
+const advance = (size: number, gap: number, step: number): number => {
+  const raw = size + gap;
+  const cell = Math.max(1, step);
+  return Math.max(cell, Math.ceil(raw / cell) * cell);
+};
+
 const computePackedTargets = (
   ordered: Footprint[],
   mode: Shape2dLayoutMode,
   origin: Coords,
-  gap: number
+  gap: number,
+  step: Coords
 ): Record<string, Coords> => {
   const targets: Record<string, Coords> = {};
 
@@ -154,7 +184,7 @@ const computePackedTargets = (
     let y = origin.y;
     ordered.forEach((item) => {
       targets[item.id] = { x: origin.x, y };
-      y += item.height + gap;
+      y += advance(item.height, gap, step.y);
     });
     return targets;
   }
@@ -163,7 +193,7 @@ const computePackedTargets = (
     let x = origin.x;
     ordered.forEach((item) => {
       targets[item.id] = { x, y: origin.y };
-      x += item.width + gap;
+      x += advance(item.width, gap, step.x);
     });
     return targets;
   }
@@ -184,14 +214,14 @@ const computePackedTargets = (
   let xCursor = origin.x;
   colWidths.forEach((width, index) => {
     colXs[index] = xCursor;
-    xCursor += width + gap;
+    xCursor += advance(width, gap, step.x);
   });
 
   const rowYs: number[] = [];
   let yCursor = origin.y;
   rowHeights.forEach((height, index) => {
     rowYs[index] = yCursor;
-    yCursor += height + gap;
+    yCursor += advance(height, gap, step.y);
   });
 
   ordered.forEach((item, index) => {
@@ -251,13 +281,17 @@ export const layoutShape2dItems = ({
   allItems,
   modelItems,
   mode,
-  gap = SHAPE_2D_LAYOUT_GAP
+  /** Gapless by default — items land on adjacent grid cells. */
+  gap = 0,
+  /** Grid cell to align to (1×1 for the fine grid, 9×9 for the rack grid). */
+  gridStep = { x: 1, y: 1 }
 }: {
   selectedItems: ViewItem[];
   allItems: ViewItem[];
   modelItems: { id: string; icon?: string }[];
   mode: Shape2dLayoutMode;
   gap?: number;
+  gridStep?: Coords;
 }): Record<string, Coords> => {
   if (selectedItems.length === 0) return {};
 
@@ -273,12 +307,21 @@ export const layoutShape2dItems = ({
         ? sortHorizontal(footprints)
         : sortHorizontal(footprints);
 
-  const origin = {
-    x: Math.min(...footprints.map((item) => item.tile.x)),
-    y: Math.min(...footprints.map((item) => item.tile.y))
+  const step = {
+    x: Math.max(1, Math.round(gridStep.x)),
+    y: Math.max(1, Math.round(gridStep.y))
   };
 
-  let targets = computePackedTargets(ordered, mode, origin, gap);
+  // Anchor the block on a grid line so every packed tile stays aligned.
+  const origin = snapTile2dToGrid(
+    {
+      x: Math.min(...footprints.map((item) => item.tile.x)),
+      y: Math.min(...footprints.map((item) => item.tile.y))
+    },
+    step
+  );
+
+  let targets = computePackedTargets(ordered, mode, origin, gap, step);
   const excludeItemIds = footprints.map((item) => item.id);
 
   if (
@@ -293,15 +336,18 @@ export const layoutShape2dItems = ({
     return targets;
   }
 
-  // Nudge the whole group until free (or give up after a bounded search).
+  // Nudge the whole group until free — in whole grid cells, so a collision
+  // detour never knocks the block off the grid.
   const searchLimit = 40;
-  for (let step = 1; step <= searchLimit; step += 1) {
+  for (let n = 1; n <= searchLimit; n += 1) {
+    const dx = n * step.x;
+    const dy = n * step.y;
     const candidates = [
-      offsetTargets(targets, step, 0),
-      offsetTargets(targets, 0, step),
-      offsetTargets(targets, step, step),
-      offsetTargets(targets, -step, 0),
-      offsetTargets(targets, 0, -step)
+      offsetTargets(targets, dx, 0),
+      offsetTargets(targets, 0, dy),
+      offsetTargets(targets, dx, dy),
+      offsetTargets(targets, -dx, 0),
+      offsetTargets(targets, 0, -dy)
     ];
 
     const found = candidates.find((candidate) => {
@@ -1156,12 +1202,20 @@ export const bundleShape2dRoutes = ({
         switchCenter.x >= (bboxMinX + bboxMaxX) / 2;
       const trunkBaseX = trunkRight ? bboxMaxX + 2 : bboxMinX - 2;
 
-      // Lane order: leaves top→bottom.
+      // Rows top→bottom, and WITHIN a row the leaf nearest the trunk first.
+      //
+      // Lane index drives both the trunk lane and how far the exit run sits
+      // from the row (`runY` below). Ordering a row left→right while the trunk
+      // is on the right gave the farthest leaf lane 0, so its long horizontal
+      // run hugged the row and passed underneath every block between it and
+      // the switch. Nearest-first nests the bundle instead: the far leaf takes
+      // the outermost lane and clears them all.
       const ordered = [...group].sort((a, b) => {
         const ya = itemById.get(a.leafId)?.tile.y ?? 0;
         const yb = itemById.get(b.leafId)?.tile.y ?? 0;
         if (ya !== yb) return ya - yb;
-        return a.leafPortWorld.x - b.leafPortWorld.x;
+        const dx = a.leafPortWorld.x - b.leafPortWorld.x;
+        return trunkRight ? -dx : dx;
       });
 
       ordered.forEach((cable, laneIndex) => {
@@ -1202,12 +1256,14 @@ export const bundleShape2dRoutes = ({
         });
       const trunkBaseY = lanesBelow ? bboxMaxY + 2 : bboxMinY - 2;
 
-      // Lane order: leaves left→right.
+      // Columns left→right, and within one the leaf nearest the trunk first
+      // (same nesting reason as the vertical branch above).
       const ordered = [...group].sort((a, b) => {
         const xa = itemById.get(a.leafId)?.tile.x ?? 0;
         const xb = itemById.get(b.leafId)?.tile.x ?? 0;
         if (xa !== xb) return xa - xb;
-        return a.leafPortWorld.y - b.leafPortWorld.y;
+        const dy = a.leafPortWorld.y - b.leafPortWorld.y;
+        return lanesBelow ? -dy : dy;
       });
 
       ordered.forEach((cable, laneIndex) => {
@@ -1249,14 +1305,6 @@ export const bundleShape2dRoutes = ({
 };
 
 export type GatherDirection = 'down' | 'up' | 'left' | 'right';
-
-const cleanRouteTiles = (tiles: Coords[]): Coords[] => {
-  return tiles.filter((tile, index) => {
-    if (index === 0) return true;
-    const prev = tiles[index - 1];
-    return prev.x !== tile.x || prev.y !== tile.y;
-  });
-};
 
 const laneOffset = (index: number, count: number) => {
   return index - Math.floor((count - 1) / 2);
@@ -1641,82 +1689,6 @@ export const pickGatherDirection = ({
   }
 
   return dx >= 0 ? 'right' : 'left';
-};
-
-const edgeKey = (a: Coords, b: Coords) => {
-  if (a.x < b.x || (a.x === b.x && a.y <= b.y)) {
-    return `${a.x},${a.y}|${b.x},${b.y}`;
-  }
-  return `${b.x},${b.y}|${a.x},${a.y}`;
-};
-
-const markPathEdges = (path: Coords[], used: Set<string>) => {
-  for (let i = 1; i < path.length; i += 1) {
-    used.add(edgeKey(path[i - 1], path[i]));
-  }
-};
-
-const pathUsesBusyEdge = (path: Coords[], used: Set<string>) => {
-  for (let i = 1; i < path.length; i += 1) {
-    if (used.has(edgeKey(path[i - 1], path[i]))) return true;
-  }
-  return false;
-};
-
-/** Orthogonal L/U fill between two tiles (inclusive). */
-const orthoFill = (from: Coords, to: Coords, horizontalFirst: boolean) => {
-  const start = { x: Math.round(from.x), y: Math.round(from.y) };
-  const end = { x: Math.round(to.x), y: Math.round(to.y) };
-  const tiles: Coords[] = [{ ...start }];
-  let x = start.x;
-  let y = start.y;
-  let guard = 0;
-  const maxSteps = 800;
-
-  const runX = () => {
-    while (guard < maxSteps && x !== end.x) {
-      guard += 1;
-      x += Math.sign(end.x - x);
-      tiles.push({ x, y });
-    }
-  };
-  const runY = () => {
-    while (guard < maxSteps && y !== end.y) {
-      guard += 1;
-      y += Math.sign(end.y - y);
-      tiles.push({ x, y });
-    }
-  };
-
-  if (horizontalFirst) {
-    runX();
-    runY();
-  } else {
-    runY();
-    runX();
-  }
-
-  return tiles;
-};
-
-/** Bend corners only (drop collinear mids) — used as connector waypoints. */
-const pathBendWaypoints = (path: Coords[]): Coords[] => {
-  if (path.length < 3) return [];
-
-  const bends: Coords[] = [];
-  for (let i = 1; i < path.length - 1; i += 1) {
-    const prev = path[i - 1];
-    const cur = path[i];
-    const next = path[i + 1];
-    const inDx = Math.sign(cur.x - prev.x);
-    const inDy = Math.sign(cur.y - prev.y);
-    const outDx = Math.sign(next.x - cur.x);
-    const outDy = Math.sign(next.y - cur.y);
-    if (inDx !== outDx || inDy !== outDy) {
-      bends.push({ ...cur });
-    }
-  }
-  return bends;
 };
 
 /** Polyline through connector anchors (ports resolved via item tiles when possible). */

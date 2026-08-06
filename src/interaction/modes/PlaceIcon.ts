@@ -11,7 +11,8 @@ import {
   resolveCabinetSnap,
   isRackFormFactorItem,
   isFullWidthRackItem,
-  getRackSpanUnits
+  getRackSpanUnits,
+  isPlan2dCanvas
 } from 'src/utils';
 import {
   VIEW_ITEM_DEFAULTS,
@@ -74,7 +75,7 @@ export const PlaceIcon: ModeActions = {
 
     if (!uiState.mode.id) {
       const itemAtTile =
-        uiState.projectionMode === 'TWO_D'
+        isPlan2dCanvas(uiState.projectionMode)
           ? getShape2dItemAtTile({
               tile: uiState.mouse.position.tile,
               scene,
@@ -139,7 +140,7 @@ export const PlaceIcon: ModeActions = {
       }
 
       let tile =
-        uiState.projectionMode === 'TWO_D'
+        isPlan2dCanvas(uiState.projectionMode)
           ? snapTile2dToGrid(
               getShape2dPlacementTile(uiState.mouse.position.tile, shapeSize),
               isCabinet
@@ -149,7 +150,7 @@ export const PlaceIcon: ModeActions = {
           : uiState.mouse.position.tile;
 
       const placingPlanShape = Boolean(getShape2dSize(iconId));
-      if (uiState.projectionMode === 'TWO_D' !== placingPlanShape) {
+      if (isPlan2dCanvas(uiState.projectionMode) !== placingPlanShape) {
         return;
       }
 
@@ -158,7 +159,7 @@ export const PlaceIcon: ModeActions = {
 
       // Drop rack gear straight into a cabinet slot (same as drag-mount).
       if (
-        uiState.projectionMode === 'TWO_D' &&
+        isPlan2dCanvas(uiState.projectionMode) &&
         !isCabinet &&
         isRackFormFactorItem(draftModel)
       ) {

@@ -3,6 +3,7 @@ import { useModelStore } from 'src/stores/modelStore';
 import { useUiStateStore } from 'src/stores/uiStateStore';
 import { Icon } from 'src/types';
 import { isShape2dIcon } from 'src/config';
+import { isPlan2dCanvas } from 'src/utils';
 
 export const useIconFiltering = () => {
   const [filter, setFilter] = useState<string>('');
@@ -17,7 +18,7 @@ export const useIconFiltering = () => {
   const modeIcons = useMemo(() => {
     return icons.filter((icon: Icon) => {
       const isPlan = isShape2dIcon(icon.id);
-      return projectionMode === 'TWO_D' ? isPlan : !isPlan;
+      return isPlan2dCanvas(projectionMode) ? isPlan : !isPlan;
     });
   }, [icons, projectionMode]);
 

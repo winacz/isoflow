@@ -4,7 +4,8 @@ import { Coords, ModelItem } from 'src/types';
 import {
   getTilePosition,
   getShape2dCenterPosition,
-  getShape2dPlacementTile
+  getShape2dPlacementTile,
+  isPlan2dCanvas
 } from 'src/utils';
 import { useIcon } from 'src/hooks/useIcon';
 import { useUiStateStore } from 'src/stores/uiStateStore';
@@ -47,7 +48,7 @@ export const DragAndDrop = ({ iconId, tile, draftModelItem }: Props) => {
   });
 
   const tilePosition = useMemo(() => {
-    if (projectionMode === 'TWO_D') {
+    if (isPlan2dCanvas(projectionMode)) {
       const size =
         (draftModelItem
           ? getModelItemSize(draftModelItem)

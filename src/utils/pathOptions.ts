@@ -38,7 +38,7 @@ export const isSimplePathsEnabled = () => {
   return simplePathsEnabled;
 };
 
-export type RoutingStyle = 'ORTHOGONAL' | 'DIAGONAL' | 'STRAIGHT';
+export type RoutingStyle = 'ORTHOGONAL' | 'DIAGONAL' | 'BUS' | 'STRAIGHT';
 
 let routingStyle: RoutingStyle = 'ORTHOGONAL';
 

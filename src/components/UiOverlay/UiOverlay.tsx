@@ -12,6 +12,7 @@ import { useUiStateStore } from 'src/stores/uiStateStore';
 import { MainMenu } from 'src/components/MainMenu/MainMenu';
 import { ZoomControls } from 'src/components/ZoomControls/ZoomControls';
 import { ConnectorRelationPanel } from 'src/components/ConnectorRelationPanel/ConnectorRelationPanel';
+import { V3DensityGroupsPanel } from 'src/components/V3DensityGroups/V3DensityGroupsPanel';
 import { useResizeObserver } from 'src/hooks/useResizeObserver';
 import { ContextMenuManager } from 'src/components/ContextMenu/ContextMenuManager';
 import { ViewModeTabs } from 'src/components/ViewModeTabs/ViewModeTabs';
@@ -124,8 +125,10 @@ export const UiOverlay = () => {
   const { size: rendererSize } = useResizeObserver(rendererEl);
   const isTwoD = isPlanProjection(projectionMode);
   const isClassic2d = projectionMode === 'TWO_D';
-  const hasItemControlsContent =
-    Boolean(itemControls) || (isTwoD && selectedItemIds.length >= 2);
+  const isTwoDV3 = projectionMode === 'TWO_D_V3';
+  // In the 2D plan the dock always has content: with nothing selected it still
+  // offers Auto-Układ, which operates on the whole view.
+  const hasItemControlsContent = Boolean(itemControls) || isTwoD;
   /** Cable relation HUD: selected cable, or cable attached to a focused port. */
   const selectedConnectorId = useMemo(() => {
     if (itemControls?.type === 'CONNECTOR') {
@@ -412,6 +415,24 @@ export const UiOverlay = () => {
               <ConnectorRelationPanel connectorId={selectedConnectorId} />
             </Box>
           )}
+
+        {isTwoDV3 && !isWorkshopOpen && availableTools.includes('ITEM_CONTROLS') && (
+          <Box
+            sx={{
+              position: 'absolute',
+              transform: 'translate(-100%, -100%)'
+            }}
+            style={{
+              left:
+                rendererSize.width -
+                appPadding.x -
+                (planSidebarExpanded ? itemControlsWidth : 0),
+              top: rendererSize.height - appPadding.y
+            }}
+          >
+            <V3DensityGroupsPanel />
+          </Box>
+        )}
 
         {availableTools.includes('MAIN_MENU') && !isWorkshopOpen && (
           <Box

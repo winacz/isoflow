@@ -1,5 +1,6 @@
 import React from 'react';
 import { useUiStateStore } from 'src/stores/uiStateStore';
+import { isPlan2dCanvas } from 'src/utils';
 import { RectangleTransformControls } from './RectangleTransformControls';
 import { TextBoxTransformControls } from './TextBoxTransformControls';
 import { NodeTransformControls } from './NodeTransformControls';
@@ -11,7 +12,7 @@ export const TransformControlsManager = () => {
   const projectionMode = useUiStateStore((state) => {
     return state.projectionMode;
   });
-  const isTwoD = projectionMode === 'TWO_D';
+  const isTwoD = isPlan2dCanvas(projectionMode);
 
   switch (itemControls?.type) {
     case 'ITEM':

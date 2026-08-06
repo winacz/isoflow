@@ -18,6 +18,7 @@ import {
 import { UiElement } from 'src/components/UiElement/UiElement';
 import { ColorWheelInput } from 'src/components/ColorSelector/ColorWheelInput';
 import { useUiStateStore } from 'src/stores/uiStateStore';
+import { isPlan2dCanvas, projectionPrefsKey } from 'src/utils';
 import {
   DIAGRAM_BG_2D_LIGHT,
   DIAGRAM_BG_2D_DARK,
@@ -51,7 +52,7 @@ export const BackgroundColorLab = ({ open, onClose }: Props) => {
   const projectionMode = useUiStateStore((state) => {
     return state.projectionMode;
   });
-  const modeKey = projectionMode === 'TWO_D' ? 'TWO_D' : 'ISOMETRIC';
+  const modeKey = projectionPrefsKey(projectionMode);
   const bgColor = useUiStateStore((state) => {
     return state.canvasByMode[modeKey].backgroundColor;
   });
@@ -88,7 +89,7 @@ export const BackgroundColorLab = ({ open, onClose }: Props) => {
   const planTheme = useUiStateStore((state) => {
     return state.canvasByMode.TWO_D.theme;
   });
-  const isTwoD = projectionMode === 'TWO_D';
+  const isTwoD = isPlan2dCanvas(projectionMode);
   const isDark = canvasTheme === 'dark';
   // Iso: classic theme diagram color; Plan: light/dark theme defaults.
   const defaultBg = isTwoD

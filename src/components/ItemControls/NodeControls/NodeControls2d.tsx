@@ -76,7 +76,8 @@ import {
   getCabinetSlotTile,
   collectOccupiedRackUnits,
   isFullWidthRackItem,
-  getVlanIpHint
+  getVlanIpHint,
+  supportsConnectorTools
 } from 'src/utils';
 import {
   DeviceTypeIcon,
@@ -442,6 +443,11 @@ export const NodeControls2d = ({ id }: Props) => {
   const focusedPortIds = useUiStateStore((state) => {
     return state.focusedPortIds;
   });
+  const projectionMode = useUiStateStore((state) => {
+    return state.projectionMode;
+  });
+  // 2D v3 keeps nodes + ports only — no cable routing tools.
+  const hasConnectorTools = supportsConnectorTools(projectionMode);
   const viewItem = useViewItem(id);
   const modelItem = useModelItem(id);
   const modelItems = useModelStore((state) => {
@@ -925,7 +931,7 @@ export const NodeControls2d = ({ id }: Props) => {
             <Stack
               direction="row"
               spacing={1}
-              alignItems="flex-end"
+              alignItems="flex-start"
               justifyContent="space-between"
             >
               <Box sx={{ flex: 1, minWidth: 0 }}>
@@ -972,7 +978,6 @@ export const NodeControls2d = ({ id }: Props) => {
                   }
                   sx={{
                     flexShrink: 0,
-                    pb: 0.25,
                     display: 'flex',
                     flexDirection: 'column',
                     alignItems: 'center',
@@ -988,7 +993,7 @@ export const NodeControls2d = ({ id }: Props) => {
                       letterSpacing: 0.6,
                       color: 'text.secondary',
                       textTransform: 'uppercase',
-                      mb: 0.25
+                      mb: 0.5
                     }}
                   >
                     Kolor
@@ -2017,18 +2022,20 @@ export const NodeControls2d = ({ id }: Props) => {
               {isServerTemplate ? 'Edytuj serwer' : 'Edytuj szablon'}
             </Button>
           )}
-          <Button
-            size="small"
-            variant="outlined"
-            fullWidth
-            startIcon={<RouteOutlined />}
-            onClick={() => {
-              regenerateRoutesForItems([viewItem.id]);
-            }}
-            sx={{ textTransform: 'none', justifyContent: 'flex-start' }}
-          >
-            Generuj nowe trasy
-          </Button>
+          {hasConnectorTools && (
+            <Button
+              size="small"
+              variant="outlined"
+              fullWidth
+              startIcon={<RouteOutlined />}
+              onClick={() => {
+                regenerateRoutesForItems([viewItem.id]);
+              }}
+              sx={{ textTransform: 'none', justifyContent: 'flex-start' }}
+            >
+              Generuj nowe trasy
+            </Button>
+          )}
           <DeleteButton
             onClick={() => {
               uiStateActions.setFocusedPortId(null);

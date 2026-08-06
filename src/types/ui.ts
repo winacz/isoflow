@@ -100,6 +100,26 @@ export interface ConnectorMode {
   id: string | null;
 }
 
+/**
+ * 2D v3 connection lifecycle (§1).
+ *
+ * Deliberately separate from CONNECTOR: that mode rewrites the live connector
+ * on every mousemove, which reroutes the cable dozens of times per drag. Here
+ * the model is touched exactly twice — a zero-length connector at mousedown
+ * and the routed result at mouseup — while the drag itself only moves
+ * `preview`, a UI-only tile that renders as a straight hint line.
+ */
+export interface ConnectorV3Mode {
+  type: 'CONNECTOR_V3';
+  showCursor: boolean;
+  /** Connector being drawn; null until a valid port is grabbed. */
+  id: string | null;
+  /** Origin port captured at mousedown. */
+  start: { item: string; port: string } | null;
+  /** Live cursor tile — drives the preview only, never the model. */
+  preview: Coords | null;
+}
+
 export interface DrawRectangleMode {
   type: 'RECTANGLE.DRAW';
   showCursor: boolean;
@@ -137,6 +157,7 @@ export interface TextBoxMode {
 
 export type Mode =
   | InteractionsDisabled
+  | ConnectorV3Mode
   | CursorMode
   | PanMode
   | PlaceIconMode
@@ -196,6 +217,7 @@ export type CanvasPrefsByMode = {
   ISOMETRIC: CanvasModePrefs;
   TWO_D: CanvasModePrefs;
   TWO_D_V2: CanvasModePrefs;
+  TWO_D_V3: CanvasModePrefs;
 };
 
 /** Zoom/pan remembered per projection so switching Iso ⟷ Plan does not break the other map. */
@@ -208,6 +230,7 @@ export type ViewTransformByMode = {
   ISOMETRIC: ViewTransform;
   TWO_D: ViewTransform;
   TWO_D_V2: ViewTransform;
+  TWO_D_V3: ViewTransform;
 };
 
 export interface UiState {
@@ -297,10 +320,8 @@ export interface UiState {
    * Through-node dash coloring still applies.
    */
   simplePaths: boolean;
-  /**
-   * Soft compat for leftover Algorithms UI (no-op with restored path tooling).
-   */
-  routingStyle: 'ORTHOGONAL' | 'DIAGONAL' | 'STRAIGHT';
+  /** Cable routing style used by the Auto-Układ panel. */
+  routingStyle: 'ORTHOGONAL' | 'DIAGONAL' | 'BUS' | 'STRAIGHT';
   /** Whether the Workshop view is currently active. */
   isWorkshopOpen: boolean;
   /**

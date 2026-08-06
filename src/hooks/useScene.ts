@@ -23,6 +23,7 @@ import {
 } from 'src/stores/historyStore';
 import * as reducers from 'src/stores/reducers';
 import type { State } from 'src/stores/reducers/types';
+import { routeDensityGroupBuses } from 'src/v3/densityGroupBuses';
 import {
   getItemByIdOrThrow,
   modelFromModelStore,
@@ -47,6 +48,12 @@ import {
   INITIAL_SCENE_STATE
 } from 'src/config';
 import { getGridSnapStep } from 'src/utils/renderer';
+import {
+  runAutoLayout,
+  type AutoLayoutMetrics,
+  type PlacementMode,
+  type RouteStyle
+} from 'src/utils/autoLayout';
 
 export const useScene = () => {
   const modelActions = useModelStore((state) => state.actions);
@@ -254,7 +261,8 @@ export const useScene = () => {
         selectedItems,
         allItems: view.items ?? [],
         modelItems: state.model.items,
-        mode
+        mode,
+        gridStep: getGridSnapStep(gridStyle)
       });
 
       beginHistoryTransaction();
@@ -273,7 +281,8 @@ export const useScene = () => {
       endHistoryTransaction,
       getState,
       setState,
-      currentViewId
+      currentViewId,
+      gridStyle
     ]
   );
 
@@ -887,6 +896,198 @@ export const useScene = () => {
     ]
   );
 
+  /**
+   * Auto-Układ: place nodes without overlaps and route every in-scope cable
+   * with the crossing-aware global router.
+   *
+   * `ids` empty ⇒ the whole view. Returns metrics so the panel can report
+   * how many crossings / overlaps the run removed.
+   */
+  const runAutoLayoutForItems = useCallback(
+    (
+      ids: string[],
+      options: { style: RouteStyle; placement: PlacementMode }
+    ): AutoLayoutMetrics | null => {
+      const state = getState();
+      const view = getItemByIdOrThrow(state.model.views, currentViewId).value;
+      const viewItems = view.items ?? [];
+      if (viewItems.length === 0) return null;
+
+      const scopeItems =
+        ids.length > 0
+          ? viewItems.filter((item) => {
+              return ids.includes(item.id);
+            })
+          : viewItems;
+
+      if (scopeItems.length === 0) return null;
+
+      const result = runAutoLayout({
+        scopeItems,
+        allItems: viewItems,
+        modelItems: state.model.items,
+        connectors: view.connectors ?? [],
+        options: {
+          style: options.style,
+          placement: options.placement,
+          gridStep: getGridSnapStep(gridStyle)
+        }
+      });
+
+      beginHistoryTransaction();
+
+      Object.entries(result.targets).forEach(([id, tile]) => {
+        const newState = reducers.view({
+          action: 'UPDATE_VIEWITEM',
+          payload: { id, tile },
+          ctx: { viewId: currentViewId, state: getState() }
+        });
+        setState(newState, { skipHistory: true });
+      });
+
+      // Re-read: node moves above changed the anchors we are about to rebuild.
+      const viewAfterPlace = getItemByIdOrThrow(
+        getState().model.views,
+        currentViewId
+      ).value;
+
+      Object.entries(result.routes).forEach(([connectorId, routeTiles]) => {
+        const connector = (viewAfterPlace.connectors ?? []).find((candidate) => {
+          return candidate.id === connectorId;
+        });
+        if (!connector) return;
+
+        const endpointAnchors = connector.anchors.filter((anchor) => {
+          return Boolean(anchor.ref.item);
+        });
+        if (endpointAnchors.length < 2) return;
+
+        const anchors = [
+          endpointAnchors[0],
+          ...routeTiles.map((tile) => {
+            return { id: generateId(), ref: { tile } };
+          }),
+          endpointAnchors[endpointAnchors.length - 1]
+        ];
+
+        const newState = reducers.view({
+          action: 'UPDATE_CONNECTOR',
+          payload: {
+            id: connectorId,
+            anchors,
+            // The engine already resolved overlaps globally; the built-in
+            // pairwise resolver would only undo that work.
+            overlapResolve: 'off'
+          },
+          ctx: { viewId: currentViewId, state: getState() }
+        });
+        setState(newState, { skipHistory: true });
+      });
+
+      endHistoryTransaction();
+
+      return result.metrics;
+    },
+    [
+      beginHistoryTransaction,
+      endHistoryTransaction,
+      getState,
+      setState,
+      currentViewId,
+      gridStyle
+    ]
+  );
+
+  /** Auto-Układ, cables only — node positions are preserved. */
+  const runAutoRouteForItems = useCallback(
+    (ids: string[], options: { style: RouteStyle }) => {
+      return runAutoLayoutForItems(ids, {
+        style: options.style,
+        placement: 'none'
+      });
+    },
+    [runAutoLayoutForItems]
+  );
+
+  /**
+   * 2D v3 test: density-group cables as magistrala (shared trunk lanes).
+   * Untangles leaf↔port order by swapping nodes, then rewrites mid-waypoints.
+   */
+  const runDensityGroupBuses = useCallback(() => {
+    const state = getState();
+    const view = getItemByIdOrThrow(state.model.views, currentViewId).value;
+    const viewItems = view.items ?? [];
+    const viewConnectors = view.connectors ?? [];
+    if (viewItems.length === 0) {
+      return {
+        groupCount: 0,
+        cableCount: 0,
+        swappedNodes: 0,
+        routes: {},
+        targets: {}
+      };
+    }
+
+    const result = routeDensityGroupBuses({
+      items: viewItems,
+      modelItems: state.model.items,
+      connectors: viewConnectors
+    });
+
+    if (result.cableCount === 0 && result.swappedNodes === 0) return result;
+
+    beginHistoryTransaction();
+
+    Object.entries(result.targets).forEach(([id, tile]) => {
+      const newState = reducers.view({
+        action: 'UPDATE_VIEWITEM',
+        payload: { id, tile },
+        ctx: { viewId: currentViewId, state: getState() }
+      });
+      setState(newState, { skipHistory: true });
+    });
+
+    Object.entries(result.routes).forEach(([connectorId, routeTiles]) => {
+      const connector = viewConnectors.find((candidate) => {
+        return candidate.id === connectorId;
+      });
+      if (!connector) return;
+
+      const endpointAnchors = connector.anchors.filter((anchor) => {
+        return Boolean(anchor.ref.item);
+      });
+      if (endpointAnchors.length < 2) return;
+
+      const anchors = [
+        endpointAnchors[0],
+        ...routeTiles.map((tile) => {
+          return { id: generateId(), ref: { tile } };
+        }),
+        endpointAnchors[endpointAnchors.length - 1]
+      ];
+
+      const newState = reducers.view({
+        action: 'UPDATE_CONNECTOR',
+        payload: {
+          id: connectorId,
+          anchors,
+          overlapResolve: 'off'
+        },
+        ctx: { viewId: currentViewId, state: getState() }
+      });
+      setState(newState, { skipHistory: true });
+    });
+
+    endHistoryTransaction();
+    return result;
+  }, [
+    beginHistoryTransaction,
+    endHistoryTransaction,
+    getState,
+    setState,
+    currentViewId
+  ]);
+
   /** Soft compat for leftover AlgorithmsPopup — alias / no-op after 88e2dab restore. */
   const runSmartLayout3ForItems = runSmartLayout2ForItems;
   const runSmartLayout4ForItems = runSmartLayout2ForItems;
@@ -1198,6 +1399,9 @@ export const useScene = () => {
       runTestLayoutForItems,
       runSmartLayoutForItems,
       runSmartLayout2ForItems,
+      runAutoLayoutForItems,
+      runAutoRouteForItems,
+      runDensityGroupBuses,
       runSmartLayout3ForItems,
       runSmartLayout4ForItems,
       runClaudeSortForItems,
@@ -1241,6 +1445,9 @@ export const useScene = () => {
       runTestLayoutForItems,
       runSmartLayoutForItems,
       runSmartLayout2ForItems,
+      runAutoLayoutForItems,
+      runAutoRouteForItems,
+      runDensityGroupBuses,
       runSmartLayout3ForItems,
       runSmartLayout4ForItems,
       runClaudeSortForItems,

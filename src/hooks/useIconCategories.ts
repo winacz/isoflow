@@ -3,6 +3,7 @@ import { IconCollectionStateWithIcons } from 'src/types';
 import { useUiStateStore } from 'src/stores/uiStateStore';
 import { useModelStore } from 'src/stores/modelStore';
 import { isShape2dIcon } from 'src/config';
+import { isPlan2dCanvas } from 'src/utils';
 
 export const useIconCategories = () => {
   const icons = useModelStore((state) => {
@@ -23,7 +24,7 @@ export const useIconCategories = () => {
           icons: icons.filter((icon) => {
             if (icon.collection !== collection.id) return false;
             const isPlan = isShape2dIcon(icon.id);
-            return projectionMode === 'TWO_D' ? isPlan : !isPlan;
+            return isPlan2dCanvas(projectionMode) ? isPlan : !isPlan;
           })
         };
       })

@@ -21,7 +21,8 @@ export const ProjectionOrientationEnum = {
 export const ProjectionModeEnum = {
   ISOMETRIC: 'ISOMETRIC',
   TWO_D: 'TWO_D',
-  TWO_D_V2: 'TWO_D_V2'
+  TWO_D_V2: 'TWO_D_V2',
+  TWO_D_V3: 'TWO_D_V3'
 } as const;
 
 export type ProjectionMode = keyof typeof ProjectionModeEnum;

@@ -30,7 +30,8 @@ import {
   BLACK_CROSSHAIR_CURSOR,
   setWindowCursor,
   screenToTile2dContinuous,
-  isPlanProjection
+  isPlanProjection,
+  supportsConnectorTools
 } from 'src/utils';
 import { useScene } from 'src/hooks/useScene';
 import { isShape2dIcon, getShape2dSize } from 'src/config';
@@ -650,9 +651,11 @@ export const Cursor: ModeActions = {
   mousemove: ({ scene, uiState, model }) => {
     if (uiState.mode.type !== 'CURSOR' || !hasMovedTile(uiState.mouse)) return;
 
-    // 2D: drag from an empty port → start connector tool from that port
+    // 2D: drag from an empty port → start connector tool from that port.
+    // 2D v3 opts out: connections there come from a different library.
     if (
       isPlanProjection(uiState.projectionMode) &&
+      supportsConnectorTools(uiState.projectionMode) &&
       uiState.mode.mousedownItem?.type === 'ITEM' &&
       uiState.mouse.mousedown
     ) {

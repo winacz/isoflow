@@ -20,6 +20,7 @@ import { DragItems } from './modes/DragItems';
 import { DrawRectangle } from './modes/Rectangle/DrawRectangle';
 import { TransformRectangle } from './modes/Rectangle/TransformRectangle';
 import { Connector } from './modes/Connector';
+import { ConnectorV3 } from './modes/ConnectorV3';
 import { Pan } from './modes/Pan';
 import { PlaceIcon } from './modes/PlaceIcon';
 import { TextBox } from './modes/TextBox';
@@ -39,6 +40,7 @@ const modes: { [k in string]: ModeActions } = {
   'RECTANGLE.DRAW': DrawRectangle,
   'RECTANGLE.TRANSFORM': TransformRectangle,
   CONNECTOR: Connector,
+  CONNECTOR_V3: ConnectorV3,
   PAN: Pan,
   PLACE_ICON: PlaceIcon,
   TEXTBOX: TextBox
@@ -65,6 +67,7 @@ const restoreCursorForMode = (modeType: string) => {
       setWindowCursor('grab');
       break;
     case 'CONNECTOR':
+    case 'CONNECTOR_V3':
       setWindowCursor(BLACK_CROSSHAIR_CURSOR);
       break;
     case 'RECTANGLE.DRAW':

@@ -8,7 +8,8 @@ import {
   findConnectorStackBadges,
   getConnectorGlobalTiles,
   getStackFanOffsetsPx,
-  expandConnectorIdsThroughPatchPanels
+  expandConnectorIdsThroughPatchPanels,
+  isPlan2dCanvas
 } from 'src/utils';
 import { TILE_SIZE_2D } from 'src/config';
 import { Connector } from './Connector';
@@ -89,13 +90,13 @@ export const Connectors = ({ connectors }: Props) => {
     itemControls?.type === 'ITEM' ? itemControls.id : null;
 
   const hasSelectionFocus = Boolean(
-    selectedConnectorId || (projectionMode === 'TWO_D' && selectedItemId)
+    selectedConnectorId || (isPlan2dCanvas(projectionMode) && selectedItemId)
   );
   const softDim = mode.type === 'DRAG_ITEMS';
 
   /** Directly related cables + their patch-panel bridge siblings (both segments). */
   const focusedConnectorIds = useMemo(() => {
-    if (projectionMode !== 'TWO_D') return null;
+    if (!isPlan2dCanvas(projectionMode)) return null;
 
     const direct = new Set<string>();
     if (selectedConnectorId) {
@@ -135,7 +136,7 @@ export const Connectors = ({ connectors }: Props) => {
   ]);
 
   const pathInputs = useMemo(() => {
-    if (projectionMode !== 'TWO_D') return [];
+    if (!isPlan2dCanvas(projectionMode)) return [];
     // Jump detection is O(cables²×segments) — skip during drag.
     if (softDim) return [];
 
@@ -149,7 +150,7 @@ export const Connectors = ({ connectors }: Props) => {
 
   /** Cable under cursor — emphasize before click (idle CURSOR only). */
   const hoveredConnectorId = useMemo(() => {
-    if (projectionMode !== 'TWO_D') return null;
+    if (!isPlan2dCanvas(projectionMode)) return null;
     if (mode.type !== 'CURSOR') return null;
     if (hasMouseDown || softDim) return null;
 
@@ -188,13 +189,13 @@ export const Connectors = ({ connectors }: Props) => {
   ]);
 
   const jumpsByConnectorId = useMemo(() => {
-    if (projectionMode !== 'TWO_D' || softDim) return {};
+    if (!isPlan2dCanvas(projectionMode) || softDim) return {};
 
     return findConnectorJumpsById(pathInputs);
   }, [pathInputs, projectionMode, softDim]);
 
   const fanOffsets = useMemo(() => {
-    if (projectionMode !== 'TWO_D' || !activeStackKey) return {};
+    if (!isPlan2dCanvas(projectionMode) || !activeStackKey) return {};
 
     const badges = findConnectorStackBadges(pathInputs);
     const badge = badges.find((candidate) => {
@@ -229,7 +230,7 @@ export const Connectors = ({ connectors }: Props) => {
           (hasSelectionFocus && !isFocused) ||
           (highlightedConnectorId !== null && !isHandleTarget);
 
-        if (projectionMode === 'TWO_D') {
+        if (isPlan2dCanvas(projectionMode)) {
           return (
             <Connector2d
               key={connector.id}

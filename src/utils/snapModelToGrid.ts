@@ -8,6 +8,7 @@ import {
 import { CoordsUtils } from './CoordsUtils';
 import { getCabinetSlotTile, isCabinetItem, isFullWidthRackItem } from './cabinet';
 import { getGridSnapStep, snapTile2dToGrid } from './renderer';
+import { isPlan2dCanvas } from './projection';
 
 const tileNeedsSnap = (tile: Coords, step: { x: number; y: number }) => {
   const snapped = snapTile2dToGrid(tile, step);
@@ -144,7 +145,7 @@ export const snapModelToGrid = (
     projectionMode?: ProjectionMode;
   } = {}
 ): Model => {
-  if (options.projectionMode !== 'TWO_D') {
+  if (!isPlan2dCanvas(options.projectionMode ?? '')) {
     return model;
   }
 

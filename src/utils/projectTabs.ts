@@ -1,16 +1,19 @@
 import type { InitialData, View, ProjectionMode } from 'src/types';
 import { DEFAULT_COLOR, SHAPES_2D } from 'src/config';
 import { generateId } from './common';
+import { clonePlanViewContent } from './clonePlanView';
 import { ensureDeviceTemplateIcons } from './deviceTemplateStorage';
 import {
   ISOMETRIC_VIEW_NAME,
-  PLAN_2D_VIEW_NAME
+  PLAN_2D_VIEW_NAME,
+  PLAN_2D_V3_VIEW_NAME
 } from './plan2dv2';
 
 /** Modular tab role — drives UI + projection without hardcoding view names. */
 export const ViewKindEnum = {
   ISOMETRIC: 'ISOMETRIC',
-  PLAN_2D: 'PLAN_2D'
+  PLAN_2D: 'PLAN_2D',
+  PLAN_2D_V3: 'PLAN_2D_V3'
 } as const;
 
 export type ViewKind = keyof typeof ViewKindEnum;
@@ -25,11 +28,13 @@ export type ProjectTab = {
 export const inferViewKind = (view: Pick<View, 'name' | 'kind'>): ViewKind => {
   // Legacy PLAN_2D_V2 collapses into the modular PLAN_2D tab kind.
   if (view.kind === 'ISOMETRIC') return ViewKindEnum.ISOMETRIC;
+  if (view.kind === 'PLAN_2D_V3') return ViewKindEnum.PLAN_2D_V3;
   if (view.kind === 'PLAN_2D' || view.kind === 'PLAN_2D_V2') {
     return ViewKindEnum.PLAN_2D;
   }
   if (view.name === ISOMETRIC_VIEW_NAME) return ViewKindEnum.ISOMETRIC;
   if (view.name === PLAN_2D_VIEW_NAME) return ViewKindEnum.PLAN_2D;
+  if (view.name === PLAN_2D_V3_VIEW_NAME) return ViewKindEnum.PLAN_2D_V3;
   // Extra / custom plan-like views default to 2D.
   return ViewKindEnum.PLAN_2D;
 };
@@ -38,6 +43,8 @@ export const projectionModeForKind = (kind: ViewKind): ProjectionMode => {
   switch (kind) {
     case ViewKindEnum.ISOMETRIC:
       return 'ISOMETRIC';
+    case ViewKindEnum.PLAN_2D_V3:
+      return 'TWO_D_V3';
     case ViewKindEnum.PLAN_2D:
     default:
       return 'TWO_D';
@@ -50,6 +57,8 @@ export const defaultLabelForKind = (kind: ViewKind, name: string): string => {
       return 'Isometric';
     case ViewKindEnum.PLAN_2D:
       return name === PLAN_2D_VIEW_NAME ? '2D' : name;
+    case ViewKindEnum.PLAN_2D_V3:
+      return name === PLAN_2D_V3_VIEW_NAME ? '2D v3' : name;
     default:
       return name;
   }
@@ -61,6 +70,8 @@ export const defaultOrderForKind = (kind: ViewKind): number => {
       return 0;
     case ViewKindEnum.PLAN_2D:
       return 100;
+    case ViewKindEnum.PLAN_2D_V3:
+      return 200;
     default:
       return 50;
   }
@@ -124,6 +135,17 @@ export const ensureProjectViews = <
     ];
   }
 
+  if (!hasKind(ViewKindEnum.PLAN_2D_V3)) {
+    views = [
+      ...views,
+      emptyView({
+        name: PLAN_2D_V3_VIEW_NAME,
+        kind: ViewKindEnum.PLAN_2D_V3,
+        order: defaultOrderForKind(ViewKindEnum.PLAN_2D_V3)
+      })
+    ];
+  }
+
   if (!hasKind(ViewKindEnum.ISOMETRIC)) {
     views = [
       ...views,
@@ -135,7 +157,7 @@ export const ensureProjectViews = <
     ];
   }
 
-  // Canonical strip order: Isometric → 2D (extra 2D tabs sit after 2D).
+  // Canonical strip order: Isometric → 2D (extra 2D tabs) → 2D v3.
   const primaryPlan = views
     .filter((view) => {
       return inferViewKind(view) === ViewKindEnum.PLAN_2D;
@@ -168,6 +190,12 @@ export const ensureProjectViews = <
         order: defaultOrderForKind(ViewKindEnum.PLAN_2D)
       };
     }
+    if (kind === ViewKindEnum.PLAN_2D_V3) {
+      return {
+        ...view,
+        order: defaultOrderForKind(ViewKindEnum.PLAN_2D_V3)
+      };
+    }
     if (kind === ViewKindEnum.PLAN_2D) {
       const extraIndex = extraPlans.findIndex((candidate) => {
         return candidate.id === view.id;
@@ -179,6 +207,44 @@ export const ensureProjectViews = <
     }
     return view;
   });
+
+  // Seed an empty 2D v3 tab from the 2D plan so it opens on the real project
+  // (same devices, same wiring) instead of a blank canvas. Only ever fills a
+  // view that has nothing in it — work done in v3 is never overwritten.
+  const planV3 = views.find((view) => {
+    return inferViewKind(view) === ViewKindEnum.PLAN_2D_V3;
+  });
+  const sourceItems = model.items;
+
+  if (
+    planV3 &&
+    planV3.items.length === 0 &&
+    primaryPlan &&
+    primaryPlan.items.length > 0 &&
+    Array.isArray(sourceItems)
+  ) {
+    const copy = clonePlanViewContent({
+      source: primaryPlan,
+      modelItems: sourceItems
+    });
+
+    views = views.map((view) => {
+      if (view.id !== planV3.id) return view;
+      return {
+        ...view,
+        items: copy.items,
+        connectors: copy.connectors,
+        rectangles: copy.rectangles,
+        textBoxes: copy.textBoxes
+      };
+    });
+
+    return {
+      ...model,
+      views,
+      items: [...sourceItems, ...copy.modelItems]
+    };
+  }
 
   return { ...model, views };
 };
@@ -272,6 +338,11 @@ export const createEmptyProject = (
         name: PLAN_2D_VIEW_NAME,
         kind: ViewKindEnum.PLAN_2D,
         order: defaultOrderForKind(ViewKindEnum.PLAN_2D)
+      }),
+      emptyView({
+        name: PLAN_2D_V3_VIEW_NAME,
+        kind: ViewKindEnum.PLAN_2D_V3,
+        order: defaultOrderForKind(ViewKindEnum.PLAN_2D_V3)
       })
     ],
     view: isoId

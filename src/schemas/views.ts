@@ -4,8 +4,13 @@ import { rectangleSchema } from './rectangle';
 import { connectorSchema } from './connector';
 import { textBoxSchema } from './textBox';
 
-/** Modular tab role — Isometric / Plan 2D / schematic 2Dv2. */
-export const viewKindSchema = z.enum(['ISOMETRIC', 'PLAN_2D', 'PLAN_2D_V2']);
+/** Modular tab role — Isometric / Plan 2D / schematic 2Dv2 / Plan 2D v3. */
+export const viewKindSchema = z.enum([
+  'ISOMETRIC',
+  'PLAN_2D',
+  'PLAN_2D_V2',
+  'PLAN_2D_V3'
+]);
 
 export const viewItemSchema = z.object({
   id,
