@@ -93,7 +93,7 @@ export const ConnectorRelationPanel = ({
               boxShadow: 'none',
               display: 'flex',
               flexDirection: 'column',
-              overflow: 'auto',
+              overflow: 'hidden',
               overscrollBehavior: 'contain',
               '&::-webkit-scrollbar': { display: 'none' }
             }
@@ -101,8 +101,8 @@ export const ConnectorRelationPanel = ({
               minWidth: 260,
               maxWidth: 340
             }),
-        px: embedded ? 1.5 : 1.75,
-        py: embedded ? 1.25 : 1.5,
+        px: embedded ? 1 : 1.25,
+        py: embedded ? 0.75 : 1,
         boxSizing: 'border-box',
         border: isMismatchLink ? '2px solid' : undefined,
         borderColor: isMismatchLink ? TRUNK_MISMATCH_COLOR : undefined
@@ -110,19 +110,19 @@ export const ConnectorRelationPanel = ({
     >
       <Typography
         sx={{
-          fontSize: 11,
+          fontSize: 10,
           fontWeight: 700,
-          letterSpacing: 0.55,
+          letterSpacing: 0.5,
           color: isMismatchLink ? TRUNK_MISMATCH_COLOR : 'text.secondary',
           textTransform: 'uppercase',
-          mb: 1
+          mb: 0.5
         }}
       >
         {isMismatchLink ? 'Błąd łącza' : 'Połączenie'}
       </Typography>
 
       {linkSummary.endpoints.length === 0 ? (
-        <Typography sx={{ fontSize: 14, color: 'text.secondary' }}>
+        <Typography sx={{ fontSize: 13, color: 'text.secondary' }}>
           Brak endpointów
         </Typography>
       ) : (
@@ -132,8 +132,8 @@ export const ConnectorRelationPanel = ({
           return (
             <Box key={`${endpoint.itemId}-${endpoint.portId}-${index}`}>
               {index > 0 && (
-                <Box sx={{ display: 'flex', justifyContent: 'center', my: 0.75 }}>
-                  <Box sx={{ width: 2, height: 16, bgcolor: 'divider', borderRadius: 1 }} />
+                <Box sx={{ display: 'flex', justifyContent: 'center', my: 0.25 }}>
+                  <Box sx={{ width: 2, height: 12, bgcolor: 'divider', borderRadius: 1 }} />
                 </Box>
               )}
               <Box
@@ -154,15 +154,15 @@ export const ConnectorRelationPanel = ({
                 sx={{
                   display: 'flex',
                   flexDirection: 'column',
-                  gap: 0.75,
+                  gap: 0.25,
                   width: '100%',
                   textAlign: 'left',
                   border: '1px solid',
                   borderColor: 'divider',
                   background: 'transparent',
-                  p: 1.25,
+                  p: 0.75,
                   m: 0,
-                  borderRadius: 2,
+                  borderRadius: 1.5,
                   cursor: canJump ? 'pointer' : 'default',
                   font: 'inherit',
                   color: 'inherit',
@@ -185,31 +185,31 @@ export const ConnectorRelationPanel = ({
               >
                 <Typography
                   sx={{
-                    fontSize: 14,
+                    fontSize: 12,
                     fontWeight: 700,
-                    lineHeight: 1.3,
+                    lineHeight: 1.2,
                     color: canJump ? 'primary.main' : 'text.primary',
                     display: 'flex',
                     alignItems: 'center',
-                    gap: 1
+                    gap: 0.75
                   }}
                 >
-                  <DeviceTypeIcon iconId={endpoint.icon} sx={{ fontSize: 16 }} />
+                  <DeviceTypeIcon iconId={endpoint.icon} sx={{ fontSize: 14 }} />
                   {endpoint.itemName}
                 </Typography>
                 
-                <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.5, mt: 0.25 }}>
-                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                    <Typography sx={{ fontSize: 11, color: 'text.secondary', fontWeight: 600, width: 34, letterSpacing: 0.5 }}>
+                <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.25, mt: 0.25 }}>
+                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.75 }}>
+                    <Typography sx={{ fontSize: 10, color: 'text.secondary', fontWeight: 600, width: 30, letterSpacing: 0.5 }}>
                       PORT
                     </Typography>
                     <Typography
                       sx={{
-                        fontSize: 12,
+                        fontSize: 11,
                         fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
                         bgcolor: 'action.selected',
-                        px: 0.75,
-                        py: 0.25,
+                        px: 0.5,
+                        py: 0.1,
                         borderRadius: 1,
                         color: 'text.primary',
                         fontWeight: 500
@@ -218,28 +218,28 @@ export const ConnectorRelationPanel = ({
                       {endpoint.portLabel}
                     </Typography>
                     {endpoint.type === 'trunk' && (
-                      <Typography sx={{ fontSize: 10, fontWeight: 700, bgcolor: 'info.main', color: 'white', px: 0.5, py: 0.25, borderRadius: 0.5, lineHeight: 1 }}>
+                      <Typography sx={{ fontSize: 9, fontWeight: 700, bgcolor: 'info.main', color: 'white', px: 0.5, py: 0.1, borderRadius: 0.5, lineHeight: 1 }}>
                         TRUNK
                       </Typography>
                     )}
                     {endpoint.isNonVlanAware && (
-                      <Typography sx={{ fontSize: 10, color: 'text.secondary', fontWeight: 700, bgcolor: 'action.disabledBackground', px: 0.5, py: 0.25, borderRadius: 0.5, lineHeight: 1 }}>
+                      <Typography sx={{ fontSize: 9, color: 'text.secondary', fontWeight: 700, bgcolor: 'action.disabledBackground', px: 0.5, py: 0.1, borderRadius: 0.5, lineHeight: 1 }}>
                         HOST
                       </Typography>
                     )}
                   </Box>
                   
-                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                    <Typography sx={{ fontSize: 11, color: 'text.secondary', fontWeight: 600, width: 34, letterSpacing: 0.5 }}>
+                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.75 }}>
+                    <Typography sx={{ fontSize: 10, color: 'text.secondary', fontWeight: 600, width: 30, letterSpacing: 0.5 }}>
                       VLAN
                     </Typography>
-                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.75 }}>
+                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
                       {endpoint.vlanColor && !endpoint.isNonVlanAware && (
-                        <Box sx={{ width: 8, height: 8, borderRadius: '50%', bgcolor: endpoint.vlanColor }} />
+                        <Box sx={{ width: 6, height: 6, borderRadius: '50%', bgcolor: endpoint.vlanColor }} />
                       )}
                       <Typography
                         sx={{
-                          fontSize: 12,
+                          fontSize: 11,
                           fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
                           color: 'text.primary',
                           fontWeight: 500
@@ -251,13 +251,13 @@ export const ConnectorRelationPanel = ({
                   </Box>
                   
                   {endpoint.ip && (
-                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                      <Typography sx={{ fontSize: 11, color: 'text.secondary', fontWeight: 600, width: 34, letterSpacing: 0.5 }}>
+                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.75 }}>
+                      <Typography sx={{ fontSize: 10, color: 'text.secondary', fontWeight: 600, width: 30, letterSpacing: 0.5 }}>
                         IP
                       </Typography>
                       <Typography
                         sx={{
-                          fontSize: 12,
+                          fontSize: 11,
                           fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
                           color: 'text.primary',
                           fontWeight: 500
@@ -277,11 +277,11 @@ export const ConnectorRelationPanel = ({
       {isMismatchLink && (
         <Typography
           sx={{
-            mt: 1,
-            fontSize: 12,
+            mt: 0.5,
+            fontSize: 11,
             fontWeight: 600,
             color: TRUNK_MISMATCH_COLOR,
-            lineHeight: 1.4
+            lineHeight: 1.3
           }}
         >
           {linkSummary.endpoints.some((endpoint) => {
@@ -294,8 +294,8 @@ export const ConnectorRelationPanel = ({
 
       <Box
         sx={{
-          mt: 1.25,
-          pt: 1.25,
+          mt: 0.75,
+          pt: 0.75,
           borderTop: '1px solid',
           borderColor: 'divider',
           display: 'flex',
@@ -305,8 +305,8 @@ export const ConnectorRelationPanel = ({
       >
         <Box
           sx={{
-            width: 14,
-            height: 14,
+            width: 12,
+            height: 12,
             borderRadius: '50%',
             flexShrink: 0,
             bgcolor: isTrunkLink
@@ -317,7 +317,7 @@ export const ConnectorRelationPanel = ({
             border: '1px solid rgba(0,0,0,0.12)'
           }}
         />
-        <Typography sx={{ fontSize: 13, fontWeight: 600 }}>
+        <Typography sx={{ fontSize: 12, fontWeight: 600 }}>
           {linkSummary.vlanLabel}
         </Typography>
       </Box>

@@ -1608,11 +1608,13 @@ export const getScaledShape2dItemIds = ({
     }
   });
 
-  extraScaledItemIds?.forEach((id) => {
-    if (!id) return;
-    if (iconById.get(id) === SHAPE_2D_CABINET_ID) return;
-    ids.add(id);
-  });
+  if (extraScaledItemIds) {
+    for (const id of extraScaledItemIds) {
+      if (!id) continue;
+      if (iconById.get(id) === SHAPE_2D_CABINET_ID) continue;
+      ids.add(id);
+    }
+  }
 
   return ids;
 };
