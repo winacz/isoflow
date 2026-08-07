@@ -1,7 +1,6 @@
 import { useEffect, useRef } from 'react';
 import { useUiStateStore } from 'src/stores/uiStateStore';
 import { useModelStoreApi } from 'src/stores/modelStore';
-import { useSceneStoreApi } from 'src/stores/sceneStore';
 import { useUiStateStoreApi } from 'src/stores/uiStateStore';
 import { useResizeObserver } from 'src/hooks/useResizeObserver';
 import {
@@ -43,7 +42,6 @@ export const Shape2dPortHoverController = () => {
     return state.actions.setShape2dPortHover;
   });
   const modelStore = useModelStoreApi();
-  const sceneStore = useSceneStoreApi();
   const uiStateStoreApi = useUiStateStoreApi();
   const { size: rendererSize } = useResizeObserver(rendererEl);
   const clearTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -83,21 +81,14 @@ export const Shape2dPortHoverController = () => {
     });
 
     const model = modelStore.getState();
-    const sceneStoreState = sceneStore.getState();
+
     const uiState = uiStateStoreApi.getState();
     const currentView = model.views.find((v) => v.id === uiState.view);
 
+    // getShape2dPortAtPoint only reads scene.items — skip connector/textBox
+    // mapping to avoid O(n) work on every mouse move.
     const mockScene = {
-      items: currentView?.items ?? [],
-      connectors: (currentView?.connectors ?? []).map((connector) => ({
-        ...connector,
-        ...sceneStoreState.connectors[connector.id]
-      })),
-      rectangles: currentView?.rectangles ?? [],
-      textBoxes: (currentView?.textBoxes ?? []).map((textBox) => ({
-        ...textBox,
-        ...sceneStoreState.textBoxes[textBox.id]
-      }))
+      items: currentView?.items ?? []
     } as any;
 
     // When a port is hovered the device gets CSS scale(1.15) — tell the
@@ -141,7 +132,6 @@ export const Shape2dPortHoverController = () => {
     shape2dPortHover,
     setShape2dPortHover,
     modelStore,
-    sceneStore,
     uiStateStoreApi
   ]);
 

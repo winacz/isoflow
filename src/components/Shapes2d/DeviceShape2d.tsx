@@ -86,7 +86,7 @@ interface Props {
  * Topology-card device (Switch / PC): thin frame, header, RJ45/SFP port grid.
  * Each port cell is a connection handle (exact tile center).
  */
-export const DeviceShape2d = ({
+const DeviceShape2dComponent = ({
   itemId,
   shapeId,
   width,
@@ -1853,6 +1853,68 @@ export const DeviceShape2d = ({
     </Box>
   );
 };
+
+function shallowCompareArraysOrSets(a: any, b: any) {
+  if (a === b) return true;
+  if (!a || !b) return false;
+  if (a instanceof Set && b instanceof Set) {
+    if (a.size !== b.size) return false;
+    for (const item of a) if (!b.has(item)) return false;
+    return true;
+  }
+  if (Array.isArray(a) && Array.isArray(b)) {
+    if (a.length !== b.length) return false;
+    for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return false;
+    return true;
+  }
+  if (a instanceof Set && Array.isArray(b)) {
+    if (a.size !== b.length) return false;
+    for (const item of b) if (!a.has(item)) return false;
+    return true;
+  }
+  if (Array.isArray(a) && b instanceof Set) {
+    if (a.length !== b.size) return false;
+    for (const item of a) if (!b.has(item)) return false;
+    return true;
+  }
+  return false;
+}
+
+export const DeviceShape2d = React.memo(
+  DeviceShape2dComponent,
+  (prev, next) => {
+    if (prev.itemId !== next.itemId) return false;
+    if (prev.shapeId !== next.shapeId) return false;
+    if (prev.width !== next.width) return false;
+    if (prev.height !== next.height) return false;
+    if (prev.name !== next.name) return false;
+    if (prev.subtitle !== next.subtitle) return false;
+    if (prev.centered !== next.centered) return false;
+    if (prev.color !== next.color) return false;
+    if (prev.ip !== next.ip) return false;
+    if (prev.nodeIcon !== next.nodeIcon) return false;
+    if (prev.description !== next.description) return false;
+    if (prev.showShadow !== next.showShadow) return false;
+    if (prev.vlanBorderColor !== next.vlanBorderColor) return false;
+    if (prev.poweredByPoe !== next.poweredByPoe) return false;
+    if (prev.poePowerWarning !== next.poePowerWarning) return false;
+    if (prev.hoveredPortId !== next.hoveredPortId) return false;
+    if (prev.attentionPortId !== next.attentionPortId) return false;
+    if (prev.attentionToken !== next.attentionToken) return false;
+    if (prev.layoutOverride !== next.layoutOverride) return false;
+
+    if (!shallowCompareArraysOrSets(prev.ports, next.ports)) return false;
+    if (!shallowCompareArraysOrSets(prev.svis, next.svis)) return false;
+    if (!shallowCompareArraysOrSets(prev.connectedPortIds, next.connectedPortIds)) return false;
+    if (!shallowCompareArraysOrSets(prev.mismatchPortIds, next.mismatchPortIds)) return false;
+    if (!shallowCompareArraysOrSets(prev.focusedPortIds, next.focusedPortIds)) return false;
+    if (!shallowCompareArraysOrSets(prev.peerHighlightPortIds, next.peerHighlightPortIds)) return false;
+    if (prev.modelItems !== next.modelItems) return false;
+
+    return true;
+  }
+);
+DeviceShape2d.displayName = 'DeviceShape2d';
 
 /** @deprecated use DeviceShape2d — kept as alias for Switch */
 export const SwitchShape = (
