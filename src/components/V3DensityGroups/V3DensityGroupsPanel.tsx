@@ -2,13 +2,15 @@ import React, { useCallback, useMemo, useState } from 'react';
 import { Button, Stack, Typography } from '@mui/material';
 import {
   BubbleChartOutlined,
-  AccountTreeOutlined
+  AccountTreeOutlined,
+  TimelineOutlined
 } from '@mui/icons-material';
 import { UiElement } from 'src/components/UiElement/UiElement';
 import { useScene } from 'src/hooks/useScene';
 import { useModelStore } from 'src/stores/modelStore';
 import { computeDensityGroups } from 'src/v3/densityGroups';
 import { useDensityGroupsDebugStore } from 'src/v3/densityGroupsStore';
+import type { DensityBusExitStyle } from 'src/v3/densityGroupBuses';
 
 /**
  * Test panel for 2D v3 density grouping — rings + magistrala routing.
@@ -35,25 +37,28 @@ export const V3DensityGroupsPanel = () => {
     return computeDensityGroups({ items, modelItems }).length;
   }, [items, modelItems]);
 
-  const onBus = useCallback(() => {
-    setBusBusy(true);
-    setVisible(true);
-    setTimeout(() => {
-      try {
-        const result = runDensityGroupBuses();
-        setBusSummary(
-          result.cableCount === 0
-            ? 'Brak kabli do magistrali'
-            : `Magistrala: ${result.cableCount} kabli · ${result.groupCount} grup` +
-                (result.swappedNodes
-                  ? ` · zamieniono ${result.swappedNodes}`
-                  : '')
-        );
-      } finally {
-        setBusBusy(false);
-      }
-    }, 0);
-  }, [runDensityGroupBuses, setVisible]);
+  const runBus = useCallback(
+    (exitStyle: DensityBusExitStyle, label: string) => {
+      setBusBusy(true);
+      setVisible(true);
+      setTimeout(() => {
+        try {
+          const result = runDensityGroupBuses({ exitStyle });
+          setBusSummary(
+            result.cableCount === 0
+              ? 'Brak kabli do magistrali'
+              : `${label}: ${result.cableCount} kabli · ${result.groupCount} grup` +
+                  (result.swappedNodes
+                    ? ` · zamieniono ${result.swappedNodes}`
+                    : '')
+          );
+        } finally {
+          setBusBusy(false);
+        }
+      }, 0);
+    },
+    [runDensityGroupBuses, setVisible]
+  );
 
   return (
     <UiElement sx={{ px: 1.25, py: 1, width: 240 }}>
@@ -91,8 +96,10 @@ export const V3DensityGroupsPanel = () => {
           color="secondary"
           startIcon={<AccountTreeOutlined />}
           disabled={busBusy || groupCount === 0}
-          onClick={onBus}
-          title="Dla każdej grupy gęstości prowadzi kable wspólną magistralą (BUS)."
+          onClick={() => {
+            return runBus('orthogonal', 'Magistrala');
+          }}
+          title="Ortogonalna magistrala; nakładania X/Y → przesunięcie z krótką przekątną z portu celu."
           sx={{
             justifyContent: 'flex-start',
             textTransform: 'none',
@@ -101,6 +108,25 @@ export const V3DensityGroupsPanel = () => {
           }}
         >
           Magistrala z grup
+        </Button>
+        <Button
+          size="small"
+          variant="contained"
+          color="secondary"
+          startIcon={<TimelineOutlined />}
+          disabled={busBusy || groupCount === 0}
+          onClick={() => {
+            return runBus('oneBend', 'Diagonalny');
+          }}
+          title="Pozioma magistrala z grupy, krótki offset, potem przekątna do portów."
+          sx={{
+            justifyContent: 'flex-start',
+            textTransform: 'none',
+            fontSize: 12,
+            py: 0.4
+          }}
+        >
+          Diagonalny z grup
         </Button>
         <Typography sx={{ fontSize: 11, color: 'text.secondary' }}>
           {groupCount}{' '}

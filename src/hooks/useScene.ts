@@ -24,6 +24,7 @@ import {
 import * as reducers from 'src/stores/reducers';
 import type { State } from 'src/stores/reducers/types';
 import { routeDensityGroupBuses } from 'src/v3/densityGroupBuses';
+import { isSwitchLikeIcon } from 'src/utils/shape2dLayout';
 import {
   getItemByIdOrThrow,
   modelFromModelStore,
@@ -1013,7 +1014,8 @@ export const useScene = () => {
    * 2D v3 test: density-group cables as magistrala (shared trunk lanes).
    * Untangles leaf↔port order by swapping nodes, then rewrites mid-waypoints.
    */
-  const runDensityGroupBuses = useCallback(() => {
+  const runDensityGroupBuses = useCallback(
+    (options?: { exitStyle?: 'orthogonal' | 'oneBend' }) => {
     const state = getState();
     const view = getItemByIdOrThrow(state.model.views, currentViewId).value;
     const viewItems = view.items ?? [];
@@ -1028,10 +1030,12 @@ export const useScene = () => {
       };
     }
 
+    const exitStyle = options?.exitStyle ?? 'orthogonal';
     const result = routeDensityGroupBuses({
       items: viewItems,
       modelItems: state.model.items,
-      connectors: viewConnectors
+      connectors: viewConnectors,
+      exitStyle
     });
 
     if (result.cableCount === 0 && result.swappedNodes === 0) return result;
@@ -1058,9 +1062,18 @@ export const useScene = () => {
       });
       if (endpointAnchors.length < 2) return;
 
+      // Routes are always leaf→switch; flip when the connector is stored switch→leaf.
+      const firstItemId = endpointAnchors[0].ref.item!;
+      const firstIcon = state.model.items.find((item) => {
+        return item.id === firstItemId;
+      })?.icon;
+      const tiles = isSwitchLikeIcon(firstIcon)
+        ? [...routeTiles].reverse()
+        : routeTiles;
+
       const anchors = [
         endpointAnchors[0],
-        ...routeTiles.map((tile) => {
+        ...tiles.map((tile) => {
           return { id: generateId(), ref: { tile } };
         }),
         endpointAnchors[endpointAnchors.length - 1]
@@ -1071,7 +1084,10 @@ export const useScene = () => {
         payload: {
           id: connectorId,
           anchors,
-          overlapResolve: 'off'
+          overlapResolve: 'off',
+          // Preserve exact Magistala / Diagonalny waypoints (incl. 45° stubs).
+          // A* between mids was re-creating shared verticals on the port column.
+          fastPath: true
         },
         ctx: { viewId: currentViewId, state: getState() }
       });
