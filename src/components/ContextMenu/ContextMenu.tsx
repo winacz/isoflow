@@ -1,17 +1,21 @@
 import React from 'react';
-import { Menu, MenuItem } from '@mui/material';
+import { Divider, ListSubheader, Menu, MenuItem } from '@mui/material';
 import { Coords } from 'src/types';
 
-interface MenuItemI {
+export interface ContextMenuEntry {
   label: string;
-  onClick: () => void;
+  onClick?: () => void;
+  disabled?: boolean;
+  /** Non-clickable section title. */
+  isHeader?: boolean;
+  dividerBefore?: boolean;
 }
 
 interface Props {
   onClose: () => void;
   position: Coords;
   anchorEl?: HTMLElement;
-  menuItems: MenuItemI[];
+  menuItems: ContextMenuEntry[];
 }
 
 export const ContextMenu = ({
@@ -31,20 +35,43 @@ export const ContextMenu = ({
       onClose={onClose}
       PaperProps={{
         sx: {
+          minWidth: 220,
           '& .MuiMenuItem-root': {
             minHeight: 28,
             py: 0.5,
             fontSize: 13,
             lineHeight: 1.25
+          },
+          '& .MuiListSubheader-root': {
+            lineHeight: 1.3,
+            py: 0.75,
+            fontSize: 10,
+            fontWeight: 700,
+            letterSpacing: 0.5,
+            textTransform: 'uppercase',
+            color: 'text.secondary'
           }
         }
       }}
     >
-      {menuItems.map((item) => {
+      {menuItems.map((item, index) => {
+        const key = `${item.label}-${index}`;
         return (
-          <MenuItem key={item.label} onClick={item.onClick}>
-            {item.label}
-          </MenuItem>
+          <React.Fragment key={key}>
+            {item.dividerBefore && <Divider component="li" sx={{ my: 0.5 }} />}
+            {item.isHeader ? (
+              <ListSubheader disableSticky>{item.label}</ListSubheader>
+            ) : (
+              <MenuItem
+                disabled={item.disabled}
+                onClick={() => {
+                  item.onClick?.();
+                }}
+              >
+                {item.label}
+              </MenuItem>
+            )}
+          </React.Fragment>
         );
       })}
     </Menu>

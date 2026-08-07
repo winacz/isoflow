@@ -454,14 +454,22 @@ export const UiStateProvider = ({ children }: ProviderProps) => {
   );
 };
 
-export function useUiStateStore<T>(selector: (state: UiStateStore) => T) {
+export function useUiStateStore<T>(
+  selector: (state: UiStateStore) => T,
+  /**
+   * Custom equality check — lets a component treat certain state changes as
+   * "no-ops" (e.g. a port-hover update on an unrelated node) so it skips
+   * re-rendering instead of relying on reference equality alone.
+   */
+  equalityFn?: (a: T, b: T) => boolean
+) {
   const store = useContext(UiStateContext);
 
   if (store === null) {
     throw new Error('Missing provider in the tree');
   }
 
-  const value = useStore(store, selector);
+  const value = useStore(store, selector, equalityFn);
   return value;
 }
 

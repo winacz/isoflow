@@ -16,7 +16,6 @@ import {
 import { useScene } from 'src/hooks/useScene';
 import { useUiStateStore } from 'src/stores/uiStateStore';
 import { TIDY_IN_PLACE_VARIANTS, supportsConnectorTools, normalizeDeviceColorInput, parseDeviceColor } from 'src/utils';
-import { AutoLayoutControls } from 'src/components/ItemControls/AutoLayoutControls/AutoLayoutControls';
 import { ControlsContainer } from '../components/ControlsContainer';
 import { useModelStore } from 'src/stores/modelStore';
 import { ColorPicker } from 'src/components/ColorSelector/ColorPicker';
@@ -101,7 +100,6 @@ export const MultiNodeControls = () => {
 
   return (
     <ControlsContainer>
-      {hasConnectorTools && <AutoLayoutControls />}
       <Box sx={{ px: 1.25, pt: 1, pb: 1.25 }}>
         <Typography
           sx={{
@@ -114,6 +112,9 @@ export const MultiNodeControls = () => {
           }}
         >
           Algorytmy
+        </Typography>
+        <Typography sx={{ fontSize: 11, color: 'text.secondary', mb: 1 }}>
+          Auto-Układ — PPM na planie.
         </Typography>
         <Typography sx={{ fontSize: 12, fontWeight: 600, mb: 1 }}>
           {count === 0

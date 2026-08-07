@@ -171,6 +171,12 @@ export const useInteractionManager = () => {
         item: itemAtTile,
         tile
       });
+    } else if (isPlanProjection(liveUiState.projectionMode)) {
+      // Blank plan tile — still open context menu (Auto-Układ / grupy).
+      liveUiState.actions.setContextMenu({
+        item: { type: 'EMPTY' },
+        tile
+      });
     } else if (liveUiState.contextMenu) {
       liveUiState.actions.setContextMenu(null);
     }

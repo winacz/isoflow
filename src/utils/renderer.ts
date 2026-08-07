@@ -1520,7 +1520,10 @@ export const getShape2dPortAtPoint = ({
       const isSticky =
         stickyHover?.itemId === viewItem.id &&
         stickyHover?.portId === port.id;
-      const half = isSticky ? stickyHalf : baseHalf;
+      // When the node is CSS-scaled, the jack is also larger on screen.
+      const half =
+        (isSticky ? stickyHalf : baseHalf) *
+        (isScaled ? HIGHLIGHT_SCALE : 1);
 
       if (dx > half || dy > half) continue;
 

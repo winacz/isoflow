@@ -187,7 +187,8 @@ export const DialogTypeEnum = {
 } as const;
 
 export interface ContextMenu {
-  item: ItemReference;
+  /** Target under the cursor, or EMPTY when RMB on blank plan canvas. */
+  item: ItemReference | { type: 'EMPTY' };
   tile: Coords;
 }
 

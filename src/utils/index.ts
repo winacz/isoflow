@@ -38,6 +38,7 @@ export * from './htmlExportHover';
 export * from './cloneModelItem';
 export * from './clonePlanView';
 export * from './vlanIpHint';
+export * from './portHoverDom';
 
 // NOT re-exported here on purpose: offscreenPlanRenderer, exportAsHtml and
 // exportAsPdf render React. Re-exporting them made every consumer of this

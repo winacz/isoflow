@@ -85,10 +85,6 @@ export const Nodes = React.memo(({ nodes }: Props) => {
     return map;
   }, [modelItems]);
 
-  const shape2dPortHover = useUiStateStore((state) => {
-    return state.shape2dPortHover;
-  });
-
   const highlightedNodeIds = useMemo(() => {
     if (!isPlanProjection(projectionMode)) {
       return null;
@@ -181,30 +177,6 @@ export const Nodes = React.memo(({ nodes }: Props) => {
       }
     }
 
-    if (shape2dPortHover) {
-      ids.add(shape2dPortHover.itemId);
-      if (shape2dPortHover.portId) {
-        const hoverConnectorIds: string[] = [];
-        connectors.forEach((connector) => {
-          if (connectorUsesPort(connector, shape2dPortHover.itemId, shape2dPortHover.portId!)) {
-            hoverConnectorIds.push(connector.id);
-          }
-        });
-        expandConnectorIdsThroughPatchPanels({
-          connectorIds: hoverConnectorIds,
-          connectors,
-          modelItems
-        }).forEach((connectorId) => {
-          const connector = connectors.find((con) => con.id === connectorId);
-          getEndpointItemIds(connector).forEach((id) => {
-            if (!isPatchPanelItem(modelItems.find((m) => m.id === id))) {
-              ids.add(id);
-            }
-          });
-        });
-      }
-    }
-
     return ids.size > 0 ? ids : null;
   }, [
     projectionMode,
@@ -214,8 +186,7 @@ export const Nodes = React.memo(({ nodes }: Props) => {
     focusedPortIds,
     modelItems,
     iconById,
-    nodes,
-    shape2dPortHover
+    nodes
   ]);
 
   /**
@@ -307,12 +278,26 @@ export const Nodes = React.memo(({ nodes }: Props) => {
   return (
     <>
       {[...nodes].reverse().map((node) => {
-        let selectionTone: 'normal' | 'highlighted' | 'dimmed' = 'normal';
+        let selectionTone: 'normal' | 'highlighted' | 'related' | 'dimmed' =
+          'normal';
 
         if (highlightedNodeIds) {
-          selectionTone = highlightedNodeIds.has(node.id)
-            ? 'highlighted'
-            : 'dimmed';
+          if (selectedItemIds.includes(node.id)) {
+            // Clicked / multi-selected — full hover-scale emphasis.
+            selectionTone = 'highlighted';
+          } else if (
+            node.parentId &&
+            selectedItemIds.includes(node.parentId) &&
+            highlightedNodeIds.has(node.id)
+          ) {
+            // Gear mounted in a selected cabinet — keep scale with the cabinet.
+            selectionTone = 'highlighted';
+          } else if (highlightedNodeIds.has(node.id)) {
+            // Cable peers: glow only, no scale.
+            selectionTone = 'related';
+          } else {
+            selectionTone = 'dimmed';
+          }
         }
 
         const isCabinet = iconById.get(node.id) === SHAPE_2D_CABINET_ID;
@@ -320,7 +305,10 @@ export const Nodes = React.memo(({ nodes }: Props) => {
         const baseOrder = isCabinet
           ? CABINET_Z_BASE + depth
           : DEVICE_Z_BASE + depth;
-        const order = selectionTone === 'highlighted' ? baseOrder + 10000 : baseOrder;
+        const order =
+          selectionTone === 'highlighted' || selectionTone === 'related'
+            ? baseOrder + 10000
+            : baseOrder;
 
         return (
           <Node

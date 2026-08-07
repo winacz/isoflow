@@ -7,8 +7,7 @@ import { IconSelectionControls } from 'src/components/ItemControls/IconSelection
 import { ShapeSelectionControls } from 'src/components/ItemControls/ShapeSelectionControls/ShapeSelectionControls';
 import { DeviceTemplateEditorControls } from 'src/components/ItemControls/DeviceCreator/DeviceTemplateEditorControls';
 import { MultiNodeControls } from 'src/components/ItemControls/MultiNodeControls/MultiNodeControls';
-import { AutoLayoutControls } from 'src/components/ItemControls/AutoLayoutControls/AutoLayoutControls';
-import { isPlanProjection, supportsConnectorTools } from 'src/utils';
+import { isPlanProjection } from 'src/utils';
 import { NodeControls } from './NodeControls/NodeControls';
 import { NodeControls2d } from './NodeControls/NodeControls2d';
 import { ConnectorControls } from './ConnectorControls/ConnectorControls';
@@ -32,34 +31,31 @@ const NodeControlsSwitcher = ({
   return <NodeControls id={id} />;
 };
 
-/** 2D plan with an empty selection: Auto-Układ plus the usual hint. */
-const EmptyPlanControls = ({ showAutoLayout }: { showAutoLayout: boolean }) => {
+/** 2D plan with an empty selection: hint only (layout tools live in RMB menu). */
+const EmptyPlanControls = () => {
   return (
-    <Box>
-      {showAutoLayout && <AutoLayoutControls />}
-      <Box sx={{ px: 2, py: 2 }}>
-        <Typography
-          sx={{
-            fontSize: 10,
-            fontWeight: 600,
-            letterSpacing: 0.6,
-            color: 'text.secondary',
-            textTransform: 'uppercase',
-            mb: 0.5
-          }}
-        >
-          Kontekst
-        </Typography>
-        <Typography
-          sx={{ fontSize: 13, color: 'text.secondary', lineHeight: 1.45 }}
-        >
-          Wybierz urządzenie na planie albo naciśnij{' '}
-          <Box component="span" sx={{ fontWeight: 700 }}>
-            +
-          </Box>{' '}
-          aby dodać nowe.
-        </Typography>
-      </Box>
+    <Box sx={{ px: 2, py: 2 }}>
+      <Typography
+        sx={{
+          fontSize: 10,
+          fontWeight: 600,
+          letterSpacing: 0.6,
+          color: 'text.secondary',
+          textTransform: 'uppercase',
+          mb: 0.5
+        }}
+      >
+        Kontekst
+      </Typography>
+      <Typography
+        sx={{ fontSize: 13, color: 'text.secondary', lineHeight: 1.45 }}
+      >
+        Wybierz urządzenie na planie albo naciśnij{' '}
+        <Box component="span" sx={{ fontWeight: 700 }}>
+          +
+        </Box>{' '}
+        aby dodać nowe. Auto-Układ i grupy — PPM na planie.
+      </Typography>
     </Box>
   );
 };
@@ -132,13 +128,8 @@ export const ItemControlsManager = () => {
           />
         );
       default:
-        // Nothing selected in the 2D plan: Auto-Układ still applies, using the
-        // whole view as its scope.
-        return isPlanProjection(projectionMode) ? (
-          <EmptyPlanControls
-            showAutoLayout={supportsConnectorTools(projectionMode)}
-          />
-        ) : null;
+        // Nothing selected in the 2D plan: layout tools are on the RMB menu.
+        return isPlanProjection(projectionMode) ? <EmptyPlanControls /> : null;
     }
   }, [itemControls, selectedItemIds, projectionMode]);
 

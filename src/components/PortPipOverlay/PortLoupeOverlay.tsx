@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState, useCallback } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Box } from '@mui/material';
 import { useUiStateStore, useUiStateStoreApi } from 'src/stores/uiStateStore';
 import { useModelStore } from 'src/stores/modelStore';
@@ -6,19 +6,14 @@ import { useScene } from 'src/hooks/useScene';
 import { SceneLayer } from 'src/components/SceneLayer/SceneLayer';
 import { DeviceShape2d } from 'src/components/Shapes2d/DeviceShape2d';
 import { useResizeObserver } from 'src/hooks/useResizeObserver';
-import {
-  TILE_SIZE_2D,
-  getModelItemSize,
-  getShape2dSize,
-  getModelItemPorts
-} from 'src/config';
+import { TILE_SIZE_2D, getModelItemSize, getShape2dSize } from 'src/config';
 import {
   getShape2dCenterPosition,
   screenToTile2dContinuous,
   isPlanProjection,
-  isTileInShape2dBounds,
   connectorPathTileToGlobal,
-  buildConnectorSvgPathD
+  buildConnectorSvgPathD,
+  applyPortHoverInRoot
 } from 'src/utils';
 import { ModelItem } from 'src/types';
 
@@ -36,12 +31,16 @@ const LOUPE_PORT_SHOW_DELAY_MS = 700;
 /** Light cursor follow smoothing (ms). Low = stuck to the pointer. */
 const LOUPE_CURSOR_TAU_MS = 45;
 
+/**
+ * When true, loupe highlights the hovered RJ45 / cable via imperative DOM
+ * (no DeviceShape2d re-render — safe while sliding along port rows).
+ */
+const LOUPE_SHOW_PORT_HOVER = true;
+
 type SceneConnector = ReturnType<typeof useScene>['connectors'][number];
 
 type LoupeDevice = {
   itemId: string;
-  /** Port id, or null when triggered by body hover. */
-  portId: string | null;
   modelItem: ModelItem;
   deviceCenter: { x: number; y: number };
   diameter: number;
@@ -49,109 +48,162 @@ type LoupeDevice = {
 
 type LoupeContent = {
   itemId: string;
-  portId: string | null;
   modelItem: ModelItem;
   deviceCenter: { x: number; y: number };
   diameter: number;
 };
 
 /** Lightweight cable strokes for the loupe (Connector2d is too heavy / often hidden under chassis). */
-const LoupeCableLayer = ({
-  connectors,
-  itemId,
-  portId,
-  deviceCenter
-}: {
-  connectors: SceneConnector[];
-  itemId: string;
-  portId: string | null;
-  deviceCenter: { x: number; y: number };
-}) => {
-  return (
-    <Box
-      sx={{
-        position: 'absolute',
-        left: -deviceCenter.x,
-        top: -deviceCenter.y,
-        width: 0,
-        height: 0,
-        overflow: 'visible',
-        pointerEvents: 'none',
-        zIndex: 6
-      }}
-    >
-      {connectors.map((connector) => {
-        const pathTiles = connector.path?.tiles ?? [];
-        if (pathTiles.length < 2) return null;
+const LoupeCableLayer = React.memo(
+  ({
+    connectors,
+    itemId,
+    deviceCenter
+  }: {
+    connectors: SceneConnector[];
+    itemId: string;
+    deviceCenter: { x: number; y: number };
+  }) => {
+    return (
+      <Box
+        sx={{
+          position: 'absolute',
+          left: -deviceCenter.x,
+          top: -deviceCenter.y,
+          width: 0,
+          height: 0,
+          overflow: 'visible',
+          pointerEvents: 'none',
+          zIndex: 6
+        }}
+      >
+        {connectors.map((connector) => {
+          const pathTiles = connector.path?.tiles ?? [];
+          if (pathTiles.length < 2) return null;
 
-        const pathFrom = connector.path.rectangle.from;
-        const globalTiles = pathTiles.map((tile) => {
-          return connectorPathTileToGlobal(tile, pathFrom);
-        });
-        const points = globalTiles.map((tile) => {
-          return { x: tile.x + 0.5, y: tile.y + 0.5 };
-        });
-        const xs = points.map((point) => point.x);
-        const ys = points.map((point) => point.y);
-        const minX = Math.min(...xs);
-        const maxX = Math.max(...xs);
-        const minY = Math.min(...ys);
-        const maxY = Math.max(...ys);
-        const widthTiles = Math.max(1, maxX - minX);
-        const heightTiles = Math.max(1, maxY - minY);
-        const pathD = buildConnectorSvgPathD({
-          points,
-          jumps: [],
-          minX,
-          minY,
-          tileSize: TILE_SIZE_2D
-        });
-        if (!pathD) return null;
+          const pathFrom = connector.path.rectangle.from;
+          const globalTiles = pathTiles.map((tile) => {
+            return connectorPathTileToGlobal(tile, pathFrom);
+          });
+          const points = globalTiles.map((tile) => {
+            return { x: tile.x + 0.5, y: tile.y + 0.5 };
+          });
+          const xs = points.map((point) => {
+            return point.x;
+          });
+          const ys = points.map((point) => {
+            return point.y;
+          });
+          const minX = Math.min(...xs);
+          const maxX = Math.max(...xs);
+          const minY = Math.min(...ys);
+          const maxY = Math.max(...ys);
+          const widthTiles = Math.max(1, maxX - minX);
+          const heightTiles = Math.max(1, maxY - minY);
+          const pathD = buildConnectorSvgPathD({
+            points,
+            jumps: [],
+            minX,
+            minY,
+            tileSize: TILE_SIZE_2D
+          });
+          if (!pathD) return null;
 
-        const onHoveredPort = portId != null && connector.anchors.some((anchor) => {
-          return anchor.ref.item === itemId && anchor.ref.port === portId;
-        });
-        const core = onHoveredPort ? 5.5 : 4;
-        const outline = core + 2.5;
+          // Port ids on THIS device — used by imperative hover (no React re-render).
+          const localPortIds = connector.anchors
+            .filter((anchor) => {
+              return anchor.ref.item === itemId && Boolean(anchor.ref.port);
+            })
+            .map((anchor) => {
+              return anchor.ref.port as string;
+            })
+            .join(' ');
+          const core = 4;
+          const outline = core + 2.5;
 
-        return (
-          <Box
-            key={connector.id}
-            component="svg"
-            width={widthTiles * TILE_SIZE_2D}
-            height={heightTiles * TILE_SIZE_2D}
-            sx={{
-              position: 'absolute',
-              left: minX * TILE_SIZE_2D,
-              top: minY * TILE_SIZE_2D,
-              overflow: 'visible',
-              display: 'block'
-            }}
-          >
-            <path
-              d={pathD}
-              fill="none"
-              stroke="#ffffff"
-              strokeWidth={outline}
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              strokeOpacity={0.95}
-            />
-            <path
-              d={pathD}
-              fill="none"
-              stroke={onHoveredPort ? '#2563eb' : '#0a0a0a'}
-              strokeWidth={core}
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              strokeOpacity={1}
-            />
-          </Box>
-        );
-      })}
-    </Box>
-  );
-};
+          return (
+            <Box
+              key={connector.id}
+              component="svg"
+              width={widthTiles * TILE_SIZE_2D}
+              height={heightTiles * TILE_SIZE_2D}
+              sx={{
+                position: 'absolute',
+                left: minX * TILE_SIZE_2D,
+                top: minY * TILE_SIZE_2D,
+                overflow: 'visible',
+                display: 'block'
+              }}
+            >
+              <path
+                data-loupe-cable-outline
+                d={pathD}
+                fill="none"
+                stroke="#ffffff"
+                strokeWidth={outline}
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeOpacity={0.95}
+              />
+              <path
+                data-loupe-cable-core
+                data-loupe-cable-ports={localPortIds}
+                d={pathD}
+                fill="none"
+                stroke="#0a0a0a"
+                strokeWidth={core}
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeOpacity={1}
+              />
+            </Box>
+          );
+        })}
+      </Box>
+    );
+  }
+);
+LoupeCableLayer.displayName = 'LoupeCableLayer';
+
+/**
+ * Port / cable hover inside the loupe — pure DOM, no React state.
+ * Jack visuals come from applyPortHoverInRoot; cables are loupe-specific.
+ */
+function applyLoupePortHoverDom(
+  root: HTMLElement | null,
+  portId: string | null,
+  prevJackRef: { current: HTMLElement | null }
+) {
+  applyPortHoverInRoot(root, portId, prevJackRef);
+
+  if (root) {
+    root.querySelectorAll('[data-loupe-cable-core]').forEach((node) => {
+      const core = node as SVGPathElement;
+      core.setAttribute('stroke', '#0a0a0a');
+      core.setAttribute('stroke-width', '4');
+      const outline = core.previousElementSibling as SVGPathElement | null;
+      if (outline?.hasAttribute('data-loupe-cable-outline')) {
+        outline.setAttribute('stroke-width', '6.5');
+      }
+    });
+  }
+
+  if (!root || !portId) return;
+
+  root.querySelectorAll('[data-loupe-cable-core]').forEach((node) => {
+    const core = node as SVGPathElement;
+    const ports = (core.getAttribute('data-loupe-cable-ports') || '').split(
+      /\s+/
+    );
+    if (!ports.includes(portId)) return;
+    core.setAttribute('stroke', '#2563eb');
+    core.setAttribute('stroke-width', '5.5');
+    const outline = core.previousElementSibling as SVGPathElement | null;
+    if (outline?.hasAttribute('data-loupe-cable-outline')) {
+      outline.setAttribute('stroke-width', '8');
+    }
+  });
+}
 
 /** Continuous tile → scene-layer pixel (top-left origin of tile 0,0). */
 const continuousTileToWorld = (tile: { x: number; y: number }) => {
@@ -161,36 +213,35 @@ const continuousTileToWorld = (tile: { x: number; y: number }) => {
   };
 };
 
-/**
- * Visual highlight scale applied to the node on the main canvas when a port
- * is hovered (must match HIGHLIGHT_SCALE in Nodes.tsx / Node.tsx).
- * The loupe renders the device UN-scaled, so we divide the cursor offset
- * by this factor to keep the correct point centered in the glass.
- */
-const NODE_HIGHLIGHT_SCALE = 1.15;
-
 function applyLoupeDom(
   loupeEl: HTMLDivElement | null,
   contentEl: HTMLDivElement | null,
   cursor: { x: number; y: number },
   deviceCenter: { x: number; y: number },
   diameter: number,
-  isHighlighted: boolean
+  zoom: number
 ) {
   if (!loupeEl) return;
   const radius = diameter / 2;
-  loupeEl.style.width = `${diameter}px`;
-  loupeEl.style.height = `${diameter}px`;
-  loupeEl.style.transform = `translate(${cursor.x - radius}px, ${cursor.y - radius}px)`;
+  const safeZoom = Math.max(0.01, zoom);
+  const loupeStyle = loupeEl.style;
+  loupeStyle.width = `${diameter}px`;
+  loupeStyle.height = `${diameter}px`;
+  // Cancel SceneLayer zoom on the glass so Chromium composites a layer no
+  // larger than `diameter` px, rather than a multi-thousand-pixel texture at
+  // low zoom. With transformOrigin at the top-left (set in sx below), the
+  // composed transform maps local point P to `translate + scale * P` — so to
+  // land the box's own centre (radius, radius) on the cursor we must offset
+  // the translate by `radius / zoom`, not by `radius`.
+  const tx = cursor.x - radius / safeZoom;
+  const ty = cursor.y - radius / safeZoom;
+  const invZoom = 1 / safeZoom;
+  loupeStyle.transform = `translate3d(${tx}px, ${ty}px, 0) scale(${invZoom})`;
   if (contentEl) {
-    // The device on the canvas may be CSS-scaled by NODE_HIGHLIGHT_SCALE
-    // around its center (because port hover highlights the node).  The cursor
-    // world position W maps to device-local offset (W − center) / scale.
-    // The loupe renders the device un-scaled, so we apply the inverse.
-    const scale = isHighlighted ? NODE_HIGHLIGHT_SCALE : 1;
-    const offsetX = (cursor.x - deviceCenter.x) / scale;
-    const offsetY = (cursor.y - deviceCenter.y) / scale;
-    contentEl.style.transform = `translate(${-offsetX}px, ${-offsetY}px)`;
+    const offsetX = cursor.x - deviceCenter.x;
+    const offsetY = cursor.y - deviceCenter.y;
+    const contentStyle = contentEl.style;
+    contentStyle.transform = `translate3d(${-offsetX}px, ${-offsetY}px, 0)`;
   }
 }
 
@@ -209,8 +260,11 @@ export const PortLoupeOverlay = () => {
   const zoom = useUiStateStore((state) => {
     return state.zoom;
   });
-  const hover = useUiStateStore((state) => {
-    return state.shape2dPortHover;
+  // Only the hovered ITEM drives loupe React state. Port-id changes are
+  // applied imperatively (see applyLoupePortHoverDom) so DeviceShape2d does
+  // not re-render while sliding along a port row.
+  const hoverItemId = useUiStateStore((state) => {
+    return state.shape2dPortHover?.itemId ?? null;
   });
   const showLoupe = useUiStateStore((state) => {
     return state.showLoupe;
@@ -229,9 +283,9 @@ export const PortLoupeOverlay = () => {
     return state.items;
   });
 
-  /** Compute the loupe device from a port hover. */
+  /** Compute the loupe device from a port/body hover (item only). */
   const deviceFromPortHover = useMemo((): LoupeDevice | null => {
-    if (!showLoupe || !hover) return null;
+    if (!showLoupe || !hoverItemId) return null;
     if (!isPlanProjection(projectionMode) || projectionMode === 'TWO_D_V2') {
       return null;
     }
@@ -242,23 +296,18 @@ export const PortLoupeOverlay = () => {
     }
 
     const viewItem = items.find((item) => {
-      return item.id === hover.itemId;
+      return item.id === hoverItemId;
     });
     const modelItem = modelItems.find((item) => {
-      return item.id === hover.itemId;
+      return item.id === hoverItemId;
     });
     if (!viewItem || !modelItem?.icon) return null;
 
-    const ports = getModelItemPorts(modelItem);
-    const port = hover.portId ? ports.find((p) => p.id === hover.portId) : null;
-    if (hover.portId && !port) return null;
-
-    const size =
-      getModelItemSize(modelItem) ??
+    const size = getModelItemSize(modelItem) ??
       getShape2dSize(modelItem.icon) ?? { width: 1, height: 1 };
     const deviceCenter = getShape2dCenterPosition(viewItem.tile, size);
-    
-    // Oblicz rozmiar lupy na ekranie. 
+
+    // Oblicz rozmiar lupy na ekranie.
     // Od 30% w górę: ukryta. Poniżej 30% zaczyna od 248px.
     // Osiąga maksymalny rozmiar przy 20% (ok. 400px).
     let targetPx = 248;
@@ -268,23 +317,20 @@ export const PortLoupeOverlay = () => {
     } else if (zoom < 0.3) {
       const linearRatio = (0.3 - zoom) / (0.3 - 0.2);
       // Nieliniowy przyrost (quartic ease-in): na początku rośnie jeszcze wolniej.
-      const ratio = Math.pow(linearRatio, 4);
+      const ratio = linearRatio ** 4;
       targetPx = 248 + ratio * (MAX_LOUPE_PX - 248);
     }
 
-    const loupeScreenPx = targetPx;
-    const diameter = loupeScreenPx / Math.max(0.01, zoom);
-
     return {
       itemId: viewItem.id,
-      portId: port?.id ?? null,
       modelItem,
       deviceCenter,
-      diameter
+      diameter: targetPx
     };
-  }, [hover, items, modelItems, projectionMode, zoom, showLoupe]);
+  }, [hoverItemId, items, modelItems, projectionMode, zoom, showLoupe]);
 
   const device = deviceFromPortHover;
+  const hasDevice = Boolean(device);
 
   const relatedConnectors = useMemo(() => {
     if (!device) return [];
@@ -295,45 +341,7 @@ export const PortLoupeOverlay = () => {
     });
   }, [connectors, device]);
 
-  // --- Performance: track cursor via store subscription, not React state ---
   const cursorWorldRef = useRef<{ x: number; y: number } | null>(null);
-
-  useEffect(() => {
-    const unsubscribe = uiStoreApi.subscribe((state) => {
-      const { mouse, zoom: z, scroll: s } = state;
-      const rSize = rendererSizeRef.current;
-      if (!rSize || !rSize.width || !rSize.height) return;
-
-      const tile = screenToTile2dContinuous({
-        mouse: mouse.position.screen,
-        zoom: z,
-        scroll: s,
-        rendererSize: rSize
-      });
-      const world = continuousTileToWorld(tile);
-      cursorWorldRef.current = world;
-
-      // Drive the rAF loop imperatively — no React re-render needed.
-      if (contentElRef.current && deviceCenterRef.current && focusRef.current) {
-        cursorTargetRef.current = { ...world };
-        ensureRafImperative();
-      } else if (deviceCenterRef.current && !focusRef.current) {
-        // First cursor update after reveal — jump to cursor.
-        cursorTargetRef.current = { ...world };
-        focusRef.current = { ...world };
-        applyLoupeDom(
-          loupeRef.current,
-          contentElRef.current,
-          focusRef.current,
-          deviceCenterRef.current,
-          diameterRef.current,
-          isHighlightedRef.current
-        );
-      }
-    });
-    return unsubscribe;
-  // eslint-disable-next-line react-hooks/exhaustive-deps -- stable refs
-  }, [uiStoreApi]);
 
   const [content, setContent] = useState<LoupeContent | null>(null);
   const [visible, setVisible] = useState(false);
@@ -344,8 +352,10 @@ export const PortLoupeOverlay = () => {
   const cursorTargetRef = useRef<{ x: number; y: number } | null>(null);
   const deviceCenterRef = useRef<{ x: number; y: number } | null>(null);
   const diameterRef = useRef(LOUPE_SCREEN_PX);
-  const isHighlightedRef = useRef(false);
+  const zoomRef = useRef(zoom);
   const latestDeviceRef = useRef<LoupeDevice | null>(null);
+  const contentItemIdRef = useRef<string | null>(null);
+  const hoveredJackRef = useRef<HTMLElement | null>(null);
   const rafRef = useRef<number | null>(null);
   const lastTsRef = useRef<number | null>(null);
   const fadeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -353,9 +363,20 @@ export const PortLoupeOverlay = () => {
   const showFrameRef = useRef<number | null>(null);
 
   latestDeviceRef.current = device;
+  zoomRef.current = zoom;
+  contentItemIdRef.current = content?.itemId ?? null;
 
-  // Track whether device is highlighted (port hover → scale 1.15).
-  isHighlightedRef.current = device?.portId != null;
+  const syncLoupePortHover = () => {
+    if (!LOUPE_SHOW_PORT_HOVER) {
+      applyLoupePortHoverDom(contentElRef.current, null, hoveredJackRef);
+      return;
+    }
+    const hover = uiStoreApi.getState().shape2dPortHover;
+    const itemId = contentItemIdRef.current;
+    const portId =
+      hover && itemId && hover.itemId === itemId ? hover.portId : null;
+    applyLoupePortHoverDom(contentElRef.current, portId, hoveredJackRef);
+  };
 
   const stopRaf = () => {
     if (rafRef.current != null) {
@@ -395,7 +416,7 @@ export const PortLoupeOverlay = () => {
       focus,
       deviceCenter,
       diameterRef.current,
-      isHighlightedRef.current
+      zoomRef.current
     );
 
     const dist = Math.hypot(target.x - focus.x, target.y - focus.y);
@@ -410,7 +431,7 @@ export const PortLoupeOverlay = () => {
         focus,
         deviceCenter,
         diameterRef.current,
-        isHighlightedRef.current
+        zoomRef.current
       );
       rafRef.current = null;
       lastTsRef.current = null;
@@ -424,16 +445,73 @@ export const PortLoupeOverlay = () => {
     }
   };
 
+  // Track the cursor imperatively so pointer movement never re-renders the
+  // loupe's DeviceShape2d subtree.
+  useEffect(() => {
+    const unsubscribe = uiStoreApi.subscribe((state) => {
+      const { mouse, zoom: z, scroll: s } = state;
+      const rSize = rendererSizeRef.current;
+      if (!rSize || !rSize.width || !rSize.height) return;
+
+      const tile = screenToTile2dContinuous({
+        mouse: mouse.position.screen,
+        zoom: z,
+        scroll: s,
+        rendererSize: rSize
+      });
+      const world = continuousTileToWorld(tile);
+      cursorWorldRef.current = world;
+
+      if (contentElRef.current && deviceCenterRef.current && focusRef.current) {
+        cursorTargetRef.current = { ...world };
+        ensureRafImperative();
+      } else if (deviceCenterRef.current && !focusRef.current) {
+        cursorTargetRef.current = { ...world };
+        focusRef.current = { ...world };
+        applyLoupeDom(
+          loupeRef.current,
+          contentElRef.current,
+          focusRef.current,
+          deviceCenterRef.current,
+          diameterRef.current,
+          zoomRef.current
+        );
+      }
+    });
+    return unsubscribe;
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- stable refs
+  }, [uiStoreApi]);
+
+  // Port hover highlight — subscribe without React state so sliding along
+  // ports never re-renders DeviceShape2d / LoupeCableLayer.
+  useEffect(() => {
+    if (!LOUPE_SHOW_PORT_HOVER) {
+      applyLoupePortHoverDom(contentElRef.current, null, hoveredJackRef);
+      return undefined;
+    }
+    let prevPortKey = '';
+    const onStore = () => {
+      const hover = uiStoreApi.getState().shape2dPortHover;
+      const itemId = contentItemIdRef.current;
+      const portId =
+        hover && itemId && hover.itemId === itemId ? hover.portId : null;
+      const key = `${itemId ?? ''}:${portId ?? ''}`;
+      if (key === prevPortKey) return;
+      prevPortKey = key;
+      applyLoupePortHoverDom(contentElRef.current, portId, hoveredJackRef);
+    };
+    onStore();
+    return uiStoreApi.subscribe(onStore);
+  }, [uiStoreApi]);
+
   const revealLoupe = (dev: LoupeDevice, cursor: { x: number; y: number }) => {
     deviceCenterRef.current = { ...dev.deviceCenter };
     diameterRef.current = dev.diameter;
-    isHighlightedRef.current = dev.portId != null;
     cursorTargetRef.current = { ...cursor };
     focusRef.current = { ...cursor };
 
     setContent({
       itemId: dev.itemId,
-      portId: dev.portId,
       modelItem: dev.modelItem,
       deviceCenter: { ...dev.deviceCenter },
       diameter: dev.diameter
@@ -445,7 +523,7 @@ export const PortLoupeOverlay = () => {
       focusRef.current,
       deviceCenterRef.current,
       diameterRef.current,
-      isHighlightedRef.current
+      zoomRef.current
     );
     stopRaf();
 
@@ -464,9 +542,10 @@ export const PortLoupeOverlay = () => {
             focusRef.current,
             deviceCenterRef.current,
             diameterRef.current,
-            isHighlightedRef.current
+            zoomRef.current
           );
         }
+        syncLoupePortHover();
       });
     });
   };
@@ -482,6 +561,7 @@ export const PortLoupeOverlay = () => {
       clearShowDelay();
       setVisible(false);
       cursorTargetRef.current = null;
+      applyLoupePortHoverDom(contentElRef.current, null, hoveredJackRef);
       fadeTimerRef.current = setTimeout(() => {
         stopRaf();
         focusRef.current = null;
@@ -496,7 +576,6 @@ export const PortLoupeOverlay = () => {
 
     deviceCenterRef.current = { ...device.deviceCenter };
     diameterRef.current = device.diameter;
-    isHighlightedRef.current = device.portId != null;
 
     if (content) {
       clearShowDelay();
@@ -504,7 +583,6 @@ export const PortLoupeOverlay = () => {
         if (
           prev &&
           prev.itemId === device.itemId &&
-          prev.portId === device.portId &&
           prev.diameter === device.diameter &&
           prev.modelItem === device.modelItem &&
           prev.deviceCenter.x === device.deviceCenter.x &&
@@ -514,7 +592,6 @@ export const PortLoupeOverlay = () => {
         }
         return {
           itemId: device.itemId,
-          portId: device.portId,
           modelItem: device.modelItem,
           deviceCenter: { ...device.deviceCenter },
           diameter: device.diameter
@@ -540,12 +617,11 @@ export const PortLoupeOverlay = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps -- dwell + device identity
   }, [
     device?.itemId,
-    device?.portId,
     device?.diameter,
     device?.modelItem,
     device?.deviceCenter.x,
     device?.deviceCenter.y,
-    Boolean(device),
+    hasDevice,
     content
   ]);
 
@@ -557,15 +633,15 @@ export const PortLoupeOverlay = () => {
       if (fadeTimerRef.current) clearTimeout(fadeTimerRef.current);
       if (showFrameRef.current) cancelAnimationFrame(showFrameRef.current);
     };
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   if (!content) return null;
 
-  const { modelItem, portId, deviceCenter, diameter } = content;
+  const { modelItem, deviceCenter, diameter } = content;
   const fadeMs = visible ? LOUPE_FADE_IN_MS : LOUPE_FADE_OUT_MS;
-  // Compensate SceneLayer zoom so loupe magnification stays constant on screen.
-  const contentScale = LOUPE_MAG / Math.max(0.01, zoom);
+  // The glass cancels SceneLayer zoom, so this is already screen-constant.
+  const contentScale = LOUPE_MAG;
   const loupeConnectors = relatedConnectors.filter((connector) => {
     return connector.anchors.some((anchor) => {
       return anchor.ref.item === content.itemId;
@@ -581,7 +657,7 @@ export const PortLoupeOverlay = () => {
         focusRef.current,
         deviceCenterRef.current,
         diameterRef.current,
-        isHighlightedRef.current
+        zoomRef.current
       );
     }
   };
@@ -595,9 +671,11 @@ export const PortLoupeOverlay = () => {
         focusRef.current,
         deviceCenterRef.current,
         diameterRef.current,
-        isHighlightedRef.current
+        zoomRef.current
       );
     }
+    // Content just mounted — apply current port hover without a React update.
+    syncLoupePortHover();
   };
 
   return (
@@ -616,15 +694,18 @@ export const PortLoupeOverlay = () => {
           pointerEvents: 'none',
           zIndex: 20,
           boxSizing: 'border-box',
+          // Must match the translate/scale math in applyLoupeDom — with the
+          // default centre origin, scale() would shift the box off-cursor.
+          transformOrigin: '0 0',
           willChange: 'transform, opacity',
           opacity: visible ? 1 : 0,
           transition: `opacity ${fadeMs}ms ease`,
-          border: `${Math.max(2, 3 / zoom)}px solid rgba(248, 250, 252, 0.92)`,
+          border: '3px solid rgba(248, 250, 252, 0.92)',
           boxShadow: `
-            0 0 0 ${Math.max(1, 1.5 / zoom)}px rgba(15, 23, 42, 0.35),
-            0 ${8 / zoom}px ${28 / zoom}px rgba(15, 23, 42, 0.4),
-            inset 0 ${2 / zoom}px ${10 / zoom}px rgba(255, 255, 255, 0.45),
-            inset 0 ${-6 / zoom}px ${14 / zoom}px rgba(15, 23, 42, 0.18)
+            0 0 0 1.5px rgba(15, 23, 42, 0.35),
+            0 8px 28px rgba(15, 23, 42, 0.4),
+            inset 0 2px 10px rgba(255, 255, 255, 0.45),
+            inset 0 -6px 14px rgba(15, 23, 42, 0.18)
           `,
           background:
             'radial-gradient(circle at 35% 30%, rgba(255,255,255,0.22) 0%, rgba(255,255,255,0.02) 42%, rgba(15,23,42,0.06) 100%)'
@@ -678,14 +759,13 @@ export const PortLoupeOverlay = () => {
                     poweredByPoe={Boolean(modelItem.poweredByPoe)}
                     showShadow={false}
                     centered
-                    hoveredPortId={portId}
+                    hoveredPortId={null}
                   />
                 </Box>
                 {/* Cables above the chassis so stubs stay visible in the glass */}
                 <LoupeCableLayer
                   connectors={loupeConnectors}
                   itemId={content.itemId}
-                  portId={portId}
                   deviceCenter={deviceCenter}
                 />
               </Box>
@@ -700,7 +780,7 @@ export const PortLoupeOverlay = () => {
               pointerEvents: 'none',
               background:
                 'radial-gradient(circle at 32% 28%, rgba(255,255,255,0.35) 0%, rgba(255,255,255,0) 38%)',
-              boxShadow: `inset 0 0 0 ${Math.max(1, 1.5 / zoom)}px rgba(255,255,255,0.25)`
+              boxShadow: 'inset 0 0 0 1.5px rgba(255,255,255,0.25)'
             }}
           />
         </Box>

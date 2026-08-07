@@ -12,15 +12,27 @@ import {
   unlockWaypointAtTile,
   stripToEndpointAnchors,
   isPlanProjection,
-  cloneModelItemForDuplicate
+  cloneModelItemForDuplicate,
+  supportsConnectorTools
 } from 'src/utils';
+import type { PlacementMode, RouteStyle } from 'src/utils/autoLayout';
 import { useScene } from 'src/hooks/useScene';
 import { useModelStore } from 'src/stores/modelStore';
-import { ContextMenu } from './ContextMenu';
+import { computeDensityGroups } from 'src/v3/densityGroups';
+import { useDensityGroupsDebugStore } from 'src/v3/densityGroupsStore';
+import type { DensityBusExitStyle } from 'src/v3/densityGroupBuses';
+import { ContextMenu, ContextMenuEntry } from './ContextMenu';
 
 interface Props {
   anchorEl?: HTMLElement;
 }
+
+const ROUTE_STYLES: { value: RouteStyle; label: string }[] = [
+  { value: 'ORTHOGONAL', label: 'Orto' },
+  { value: 'DIAGONAL', label: 'Skos' },
+  { value: 'BUS', label: 'Wiązka' },
+  { value: 'STRAIGHT', label: 'Prosty' }
+];
 
 export const ContextMenuManager = ({ anchorEl }: Props) => {
   const scene = useScene();
@@ -36,24 +48,218 @@ export const ContextMenuManager = ({ anchorEl }: Props) => {
   const contextMenu = useUiStateStore((state) => {
     return state.contextMenu;
   });
+  const selectedItemIds = useUiStateStore((state) => {
+    return state.selectedItemIds;
+  });
+  const routingStyle = useUiStateStore((state) => {
+    return state.routingStyle;
+  });
+  const setRoutingStyle = useUiStateStore((state) => {
+    return state.actions.setRoutingStyle;
+  });
 
   const uiStateActions = useUiStateStore((state) => {
     return state.actions;
+  });
+
+  const {
+    runAutoLayoutForItems,
+    runAutoRouteForItems,
+    runDensityGroupBuses,
+    runArrangeDensityGroups
+  } = scene;
+
+  const densityVisible = useDensityGroupsDebugStore((state) => {
+    return state.visible;
+  });
+  const toggleDensity = useDensityGroupsDebugStore((state) => {
+    return state.toggle;
+  });
+  const setDensityVisible = useDensityGroupsDebugStore((state) => {
+    return state.setVisible;
   });
 
   const onClose = useCallback(() => {
     uiStateActions.setContextMenu(null);
   }, [uiStateActions]);
 
+  const groupCount = useMemo(() => {
+    if (projectionMode !== 'TWO_D_V3') return 0;
+    return computeDensityGroups({ items: scene.items, modelItems }).length;
+  }, [projectionMode, scene.items, modelItems]);
+
+  const buildAutoLayoutItems = useCallback((): ContextMenuEntry[] => {
+    if (!supportsConnectorTools(projectionMode)) return [];
+
+    const style = routingStyle as RouteStyle;
+    const count = selectedItemIds.length;
+    const scopeLabel = count === 0 ? 'cały widok' : `${count} zazn.`;
+
+    const run = (placement: PlacementMode) => {
+      // Defer so the menu can close before the sync solver blocks the UI.
+      setTimeout(() => {
+        if (placement === 'none') {
+          runAutoRouteForItems(selectedItemIds, { style });
+        } else {
+          runAutoLayoutForItems(selectedItemIds, { style, placement });
+        }
+      }, 0);
+      onClose();
+    };
+
+    const items: ContextMenuEntry[] = [
+      {
+        label: `Auto-Układ · ${scopeLabel}`,
+        isHeader: true,
+        dividerBefore: true
+      }
+    ];
+
+    ROUTE_STYLES.forEach((option) => {
+      items.push({
+        label: `${style === option.value ? '✓ ' : ''}${option.label}`,
+        onClick: () => {
+          setRoutingStyle(option.value);
+          // Keep menu open so the user can pick an action next — close after style.
+          onClose();
+        }
+      });
+    });
+
+    items.push(
+      {
+        label: 'Ułóż wszystko',
+        dividerBefore: true,
+        onClick: () => {
+          run('full');
+        }
+      },
+      {
+        label: 'Porządkuj w miejscu + kable',
+        onClick: () => {
+          run('swap');
+        }
+      },
+      {
+        label: 'Tylko kable',
+        onClick: () => {
+          run('none');
+        }
+      }
+    );
+
+    return items;
+  }, [
+    projectionMode,
+    routingStyle,
+    selectedItemIds,
+    runAutoLayoutForItems,
+    runAutoRouteForItems,
+    setRoutingStyle,
+    onClose
+  ]);
+
+  const buildDensityGroupItems = useCallback((): ContextMenuEntry[] => {
+    if (projectionMode !== 'TWO_D_V3') return [];
+
+    const runBus = (exitStyle: DensityBusExitStyle) => {
+      setDensityVisible(true);
+      setTimeout(() => {
+        runDensityGroupBuses({ exitStyle });
+      }, 0);
+      onClose();
+    };
+
+    const runArrange = (mode?: 'magistrala') => {
+      setDensityVisible(true);
+      setTimeout(() => {
+        runArrangeDensityGroups(mode ? { mode } : undefined);
+      }, 0);
+      onClose();
+    };
+
+    let groupWord = 'grup';
+    if (groupCount === 1) groupWord = 'grupa';
+    else if (groupCount < 5) groupWord = 'grupy';
+
+    return [
+      {
+        label: `Gęstość · ${groupCount} ${groupWord}`,
+        isHeader: true,
+        dividerBefore: true
+      },
+      {
+        label: densityVisible ? 'Ukryj grupy' : 'Pokaż grupy',
+        onClick: () => {
+          toggleDensity();
+          onClose();
+        }
+      },
+      {
+        label: 'Ułóż grupy',
+        disabled: groupCount === 0,
+        onClick: () => {
+          runArrange();
+        }
+      },
+      {
+        label: 'Ułóż grupy (magistrale)',
+        disabled: groupCount === 0,
+        onClick: () => {
+          runArrange('magistrala');
+        }
+      },
+      {
+        label: 'Prosty z grup',
+        disabled: groupCount === 0,
+        onClick: () => {
+          runBus('simple');
+        }
+      },
+      {
+        label: 'Magistrala z grup',
+        disabled: groupCount === 0,
+        onClick: () => {
+          runBus('orthogonal');
+        }
+      },
+      {
+        label: 'Diagonalny z grup',
+        disabled: groupCount === 0,
+        onClick: () => {
+          runBus('oneBend');
+        }
+      }
+    ];
+  }, [
+    projectionMode,
+    groupCount,
+    densityVisible,
+    toggleDensity,
+    setDensityVisible,
+    runDensityGroupBuses,
+    runArrangeDensityGroups,
+    onClose
+  ]);
+
   const menuItems = useMemo(() => {
     if (!contextMenu) return [];
+
+    const layoutItems = [
+      ...buildAutoLayoutItems(),
+      ...buildDensityGroupItems()
+    ];
+
+    if (contextMenu.item.type === 'EMPTY') {
+      return layoutItems;
+    }
 
     if (contextMenu.item.type === 'ITEM') {
       let viewItem: (typeof scene.items)[number];
       try {
         viewItem = getItemByIdOrThrow(scene.items, contextMenu.item.id).value;
       } catch {
-        return [];
+        return layoutItems;
       }
 
       const itemId = viewItem.id;
@@ -87,7 +293,8 @@ export const ContextMenuManager = ({ anchorEl }: Props) => {
               }
               onClose();
             }
-          }
+          },
+          ...layoutItems
         ];
       }
 
@@ -140,7 +347,8 @@ export const ContextMenuManager = ({ anchorEl }: Props) => {
             }
             onClose();
           }
-        }
+        },
+        ...layoutItems
       ];
     }
 
@@ -153,10 +361,10 @@ export const ContextMenuManager = ({ anchorEl }: Props) => {
           contextMenu.item.id
         ).value;
       } catch {
-        return [];
+        return layoutItems;
       }
 
-      const tile = contextMenu.tile;
+      const { tile } = contextMenu;
       const stackedIds = findOverlappingConnectorIdsAtTile(
         scene.connectors.map((con) => {
           return {
@@ -188,7 +396,7 @@ export const ContextMenuManager = ({ anchorEl }: Props) => {
         });
       });
 
-      const items: { label: string; onClick: () => void }[] = [];
+      const items: ContextMenuEntry[] = [];
 
       if (connector.locked) {
         items.push({
@@ -311,7 +519,7 @@ export const ContextMenuManager = ({ anchorEl }: Props) => {
         });
       }
 
-      return items;
+      return [...items, ...layoutItems];
     }
 
     if (contextMenu.item.type === 'RECTANGLE') {
@@ -322,10 +530,10 @@ export const ContextMenuManager = ({ anchorEl }: Props) => {
           contextMenu.item.id
         ).value;
       } catch {
-        return [];
+        return layoutItems;
       }
 
-      const items: { label: string; onClick: () => void }[] = [];
+      const items: ContextMenuEntry[] = [];
 
       if (rectangle.locked) {
         items.push({
@@ -357,38 +565,58 @@ export const ContextMenuManager = ({ anchorEl }: Props) => {
         {
           label: 'Send backward',
           onClick: () => {
-            scene.changeLayerOrder('SEND_BACKWARD', contextMenu.item);
+            scene.changeLayerOrder('SEND_BACKWARD', {
+              type: 'RECTANGLE',
+              id: rectangle.id
+            });
             onClose();
           }
         },
         {
           label: 'Bring forward',
           onClick: () => {
-            scene.changeLayerOrder('BRING_FORWARD', contextMenu.item);
+            scene.changeLayerOrder('BRING_FORWARD', {
+              type: 'RECTANGLE',
+              id: rectangle.id
+            });
             onClose();
           }
         },
         {
           label: 'Send to back',
           onClick: () => {
-            scene.changeLayerOrder('SEND_TO_BACK', contextMenu.item);
+            scene.changeLayerOrder('SEND_TO_BACK', {
+              type: 'RECTANGLE',
+              id: rectangle.id
+            });
             onClose();
           }
         },
         {
           label: 'Bring to front',
           onClick: () => {
-            scene.changeLayerOrder('BRING_TO_FRONT', contextMenu.item);
+            scene.changeLayerOrder('BRING_TO_FRONT', {
+              type: 'RECTANGLE',
+              id: rectangle.id
+            });
             onClose();
           }
         }
       );
 
-      return items;
+      return [...items, ...layoutItems];
     }
 
-    return [];
-  }, [contextMenu, onClose, scene, modelItems]);
+    return layoutItems;
+  }, [
+    contextMenu,
+    onClose,
+    scene,
+    modelItems,
+    uiStateActions,
+    buildAutoLayoutItems,
+    buildDensityGroupItems
+  ]);
 
   if (!contextMenu || menuItems.length === 0) {
     return null;

@@ -38,8 +38,13 @@ import { useResizeObserver } from 'src/hooks/useResizeObserver';
 interface Props {
   node: ViewItem;
   order: number;
-  /** 2D: emphasize endpoints of the selected connector */
-  selectionTone?: 'normal' | 'highlighted' | 'dimmed';
+  /**
+   * 2D selection styling:
+   * - highlighted = clicked / selected (scale + glow)
+   * - related = cable peer (glow only, no hover-scale)
+   * - dimmed = everything else while a selection is active
+   */
+  selectionTone?: 'normal' | 'highlighted' | 'related' | 'dimmed';
   /** Opacity used when selectionTone is dimmed (softer while dragging). */
   dimmedOpacity?: number;
   /** Pixel translation so scaled highlighted nodes do not overlap. */
@@ -123,11 +128,16 @@ export const Node = React.memo(({
   const nodeFocusedPortIds =
     selectedItemIds.includes(node.id) ? focusedPortIds : null;
 
+  // Port hover visuals are applied imperatively (Shape2dPortHoverController)
+  // so sliding along a 48-port row does not re-render DeviceShape2d.
   const peerHighlightPortIds = useMemo(() => {
     return getPeerHighlightedPortIdsForItem({
       itemId: node.id,
       selectedItemIds,
-      focusedPortIds: selectedItemIds.length > 0 && selectedItemIds.includes(node.id) ? focusedPortIds : null,
+      focusedPortIds:
+        selectedItemIds.length > 0 && selectedItemIds.includes(node.id)
+          ? focusedPortIds
+          : null,
       connectors
     });
   }, [node.id, selectedItemIds, focusedPortIds, connectors]);
@@ -163,31 +173,6 @@ export const Node = React.memo(({
     )
   );
 
-  const hoveredPortId = useUiStateStore(
-    useCallback(
-      (state) => {
-        const hover = state.shape2dPortHover;
-        if (!hover) return null;
-        if (hover.itemId === node.id) return hover.portId;
-
-        if (hover.portId) {
-          const peerPorts = getPeerHighlightedPortIdsForItem({
-            itemId: node.id,
-            selectedItemIds: [hover.itemId],
-            focusedPortIds: [hover.portId],
-            connectors
-          });
-
-          if (peerPorts.size > 0) {
-            return Array.from(peerPorts)[0];
-          }
-        }
-        return null;
-      },
-      [node.id, connectors]
-    )
-  );
-
   const { iconComponent } = useIcon(
     modelItem.icon,
     modelItem.name,
@@ -205,7 +190,7 @@ export const Node = React.memo(({
     vlanBorderColor,
     Boolean(modelItem.poweredByPoe),
     poePowerWarning,
-    hoveredPortId
+    null
   );
   const liveTile = useNodeDragStore((state) => {
     return state.tiles[node.id];
@@ -357,7 +342,11 @@ export const Node = React.memo(({
 
   return (
     <Box
-      className={`isoflow-node ${selectionTone === 'highlighted' ? 'isoflow-node-highlighted' : ''}`}
+      className={`isoflow-node ${
+        selectionTone === 'highlighted' || selectionTone === 'related'
+          ? 'isoflow-node-highlighted'
+          : ''
+      }`}
       data-node-id={node.id}
       sx={{
         position: 'absolute',
@@ -367,7 +356,9 @@ export const Node = React.memo(({
           ? 'drop-shadow(0 0 5px rgba(234, 88, 12, 0.75))'
           : selectionTone === 'highlighted'
             ? 'drop-shadow(0 0 6px rgba(37, 99, 235, 0.65)) drop-shadow(0 2px 6px rgba(37, 99, 235, 0.4))'
-            : undefined,
+            : selectionTone === 'related'
+              ? 'drop-shadow(0 0 5px rgba(37, 99, 235, 0.45)) drop-shadow(0 1px 4px rgba(37, 99, 235, 0.28))'
+              : undefined,
         transition: 'opacity 0.15s ease, filter 0.15s ease, z-index 0s',
         '&:hover': {
           zIndex: order + 20000
@@ -377,6 +368,8 @@ export const Node = React.memo(({
       <Box
         sx={{
           position: 'absolute',
+          // Scale ("hover") only the clicked / selected node — cable peers
+          // stay related-highlighted without the zoom.
           transform:
             selectionTone === 'highlighted' &&
             modelItem.icon !== SHAPE_2D_CABINET_ID
