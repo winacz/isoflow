@@ -1,7 +1,13 @@
-import { Coords, Size, Scroll } from 'src/types';
+import { Coords, Size, Scroll, View } from 'src/types';
 import { CoordsUtils, SizeUtils } from 'src/utils';
 import { PROJECTED_TILE_SIZE } from 'src/config';
-import { getGridSubset, isWithinBounds, screenToIso } from '../renderer';
+import {
+  getGridSubset,
+  isWithinBounds,
+  screenToIso,
+  getConnectorPathPreview,
+  connectorPathTouchesTile
+} from '../renderer';
 
 const getRendererSize = (tileSize: Size, zoom: number = 1): Size => {
   const projectedTileSize = SizeUtils.multiply(PROJECTED_TILE_SIZE, zoom);
@@ -123,5 +129,43 @@ describe('Tests renderer utils', () => {
     });
 
     expect(tile).toEqual({ x: 0, y: 10 });
+  });
+
+  test('getConnectorPathPreview keeps free-angle diagonals as one segment', () => {
+    const view = { id: 'v', items: [], connectors: [] } as unknown as View;
+    const path = getConnectorPathPreview({
+      anchors: [
+        { id: 'a', ref: { tile: { x: 0, y: 0 } } },
+        { id: 'b', ref: { tile: { x: 10, y: 3 } } }
+      ],
+      view
+    });
+    // Sparse endpoints only — densifying |dx|≠|dy| would draw a zigzag.
+    expect(path.tiles.length).toBe(2);
+    expect(
+      connectorPathTouchesTile(path, { x: 5, y: 2 }) ||
+        connectorPathTouchesTile(path, { x: 7, y: 2 })
+    ).toBe(true);
+  });
+
+  test('getConnectorPathPreview still densifies 45° and orthogonal runs', () => {
+    const view = { id: 'v', items: [], connectors: [] } as unknown as View;
+    const diag = getConnectorPathPreview({
+      anchors: [
+        { id: 'a', ref: { tile: { x: 0, y: 0 } } },
+        { id: 'b', ref: { tile: { x: 4, y: 4 } } }
+      ],
+      view
+    });
+    expect(diag.tiles.length).toBe(5);
+
+    const ortho = getConnectorPathPreview({
+      anchors: [
+        { id: 'a', ref: { tile: { x: 0, y: 0 } } },
+        { id: 'b', ref: { tile: { x: 5, y: 0 } } }
+      ],
+      view
+    });
+    expect(ortho.tiles.length).toBe(6);
   });
 });

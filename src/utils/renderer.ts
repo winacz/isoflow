@@ -1195,6 +1195,14 @@ export const getConnectorPathPreview = ({
     const from = anchorPosition[i - 1];
     const dx = to.x - from.x;
     const dy = to.y - from.y;
+    const isOrtho = dx === 0 || dy === 0;
+    const is45 = dx !== 0 && dy !== 0 && Math.abs(dx) === Math.abs(dy);
+    // Free-angle diagonals (Diagonalny): keep a single straight segment.
+    // Chebyshev densify + rounding would stair-step them into zigzags.
+    if (!isOrtho && !is45) {
+      appendLocal(tiles, to);
+      continue;
+    }
     const steps = Math.max(Math.abs(dx), Math.abs(dy), 1);
     for (let s = 1; s <= steps; s += 1) {
       appendLocal(tiles, {

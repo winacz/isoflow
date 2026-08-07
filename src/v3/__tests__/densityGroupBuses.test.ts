@@ -1149,6 +1149,8 @@ describe('routeDensityGroupBuses', () => {
     });
     const path = result.routes.c1;
     expect(path?.length).toBeGreaterThanOrEqual(3);
+    // Sparse corners only — no grid-staircased diagonal (zigzag).
+    expect(path.length).toBeLessThanOrEqual(5);
     let sawHorizontalStub = false;
     for (let i = 1; i < path.length; i += 1) {
       const prev = path[i - 1];
@@ -1159,5 +1161,12 @@ describe('routeDensityGroupBuses', () => {
       }
     }
     expect(sawHorizontalStub).toBe(true);
+    const port = path[path.length - 1];
+    const before = path[path.length - 2];
+    const dx = Math.abs(port.x - before.x);
+    const dy = Math.abs(port.y - before.y);
+    // Final approach is a single diagonal segment (possibly non-45°).
+    expect(dx).toBeGreaterThan(0);
+    expect(dy).toBeGreaterThan(0);
   });
 });
