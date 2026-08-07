@@ -571,10 +571,26 @@ describe('arrangeDensityGroups hub-and-spoke', () => {
     expect(result.targets.floor).toBeTruthy();
     expect(result.targets.pc1 || result.targets.pc2).toBeTruthy();
 
-    const floorY = tileOf('floor').y;
-    const pcsY = (tileOf('pc1').y + tileOf('pc2').y) / 2;
-    // Screen Y grows downward — "above FLOOR" means smaller Y than FLOOR.
-    expect(pcsY).toBeLessThan(floorY);
+    const floorTile = tileOf('floor');
+    const coreTile = tileOf('core');
+    const pcs = {
+      x: (tileOf('pc1').x + tileOf('pc2').x) / 2,
+      y: (tileOf('pc1').y + tileOf('pc2').y) / 2
+    };
+    const floorC = {
+      x: floorTile.x + sw.width / 2,
+      y: floorTile.y + sw.height / 2
+    };
+    const coreC = {
+      x: coreTile.x + sw.width / 2,
+      y: coreTile.y + sw.height / 2
+    };
+    // PCs must sit opposite CORE relative to FLOOR (anti-uplink).
+    const toCoreX = coreC.x - floorC.x;
+    const toCoreY = coreC.y - floorC.y;
+    const toPcsX = pcs.x - floorC.x;
+    const toPcsY = pcs.y - floorC.y;
+    expect(toCoreX * toPcsX + toCoreY * toPcsY).toBeLessThan(0);
   });
 
   test('inner group is not left on outer group wire path to hub', () => {
@@ -684,6 +700,52 @@ describe('arrangeDensityGroups hub-and-spoke', () => {
     });
     expect(circleHitsSpokeCorridor(inner.circle, outerSpoke)).toBe(false);
     expect(circleHitsSpokeCorridor(outer.circle, innerSpoke)).toBe(false);
+  });
+
+  test('places group on the short-cable side of its switch ports', () => {
+    // Two PCs start far to the right; ports are on the left of the switch.
+    // Arrange should pull the group left of the switch (shorter wires).
+    const items = [
+      { id: 'pc1', tile: { x: 80, y: 20 } },
+      { id: 'pc2', tile: { x: 80 + w, y: 20 } },
+      { id: 'sw', tile: { x: 40, y: 20 } }
+    ];
+    const modelItems = [
+      { id: 'pc1', icon: SHAPE_2D_PC_ID, name: 'pc1' },
+      { id: 'pc2', icon: SHAPE_2D_PC_ID, name: 'pc2' },
+      { id: 'sw', icon: SHAPE_2D_SWITCH_ID, name: 'sw' }
+    ];
+    const connectors = [
+      {
+        id: 'c1',
+        anchors: [
+          { id: '1', ref: { item: 'pc1', port: 'port-1' } },
+          { id: '2', ref: { item: 'sw', port: 'port-bottom-1' } }
+        ]
+      },
+      {
+        id: 'c2',
+        anchors: [
+          { id: '3', ref: { item: 'pc2', port: 'port-1' } },
+          { id: '4', ref: { item: 'sw', port: 'port-bottom-2' } }
+        ]
+      }
+    ];
+
+    const result = arrangeDensityGroups({
+      items,
+      modelItems: modelItems as never,
+      connectors
+    });
+    const tileOf = (id: string) => {
+      return result.targets[id] ?? items.find((item) => item.id === id)!.tile;
+    };
+    const pcsCx = (tileOf('pc1').x + tileOf('pc2').x) / 2 + w / 2;
+    const swCx = tileOf('sw').x + sw.width / 2;
+    // Bottom ports sit on the chassis; shortest seats are near the switch,
+    // not stranded far to the right of the start pose.
+    expect(pcsCx).toBeLessThan(80);
+    expect(Math.abs(pcsCx - swCx)).toBeLessThan(50);
   });
 
   test('second arrange is a no-op after the first converges', () => {

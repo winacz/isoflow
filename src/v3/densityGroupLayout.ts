@@ -40,6 +40,27 @@ type LayoutConnector = {
 type GroupTargetLink = {
   switchId: string;
   portKey: number;
+  leafId: string;
+  /** Leaf port offset relative to the leaf tile origin. */
+  leafPortLocal: Coords;
+  /** Switch port offset relative to the switch tile origin. */
+  switchPortLocal: Coords;
+};
+
+type MovableGroup = {
+  group: DensityGroup;
+  memberIds: string[];
+  bounds: DensityGroupBounds;
+  /** Layout circle at the group's current position (before move). */
+  circle: LayoutCircle;
+  switchId: string;
+  medianPortKey: number;
+  /** Cables from this group to its dominant switch. */
+  cableCount: number;
+  /** Estimated magistrala band thickness (tiles). */
+  busThickness: number;
+  /** Leaf→hub cables used to score seat cable length. */
+  cableLinks: GroupTargetLink[];
 };
 
 /** How many item↔item connectors touch this node (degree in the cable graph). */
@@ -125,20 +146,6 @@ export const MAGISTRALA_LANE_PITCH = 1;
 export const MAGISTRALA_BAND_PAD = 1;
 /** Fraction of group radius used as spoke half-width (cable fan). */
 export const SPOKE_HALF_WIDTH_RADIUS_FACTOR = 0.55;
-
-type MovableGroup = {
-  group: DensityGroup;
-  memberIds: string[];
-  bounds: DensityGroupBounds;
-  /** Layout circle at the group's current position (before move). */
-  circle: LayoutCircle;
-  switchId: string;
-  medianPortKey: number;
-  /** Cables from this group to its dominant switch. */
-  cableCount: number;
-  /** Estimated magistrala band thickness (tiles). */
-  busThickness: number;
-};
 
 const snapTile = (tile: Coords): Coords => {
   return { x: Math.round(tile.x), y: Math.round(tile.y) };
@@ -634,24 +641,92 @@ const collectGroupTargetLinks = ({
 
     const switchItem = itemById.get(switchId);
     if (!switchItem) return;
-    const port = getShape2dPorts(iconById.get(switchId) ?? '').find((p) => {
-      return p.id === switchAnchor.ref.port;
+    const switchPort = getShape2dPorts(iconById.get(switchId) ?? '').find(
+      (p) => {
+        return p.id === switchAnchor.ref.port;
+      }
+    );
+    if (!switchPort) return;
+
+    const leafItem = itemById.get(leafId);
+    if (!leafItem) return;
+    const leafPort = getShape2dPorts(iconById.get(leafId) ?? '').find((p) => {
+      return p.id === leafAnchor.ref.port;
     });
-    if (!port) return;
+    const leafPortLocal = leafPort?.tile ?? { x: 0, y: 0 };
 
     const portWorld = snapTile({
-      x: switchItem.tile.x + port.tile.x,
-      y: switchItem.tile.y + port.tile.y
+      x: switchItem.tile.x + switchPort.tile.x,
+      y: switchItem.tile.y + switchPort.tile.y
     });
     const portKey =
-      port.side === 'LEFT' || port.side === 'RIGHT'
+      switchPort.side === 'LEFT' || switchPort.side === 'RIGHT'
         ? portWorld.y
         : portWorld.x;
 
-    links.push({ switchId, portKey });
+    links.push({
+      switchId,
+      portKey,
+      leafId,
+      leafPortLocal: { ...leafPortLocal },
+      switchPortLocal: { ...switchPort.tile }
+    });
   });
 
   return links;
+};
+
+/** Sum of leaf-port → switch-port distances after a rigid group translation. */
+export const estimateGroupCableLength = ({
+  links,
+  dx,
+  dy,
+  itemById
+}: {
+  links: GroupTargetLink[];
+  dx: number;
+  dy: number;
+  itemById: Map<string, ViewItem>;
+}): number => {
+  let sum = 0;
+  links.forEach((link) => {
+    const leaf = itemById.get(link.leafId);
+    const sw = itemById.get(link.switchId);
+    if (!leaf || !sw) return;
+    const lx = leaf.tile.x + dx + link.leafPortLocal.x;
+    const ly = leaf.tile.y + dy + link.leafPortLocal.y;
+    const sx = sw.tile.x + link.switchPortLocal.x;
+    const sy = sw.tile.y + link.switchPortLocal.y;
+    sum += Math.hypot(lx - sx, ly - sy);
+  });
+  return sum;
+};
+
+/**
+ * Extra cost when a seat sits on the parent-uplink side of the hub
+ * (between leaf switch and CORE) — keeps children on the short/clear side.
+ */
+export const parentSidePenalty = ({
+  hub,
+  parentHub,
+  seat,
+  weight = 12
+}: {
+  hub: Coords;
+  parentHub: Coords | null;
+  seat: Coords;
+  weight?: number;
+}): number => {
+  if (!parentHub) return 0;
+  const px = parentHub.x - hub.x;
+  const py = parentHub.y - hub.y;
+  const sx = seat.x - hub.x;
+  const sy = seat.y - hub.y;
+  const parentLen = Math.hypot(px, py);
+  if (parentLen < 1e-6) return 0;
+  const align = (px * sx + py * sy) / parentLen;
+  // align > 0 → seat is toward the parent (bad for length / crossings).
+  return align > 0 ? weight + align * 0.35 : 0;
 };
 
 const median = (values: number[]): number => {
@@ -731,7 +806,8 @@ export const findClearSpokeDistance = ({
  * - Sort by median switch-port key; angles prefer anti-uplink (or top).
  * - Reserve spoke wire capsules (group→hub) so later groups are not parked on
  *   Prosty / bus cable paths; also keep thin magistrala AABB bands.
- * - Centres sit on spokes; distance grows until circles clear peers and corridors.
+ * - Centres sit on spokes; among clear seats pick shortest leaf→port cables
+ *   (with anti-uplink / upper-half bias so groups stay off parent trunks).
  * - Members translate rigidly with the group centre.
  * - Runs internal passes until positions stabilize so one click converges
  *   (re-click is a no-op).
@@ -877,7 +953,8 @@ const arrangeDensityGroupsPass = ({
       switchId,
       medianPortKey: median(portKeys),
       cableCount,
-      busThickness: estimateMagistralaThickness(cableCount)
+      busThickness: estimateMagistralaThickness(cableCount),
+      cableLinks: switchLinks
     });
     group.memberIds.forEach((id) => {
       movableMemberIds.add(id);
@@ -1023,17 +1100,31 @@ const arrangeDensityGroupsPass = ({
       const corridors = [...settledCorridors, ...placedCorridors];
       const spokes = [...settledSpokes, ...placedSpokes];
 
-      // Prefer assigned anti-uplink / port-order angle; fan if blocked.
-      const angleCandidates: number[] = [baseAngle];
-      for (let k = 1; k <= 14; k += 1) {
-        const delta = (k * Math.PI) / 28;
-        angleCandidates.push(
-          normalizeAngle0to2Pi(baseAngle - delta),
-          normalizeAngle0to2Pi(baseAngle + delta)
-        );
+      // Dense angle samples: assigned spoke + anti-uplink fan + full compass
+      // so we can pick the shortest clear seat, not just the first.
+      const angleCandidates: number[] = [];
+      const seenAngles = new Set<number>();
+      const pushAngle = (angle: number) => {
+        const n = normalizeAngle0to2Pi(angle);
+        const key = Math.round(n * 64);
+        if (seenAngles.has(key)) return;
+        seenAngles.add(key);
+        angleCandidates.push(n);
+      };
+      pushAngle(baseAngle);
+      pushAngle(preferAngle);
+      for (let i = 0; i < 16; i += 1) {
+        pushAngle((i * Math.PI) / 8);
+      }
+      for (let k = 1; k <= 10; k += 1) {
+        const delta = (k * Math.PI) / 24;
+        pushAngle(baseAngle - delta);
+        pushAngle(baseAngle + delta);
+        pushAngle(preferAngle - delta);
+        pushAngle(preferAngle + delta);
       }
 
-      let chosen: {
+      type ScoredSeat = {
         dist: number;
         centre: Coords;
         corridor: BusCorridor;
@@ -1042,12 +1133,11 @@ const arrangeDensityGroupsPass = ({
         dy: number;
         placedBounds: DensityGroupBounds;
         placedCircle: ObstacleCircle;
-      } | null = null;
+        score: number;
+        cableLength: number;
+      };
 
-      const evaluateSeat = (
-        dx: number,
-        dy: number
-      ): typeof chosen => {
+      const evaluateSeat = (dx: number, dy: number): ScoredSeat | null => {
         const placedBounds: DensityGroupBounds = {
           x: entry.bounds.x + dx,
           y: entry.bounds.y + dy,
@@ -1111,6 +1201,19 @@ const arrangeDensityGroupsPass = ({
           });
         if (corridorBlocked) return null;
 
+        const cableLength = estimateGroupCableLength({
+          links: entry.cableLinks,
+          dx,
+          dy,
+          itemById: workingById
+        });
+        const parentHub = parentItem
+          ? itemCenter(parentItem, iconById)
+          : null;
+        const score =
+          cableLength +
+          parentSidePenalty({ hub, parentHub, seat: groupCenter });
+
         return {
           dist: Math.hypot(groupCenter.x - hub.x, groupCenter.y - hub.y),
           centre: groupCenter,
@@ -1119,64 +1222,92 @@ const arrangeDensityGroupsPass = ({
           dx,
           dy,
           placedBounds,
-          placedCircle
+          placedCircle,
+          score,
+          cableLength
         };
       };
 
-      // Keep current seat only when it is already clear AND near the assigned
-      // spoke — otherwise a far-but-clear start would never rearrange.
-      const angleDelta = (a: number, b: number) => {
-        let d = Math.abs(normalizeAngle0to2Pi(a) - normalizeAngle0to2Pi(b));
-        if (d > Math.PI) d = 2 * Math.PI - d;
-        return d;
+      const candidates: ScoredSeat[] = [];
+      const consider = (seat: ScoredSeat | null) => {
+        if (seat) candidates.push(seat);
       };
-      const currentAngle = Math.atan2(
-        entry.circle.cy - hub.y,
-        entry.circle.cx - hub.x
-      );
-      const nearAssigned = angleCandidates.some((angle, index) => {
-        return index < 5 && angleDelta(currentAngle, angle) <= Math.PI / 7;
-      });
-      if (nearAssigned) {
-        chosen = evaluateSeat(0, 0);
-      }
 
-      if (!chosen) {
-        for (const angle of angleCandidates) {
-          let dist = hubR + entry.circle.r + GROUP_CIRCLE_GAP;
-          let lastSnapKey = '';
-          for (let guard = 0; guard <= MAX_RADIUS_PUSH; guard += 1) {
-            const rawCentre = pointOnSpoke(hub, angle, dist);
-            const { dx, dy } = snapGroupTranslation({
-              bounds: entry.bounds,
-              rawDx: rawCentre.x - entry.circle.cx,
-              rawDy: rawCentre.y - entry.circle.cy,
-              gridStep
-            });
-            const snapKey = `${dx},${dy}`;
-            if (snapKey === lastSnapKey) {
-              dist += 1;
-              continue;
-            }
-            lastSnapKey = snapKey;
+      consider(evaluateSeat(0, 0));
 
-            chosen = evaluateSeat(dx, dy);
-            if (chosen) break;
+      for (const angle of angleCandidates) {
+        let dist = hubR + entry.circle.r + GROUP_CIRCLE_GAP;
+        let lastSnapKey = '';
+        for (let guard = 0; guard <= MAX_RADIUS_PUSH; guard += 1) {
+          const rawCentre = pointOnSpoke(hub, angle, dist);
+          const { dx, dy } = snapGroupTranslation({
+            bounds: entry.bounds,
+            rawDx: rawCentre.x - entry.circle.cx,
+            rawDy: rawCentre.y - entry.circle.cy,
+            gridStep
+          });
+          const snapKey = `${dx},${dy}`;
+          if (snapKey === lastSnapKey) {
             dist += 1;
+            continue;
           }
-          if (chosen) break;
+          lastSnapKey = snapKey;
+
+          const seat = evaluateSeat(dx, dy);
+          if (seat) {
+            consider(seat);
+            // First clear on this ray is the shortest for this angle.
+            break;
+          }
+          dist += 1;
         }
       }
-      if (!chosen) return;
+
+      if (candidates.length === 0) return;
+
+      const parentHubCoords = parentItem
+        ? itemCenter(parentItem, iconById)
+        : null;
+      // Root hubs: keep left→top→right bias. Leaf hubs: heavily prefer the
+      // anti-uplink half-plane, then shortest leaf→port cables.
+      const pool = candidates.filter((seat) => {
+        if (parentHubCoords) return true;
+        return seat.centre.y <= hub.y + 0.5 || candidates.every((other) => {
+          return other.centre.y > hub.y + 0.5;
+        });
+      });
+      const ranked = (pool.length > 0 ? pool : candidates).slice();
+      ranked.sort((a, b) => {
+        const pa = parentSidePenalty({
+          hub,
+          parentHub: parentHubCoords,
+          seat: a.centre,
+          weight: 48
+        });
+        const pb = parentSidePenalty({
+          hub,
+          parentHub: parentHubCoords,
+          seat: b.centre,
+          weight: 48
+        });
+        const scoreA = a.cableLength + pa;
+        const scoreB = b.cableLength + pb;
+        if (Math.abs(scoreA - scoreB) > 0.25) return scoreA - scoreB;
+        const aStay = a.dx === 0 && a.dy === 0 ? 0 : 1;
+        const bStay = b.dx === 0 && b.dy === 0 ? 0 : 1;
+        if (aStay !== bStay) return aStay - bStay;
+        return a.dist - b.dist;
+      });
+      const chosen = ranked[0];
 
       entry.memberIds.forEach((id) => {
         const item = workingById.get(id);
         if (!item) return;
-        if (chosen!.dx === 0 && chosen!.dy === 0) return;
+        if (chosen.dx === 0 && chosen.dy === 0) return;
         const next = snapTile2dToGrid(
           {
-            x: item.tile.x + chosen!.dx,
-            y: item.tile.y + chosen!.dy
+            x: item.tile.x + chosen.dx,
+            y: item.tile.y + chosen.dy
           },
           gridStep
         );
