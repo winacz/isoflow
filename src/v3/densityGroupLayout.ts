@@ -140,6 +140,8 @@ export const GROUP_CIRCLE_GAP = 2;
 export const HUB_CLEARANCE_PAD = 1;
 /** Gap between child packing radius and hub chassis. */
 export const HUB_CHILD_GAP = 1;
+/** Allow density rings of hub↔child to touch with a 1-tile visual gap. */
+export const HUB_CHILD_CIRCLE_GAP = 1;
 /** How far out we may push a spoke when the ring is crowded. */
 const MAX_RADIUS_PUSH = 200;
 /** Orthogonal magistrala lane pitch (tiles per cable). */
@@ -482,10 +484,57 @@ export const spokeAngleAwayFromParent = (
   return Math.atan2(hub.y - parent.y, hub.x - parent.x);
 };
 
+/**
+ * Outward angle from the hub center through the centroid of the group's
+ * switch ports — places leaves on the short side of the chassis face.
+ */
+export const spokeAngleTowardPorts = ({
+  hub,
+  links,
+  switchTile
+}: {
+  hub: Coords;
+  links: Array<{ switchPortLocal: Coords }>;
+  switchTile: Coords;
+}): number | null => {
+  if (links.length === 0) return null;
+  let sx = 0;
+  let sy = 0;
+  links.forEach((link) => {
+    sx += switchTile.x + link.switchPortLocal.x;
+    sy += switchTile.y + link.switchPortLocal.y;
+  });
+  sx /= links.length;
+  sy /= links.length;
+  const dx = sx - hub.x;
+  const dy = sy - hub.y;
+  if (Math.hypot(dx, dy) < 1e-6) return null;
+  return Math.atan2(dy, dx);
+};
+
+/** Blend two polar angles via unit vectors (`tA` weight for `a`). */
+export const blendSpokeAngles = (
+  a: number,
+  b: number,
+  tA: number
+): number => {
+  const t = Math.max(0, Math.min(1, tA));
+  const x = Math.cos(a) * t + Math.cos(b) * (1 - t);
+  const y = Math.sin(a) * t + Math.sin(b) * (1 - t);
+  if (Math.hypot(x, y) < 1e-9) return a;
+  return Math.atan2(y, x);
+};
+
 const normalizeAngle0to2Pi = (angle: number): number => {
   let a = angle % (2 * Math.PI);
   if (a < 0) a += 2 * Math.PI;
   return a;
+};
+
+const angleDeltaAbs = (a: number, b: number): number => {
+  let d = Math.abs(normalizeAngle0to2Pi(a) - normalizeAngle0to2Pi(b));
+  if (d > Math.PI) d = 2 * Math.PI - d;
+  return d;
 };
 
 /**
@@ -1062,7 +1111,7 @@ const arrangeDensityGroupsPass = ({
 
     const parentId = dependsOn.get(switchId);
     const parentItem = parentId ? workingById.get(parentId) : undefined;
-    const preferAngle = parentItem
+    const antiParentAngle = parentItem
       ? spokeAngleAwayFromParent(hub, itemCenter(parentItem, iconById))
       : (3 * Math.PI) / 2;
 
@@ -1073,13 +1122,25 @@ const arrangeDensityGroupsPass = ({
       return a.group.id.localeCompare(b.group.id);
     });
 
-    const preferredAngles = spokeAnglesAroundPrefer({
-      count: ordered.length,
-      prefer: preferAngle
-    });
     const angleById = new Map<string, number>();
     ordered.forEach((entry, index) => {
-      angleById.set(entry.group.id, preferredAngles[index] ?? preferAngle);
+      const portAngle = spokeAngleTowardPorts({
+        hub,
+        links: entry.cableLinks,
+        switchTile: switchItem.tile
+      });
+      // Short cables → face the ports; keep a nudge away from the uplink.
+      let prefer =
+        portAngle !== null
+          ? parentItem
+            ? blendSpokeAngles(portAngle, antiParentAngle, 0.72)
+            : portAngle
+          : antiParentAngle;
+      if (ordered.length > 1) {
+        const spread = Math.min(Math.PI / 3, (Math.PI * 0.35) / ordered.length);
+        prefer = prefer + (index - (ordered.length - 1) / 2) * spread;
+      }
+      angleById.set(entry.group.id, normalizeAngle0to2Pi(prefer));
     });
     const placeOrder = [...ordered].sort((a, b) => {
       if (b.busThickness !== a.busThickness) {
@@ -1102,12 +1163,17 @@ const arrangeDensityGroupsPass = ({
 
     placeOrder.forEach((entry) => {
       const baseAngle = angleById.get(entry.group.id)!;
-      const bareR = barePackingRadius(
-        entry.circle.r,
-        entry.memberIds.length
-      );
-      // Peer groups keep full density circles; the hub itself is chassis-only
-      // so children can sit close (density rings may overlap the hub ring).
+      const portAngle =
+        spokeAngleTowardPorts({
+          hub,
+          links: entry.cableLinks,
+          switchTile: switchItem.tile
+        }) ?? baseAngle;
+      const hubGroupCircle = settledCircles.find((circle) => {
+        return circle.memberIds.includes(switchId);
+      });
+      // Peer groups: full density circles. Hub: chassis + density ring may
+      // touch the child ring (gap 0) but must not deeply overlap.
       const peerObstacles: LayoutCircle[] = [
         ...clusterStatic,
         ...settledCircles.filter((circle) => {
@@ -1117,7 +1183,11 @@ const arrangeDensityGroupsPass = ({
       ];
       const corridors = [...settledCorridors, ...placedCorridors];
       const spokes = [...settledSpokes, ...placedSpokes];
-      const minHubDist = hubR + bareR + HUB_CHILD_GAP;
+      const minHubDist = hubGroupCircle
+        ? hubGroupCircle.r + entry.circle.r + HUB_CHILD_CIRCLE_GAP
+        : hubR +
+          barePackingRadius(entry.circle.r, entry.memberIds.length) +
+          HUB_CHILD_GAP;
 
       // Dense angle samples: assigned spoke + anti-uplink fan + full compass
       // so we can pick the shortest clear seat, not just the first.
@@ -1131,7 +1201,8 @@ const arrangeDensityGroupsPass = ({
         angleCandidates.push(n);
       };
       pushAngle(baseAngle);
-      pushAngle(preferAngle);
+      pushAngle(portAngle);
+      pushAngle(antiParentAngle);
       for (let i = 0; i < 16; i += 1) {
         pushAngle((i * Math.PI) / 8);
       }
@@ -1139,8 +1210,8 @@ const arrangeDensityGroupsPass = ({
         const delta = (k * Math.PI) / 24;
         pushAngle(baseAngle - delta);
         pushAngle(baseAngle + delta);
-        pushAngle(preferAngle - delta);
-        pushAngle(preferAngle + delta);
+        pushAngle(portAngle - delta);
+        pushAngle(portAngle + delta);
       }
 
       type ScoredSeat = {
@@ -1171,11 +1242,18 @@ const arrangeDensityGroupsPass = ({
           placedCircle.r,
           entry.memberIds.length
         );
-        const hitsHub = circlesOverlap(
+        const hitsHubChassis = circlesOverlap(
           { cx: placedCircle.cx, cy: placedCircle.cy, r: barePlacedR },
           { cx: hub.x, cy: hub.y, r: hubR },
           HUB_CHILD_GAP
         );
+        const hitsHubRing = hubGroupCircle
+          ? circlesOverlap(
+              placedCircle,
+              hubGroupCircle,
+              HUB_CHILD_CIRCLE_GAP
+            )
+          : false;
         const hitsPeer = peerObstacles.some((obs) => {
           return circlesOverlap(placedCircle, obs);
         });
@@ -1187,8 +1265,6 @@ const arrangeDensityGroupsPass = ({
         });
         const hitsBounds = [...settledBoundsList, ...placedBoundsList].some(
           (other, index) => {
-            // settledBoundsList is parallel to settledCircles in push order —
-            // skip the hub group's own footprint so children can nest close.
             const settledCount = settledBoundsList.length;
             if (index < settledCount) {
               const circle = settledCircles[index];
@@ -1197,7 +1273,14 @@ const arrangeDensityGroupsPass = ({
             return aabbChebyshevGap(placedBounds, other) < 2;
           }
         );
-        if (hitsHub || hitsPeer || hitsCorridor || hitsSpoke || hitsBounds) {
+        if (
+          hitsHubChassis ||
+          hitsHubRing ||
+          hitsPeer ||
+          hitsCorridor ||
+          hitsSpoke ||
+          hitsBounds
+        ) {
           return null;
         }
 
@@ -1246,11 +1329,16 @@ const arrangeDensityGroupsPass = ({
           ? itemCenter(parentItem, iconById)
           : null;
         const dist = Math.hypot(groupCenter.x - hub.x, groupCenter.y - hub.y);
-        // Soft pull-in: among similar cable lengths, prefer seats closer to hub.
+        const seatAngle = Math.atan2(
+          groupCenter.y - hub.y,
+          groupCenter.x - hub.x
+        );
+        const portMisalign = angleDeltaAbs(seatAngle, portAngle) / Math.PI;
         const score =
           cableLength +
-          parentSidePenalty({ hub, parentHub, seat: groupCenter }) +
-          dist * 0.35;
+          parentSidePenalty({ hub, parentHub, seat: groupCenter, weight: 28 }) +
+          portMisalign * 18 +
+          dist * 0.25;
 
         return {
           dist,
@@ -1320,16 +1408,26 @@ const arrangeDensityGroupsPass = ({
           hub,
           parentHub: parentHubCoords,
           seat: a.centre,
-          weight: 48
+          weight: 28
         });
         const pb = parentSidePenalty({
           hub,
           parentHub: parentHubCoords,
           seat: b.centre,
-          weight: 48
+          weight: 28
         });
-        const scoreA = a.cableLength + pa;
-        const scoreB = b.cableLength + pb;
+        const aAng = Math.atan2(a.centre.y - hub.y, a.centre.x - hub.x);
+        const bAng = Math.atan2(b.centre.y - hub.y, b.centre.x - hub.x);
+        const scoreA =
+          a.cableLength +
+          pa +
+          (angleDeltaAbs(aAng, portAngle) / Math.PI) * 18 +
+          a.dist * 0.25;
+        const scoreB =
+          b.cableLength +
+          pb +
+          (angleDeltaAbs(bAng, portAngle) / Math.PI) * 18 +
+          b.dist * 0.25;
         if (Math.abs(scoreA - scoreB) > 0.25) return scoreA - scoreB;
         const aStay = a.dx === 0 && a.dy === 0 ? 0 : 1;
         const bStay = b.dx === 0 && b.dy === 0 ? 0 : 1;
@@ -1338,14 +1436,45 @@ const arrangeDensityGroupsPass = ({
       });
       const chosen = ranked[0];
 
+      // Snap can pull a barely-clear seat into the hub ring — push out if needed.
+      let seat = chosen;
+      if (hubGroupCircle) {
+        for (let guard = 0; guard < 40; guard += 1) {
+          if (
+            !circlesOverlap(
+              seat.placedCircle,
+              hubGroupCircle,
+              HUB_CHILD_CIRCLE_GAP
+            )
+          ) {
+            break;
+          }
+          const ang = Math.atan2(
+            seat.centre.y - hub.y,
+            seat.centre.x - hub.x
+          );
+          const nextDist = seat.dist + 1;
+          const rawCentre = pointOnSpoke(hub, ang, nextDist);
+          const { dx, dy } = snapGroupTranslation({
+            bounds: entry.bounds,
+            rawDx: rawCentre.x - entry.circle.cx,
+            rawDy: rawCentre.y - entry.circle.cy,
+            gridStep
+          });
+          const nudged = evaluateSeat(dx, dy);
+          if (!nudged) break;
+          seat = nudged;
+        }
+      }
+
       entry.memberIds.forEach((id) => {
         const item = workingById.get(id);
         if (!item) return;
-        if (chosen.dx === 0 && chosen.dy === 0) return;
+        if (seat.dx === 0 && seat.dy === 0) return;
         const next = snapTile2dToGrid(
           {
-            x: item.tile.x + chosen.dx,
-            y: item.tile.y + chosen.dy
+            x: item.tile.x + seat.dx,
+            y: item.tile.y + seat.dy
           },
           gridStep
         );
@@ -1359,10 +1488,10 @@ const arrangeDensityGroupsPass = ({
         }
       });
 
-      placedCircles.push(chosen.placedCircle);
-      placedBoundsList.push(chosen.placedBounds);
-      placedCorridors.push(chosen.corridor);
-      placedSpokes.push(chosen.spoke);
+      placedCircles.push(seat.placedCircle);
+      placedBoundsList.push(seat.placedBounds);
+      placedCorridors.push(seat.corridor);
+      placedSpokes.push(seat.spoke);
     });
 
     settledCircles.push(...placedCircles);
@@ -1443,16 +1572,20 @@ const separateOverlappingGroupCircles = ({
       for (let j = i + 1; j < seats.length; j += 1) {
         const a = seats[i];
         const b = seats[j];
-        const circleHit = circlesOverlap(a.circle, b.circle, GROUP_CIRCLE_GAP);
-        const mergeHit = aabbChebyshevGap(a.bounds, b.bounds) < 2;
-        if (!circleHit && !mergeHit) continue;
-
-        // Hub group ↔ its leaf children may nest (density rings overlap); only
-        // peer groups around the same / different hubs must stay apart.
-        const hubChild =
+        const circleHit = circlesOverlap(
+          a.circle,
+          b.circle,
           a.entry.memberIds.includes(b.entry.switchId) ||
-          b.entry.memberIds.includes(a.entry.switchId);
-        if (hubChild) continue;
+            b.entry.memberIds.includes(a.entry.switchId)
+            ? HUB_CHILD_CIRCLE_GAP
+            : GROUP_CIRCLE_GAP
+        );
+        const mergeHit =
+          a.entry.memberIds.includes(b.entry.switchId) ||
+          b.entry.memberIds.includes(a.entry.switchId)
+            ? false
+            : aabbChebyshevGap(a.bounds, b.bounds) < 2;
+        if (!circleHit && !mergeHit) continue;
 
         const pushSeat = a.circle.cx >= b.circle.cx ? a : b;
         const other = pushSeat === a ? b : a;

@@ -13,7 +13,8 @@ import {
   pointOnSpoke,
   snapGroupTranslation,
   spokeAngleForIndex,
-  GROUP_CIRCLE_GAP
+  GROUP_CIRCLE_GAP,
+  HUB_CHILD_CIRCLE_GAP
 } from '../densityGroupLayout';
 import { computeDensityGroups, densityCirclePadForMemberCount } from '../densityGroups';
 
@@ -748,7 +749,7 @@ describe('arrangeDensityGroups hub-and-spoke', () => {
     expect(Math.abs(pcsCx - swCx)).toBeLessThan(50);
   });
 
-  test('child group sits close to its hub (density rings may nest)', () => {
+  test('child group sits close to its hub without deep ring overlap', () => {
     const items = [
       { id: 'floor', tile: { x: 40, y: 40 } },
       { id: 'pc1', tile: { x: 90, y: 10 } },
@@ -793,21 +794,19 @@ describe('arrangeDensityGroups hub-and-spoke', () => {
     const tileOf = (id: string) => {
       return result.targets[id] ?? items.find((item) => item.id === id)!.tile;
     };
-    const placed = items.map((item) => {
-      return { ...item, tile: tileOf(item.id) };
-    });
-    const after = computeDensityGroups({ items: placed, modelItems });
-    const floorG = after.find((g) => g.memberIds.includes('floor'))!;
-    const pcs = after.find((g) => g.memberIds.includes('pc1'))!;
-    const dist = Math.hypot(
-      pcs.circle.cx - floorG.circle.cx,
-      pcs.circle.cy - floorG.circle.cy
-    );
-    // Chassis clearance only — must not require densityR+densityR (~25+).
-    const hubR =
-      Math.sqrt((sw.width / 2) ** 2 + (sw.height / 2) ** 2) + 1;
-    const barePcs = pcs.circle.r - densityCirclePadForMemberCount(2);
-    expect(dist).toBeLessThanOrEqual(hubR + barePcs + 6);
+    const floorC = {
+      x: tileOf('floor').x + sw.width / 2,
+      y: tileOf('floor').y + sw.height / 2
+    };
+    const pcsC = {
+      x: (tileOf('pc1').x + tileOf('pc2').x) / 2 + w / 2,
+      y: (tileOf('pc1').y + tileOf('pc2').y) / 2 + h / 2
+    };
+    const dist = Math.hypot(pcsC.x - floorC.x, pcsC.y - floorC.y);
+    // Near the hub — not stranded on a long empty diagonal.
+    expect(dist).toBeLessThan(36);
+    // Prefer the port-face / anti-uplink side (CORE is below → PCs not below FLOOR).
+    expect(pcsC.y).toBeLessThanOrEqual(floorC.y + 2);
   });
 
   test('second arrange is a no-op after the first converges', () => {
