@@ -66,6 +66,8 @@ type LoupeContent = {
   modelItem: ModelItem;
   deviceCenter: { x: number; y: number };
   diameter: number;
+  /** Locked at reveal so a click-select scale bump does not jump the glass. */
+  highlightScale: number;
 };
 
 /** Resolve loupe stroke the same way Connector2d does (VLAN / trunk / mismatch). */
@@ -365,9 +367,6 @@ export const PortLoupeOverlay = () => {
   const vlan1CableColor = useUiStateStore((state) => {
     return state.vlan1CableColor;
   });
-  const selectedItemIds = useUiStateStore((state) => {
-    return state.selectedItemIds;
-  });
   const rendererEl = useUiStateStore((state) => {
     return state.rendererEl;
   });
@@ -561,6 +560,12 @@ export const PortLoupeOverlay = () => {
       const world = continuousTileToWorld(tile);
       cursorWorldRef.current = world;
 
+      // Freeze framing while the button is down so click jitter / hover churn
+      // cannot pan the loupe mid-interaction.
+      if (mouse.mousedown && contentElRef.current && focusRef.current) {
+        return;
+      }
+
       if (contentElRef.current && deviceCenterRef.current && focusRef.current) {
         cursorTargetRef.current = { ...world };
         ensureRafImperative();
@@ -609,11 +614,23 @@ export const PortLoupeOverlay = () => {
     cursorTargetRef.current = { ...cursor };
     focusRef.current = { ...cursor };
 
+    const ui = uiStoreApi.getState();
+    const viewItem = items.find((item) => {
+      return item.id === dev.itemId;
+    });
+    const highlightScaled =
+      dev.modelItem.icon !== SHAPE_2D_CABINET_ID &&
+      (ui.selectedItemIds.includes(dev.itemId) ||
+        Boolean(
+          viewItem?.parentId && ui.selectedItemIds.includes(viewItem.parentId)
+        ));
+
     setContent({
       itemId: dev.itemId,
       modelItem: dev.modelItem,
       deviceCenter: { ...dev.deviceCenter },
-      diameter: dev.diameter
+      diameter: dev.diameter,
+      highlightScale: highlightScaled ? NODE_HIGHLIGHT_SCALE : 1
     });
 
     applyLoupeDom(
@@ -689,11 +706,27 @@ export const PortLoupeOverlay = () => {
         ) {
           return prev;
         }
+        // Keep highlightScale when the same device stays under the loupe so a
+        // click-select (canvas scale bump) does not jump the glass mid-session.
+        const keepScale =
+          prev?.itemId === device.itemId ? prev.highlightScale : undefined;
+        const viewItem = items.find((item) => {
+          return item.id === device.itemId;
+        });
+        const selected = uiStoreApi.getState().selectedItemIds;
+        const highlightScaled =
+          device.modelItem.icon !== SHAPE_2D_CABINET_ID &&
+          (selected.includes(device.itemId) ||
+            Boolean(
+              viewItem?.parentId && selected.includes(viewItem.parentId)
+            ));
         return {
           itemId: device.itemId,
           modelItem: device.modelItem,
           deviceCenter: { ...device.deviceCenter },
-          diameter: device.diameter
+          diameter: device.diameter,
+          highlightScale:
+            keepScale ?? (highlightScaled ? NODE_HIGHLIGHT_SCALE : 1)
         };
       });
       setVisible(true);
@@ -737,22 +770,10 @@ export const PortLoupeOverlay = () => {
 
   if (!content) return null;
 
-  const { modelItem, deviceCenter, diameter } = content;
+  const { modelItem, deviceCenter, diameter, highlightScale } = content;
   const fadeMs = visible ? LOUPE_FADE_IN_MS : LOUPE_FADE_OUT_MS;
   // The glass cancels SceneLayer zoom, so this is already screen-constant.
   const contentScale = LOUPE_MAG;
-  // Selected nodes (and gear in a selected cabinet) render with CSS scale on
-  // the canvas — match that here so loupe geometry lines up with port hit-tests.
-  const viewItem = items.find((item) => {
-    return item.id === content.itemId;
-  });
-  const isHighlightScaled =
-    modelItem.icon !== SHAPE_2D_CABINET_ID &&
-    (selectedItemIds.includes(content.itemId) ||
-      Boolean(
-        viewItem?.parentId && selectedItemIds.includes(viewItem.parentId)
-      ));
-  const highlightScale = isHighlightScaled ? NODE_HIGHLIGHT_SCALE : 1;
   const loupeConnectors = relatedConnectors.filter((connector) => {
     return connector.anchors.some((anchor) => {
       return anchor.ref.item === content.itemId;

@@ -120,6 +120,18 @@ export const Shape2dPortHoverController = () => {
         return;
       }
 
+      // While clicking with the loupe active, freeze hover. Selection scale /
+      // sticky hit-boxes would otherwise switch the hovered port mid-click and
+      // reframe the loupe ("obraz przeskakuje").
+      if (
+        uiState.showLoupe &&
+        uiState.mouse.mousedown &&
+        shape2dPortHover
+      ) {
+        clearPending();
+        return;
+      }
+
       if (!rendererWidth || !rendererHeight) {
         clearPending();
         if (shape2dPortHover) setShape2dPortHover(null);
