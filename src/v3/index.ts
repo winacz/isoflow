@@ -7,3 +7,4 @@
 export * from './routing';
 export * from './densityGroups';
 export * from './densityGroupBuses';
+export * from './densityGroupLayout';

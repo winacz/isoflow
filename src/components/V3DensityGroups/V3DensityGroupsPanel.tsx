@@ -3,7 +3,8 @@ import { Button, Stack, Typography } from '@mui/material';
 import {
   BubbleChartOutlined,
   AccountTreeOutlined,
-  TimelineOutlined
+  TimelineOutlined,
+  DashboardCustomizeOutlined
 } from '@mui/icons-material';
 import { UiElement } from 'src/components/UiElement/UiElement';
 import { useScene } from 'src/hooks/useScene';
@@ -25,7 +26,7 @@ export const V3DensityGroupsPanel = () => {
   const setVisible = useDensityGroupsDebugStore((state) => {
     return state.setVisible;
   });
-  const { items, runDensityGroupBuses } = useScene();
+  const { items, runDensityGroupBuses, runArrangeDensityGroups } = useScene();
   const modelItems = useModelStore((state) => {
     return state.items;
   });
@@ -60,6 +61,32 @@ export const V3DensityGroupsPanel = () => {
     [runDensityGroupBuses, setVisible]
   );
 
+  const runArrange = useCallback(() => {
+    setBusBusy(true);
+    setVisible(true);
+    setTimeout(() => {
+      try {
+        const result = runArrangeDensityGroups();
+        setBusSummary(
+          result.groupCount === 0
+            ? 'Brak grup do ułożenia'
+            : `Ułożono ${result.groupCount} ${
+                result.groupCount === 1
+                  ? 'grupę'
+                  : result.groupCount < 5
+                    ? 'grupy'
+                    : 'grup'
+              }` +
+                (result.movedNodes
+                  ? ` · przesunięto ${result.movedNodes}`
+                  : '')
+        );
+      } finally {
+        setBusBusy(false);
+      }
+    }, 0);
+  }, [runArrangeDensityGroups, setVisible]);
+
   return (
     <UiElement sx={{ px: 1.25, py: 1, width: 240 }}>
       <Typography
@@ -89,6 +116,23 @@ export const V3DensityGroupsPanel = () => {
           }}
         >
           {visible ? 'Ukryj grupy' : 'Pokaż grupy'}
+        </Button>
+        <Button
+          size="small"
+          variant="contained"
+          color="secondary"
+          startIcon={<DashboardCustomizeOutlined />}
+          disabled={busBusy || groupCount === 0}
+          onClick={runArrange}
+          title="Hub-and-spoke: układa grupy wokół switcha po okręgach (bez nachodzenia), kąty left→top→right wg portów — proste P2P bez przecięć; dół najmniej preferowany."
+          sx={{
+            justifyContent: 'flex-start',
+            textTransform: 'none',
+            fontSize: 12,
+            py: 0.4
+          }}
+        >
+          Ułóż grupy
         </Button>
         <Button
           size="small"

@@ -24,6 +24,7 @@ import {
 import * as reducers from 'src/stores/reducers';
 import type { State } from 'src/stores/reducers/types';
 import { routeDensityGroupBuses } from 'src/v3/densityGroupBuses';
+import { arrangeDensityGroups } from 'src/v3/densityGroupLayout';
 import { isSwitchLikeIcon } from 'src/utils/shape2dLayout';
 import {
   getItemByIdOrThrow,
@@ -1104,6 +1105,46 @@ export const useScene = () => {
     currentViewId
   ]);
 
+  /**
+   * 2D v3: place density groups near their switch targets so inter-group
+   * cables cross less. Moves nodes only — does not rewrite routes.
+   */
+  const runArrangeDensityGroups = useCallback(() => {
+    const state = getState();
+    const view = getItemByIdOrThrow(state.model.views, currentViewId).value;
+    const viewItems = view.items ?? [];
+    const viewConnectors = view.connectors ?? [];
+    if (viewItems.length === 0) {
+      return { groupCount: 0, movedNodes: 0, targets: {} };
+    }
+
+    const result = arrangeDensityGroups({
+      items: viewItems,
+      modelItems: state.model.items,
+      connectors: viewConnectors
+    });
+
+    if (result.movedNodes === 0) return result;
+
+    beginHistoryTransaction();
+    Object.entries(result.targets).forEach(([id, tile]) => {
+      const newState = reducers.view({
+        action: 'UPDATE_VIEWITEM',
+        payload: { id, tile },
+        ctx: { viewId: currentViewId, state: getState() }
+      });
+      setState(newState, { skipHistory: true });
+    });
+    endHistoryTransaction();
+    return result;
+  }, [
+    beginHistoryTransaction,
+    endHistoryTransaction,
+    getState,
+    setState,
+    currentViewId
+  ]);
+
   /** Soft compat for leftover AlgorithmsPopup — alias / no-op after 88e2dab restore. */
   const runSmartLayout3ForItems = runSmartLayout2ForItems;
   const runSmartLayout4ForItems = runSmartLayout2ForItems;
@@ -1418,6 +1459,7 @@ export const useScene = () => {
       runAutoLayoutForItems,
       runAutoRouteForItems,
       runDensityGroupBuses,
+      runArrangeDensityGroups,
       runSmartLayout3ForItems,
       runSmartLayout4ForItems,
       runClaudeSortForItems,
@@ -1464,6 +1506,7 @@ export const useScene = () => {
       runAutoLayoutForItems,
       runAutoRouteForItems,
       runDensityGroupBuses,
+      runArrangeDensityGroups,
       runSmartLayout3ForItems,
       runSmartLayout4ForItems,
       runClaudeSortForItems,

@@ -27,8 +27,11 @@ export type DensityGroup = {
 
 /** Test threshold: ≤1 tile between footprints → same group. */
 export const DEFAULT_DENSITY_MAX_GAP_TILES = 1;
-/** Extra radius beyond the bbox half-diagonal so the ring clears icons. */
-export const DENSITY_CIRCLE_PAD_TILES = 0.75;
+/**
+ * Extra radius beyond the bbox half-diagonal.
+ * Sized for layout packing (hub-and-spoke uses these circles) and the overlay.
+ */
+export const DENSITY_CIRCLE_PAD_TILES = 3.5;
 
 export const footprintBounds = (fp: Footprint): DensityGroupBounds => {
   return { x: fp.tile.x, y: fp.tile.y, w: fp.width, h: fp.height };
