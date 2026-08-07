@@ -239,6 +239,10 @@ const targetPortOf = (path: Coords[]): Coords => {
   return path[path.length - 1];
 };
 
+const isUsableRoutePath = (path: Coords[] | undefined): path is Coords[] => {
+  return Boolean(path && path.length >= 2 && path[0] && path[path.length - 1]);
+};
+
 /**
  * Rebuild approach so the vertical run sits on `freeX`, joining the port with
  * a short 45° stub (≤ TARGET_DIAG_STUB_TILES). Far columns stay orthogonal:
@@ -367,6 +371,9 @@ const pathsConflictXY = (
 ): {
   axis: 'x' | 'y';
 } | null => {
+  // Fan/Test routes may be empty bend lists for short/straight cables.
+  if (!isUsableRoutePath(a) || !isUsableRoutePath(b)) return null;
+
   // Only the main bus run (longest horizontal) — short stubs near ports/leaves
   // must not trigger a bus-Y nudge that blows up the lane stack.
   const ya = longestHorizontalY(a);
@@ -389,12 +396,21 @@ const pathsConflictXY = (
       return { axis: 'y' };
     }
   }
-  // Compare main approach columns (longest vertical). Only the *same* column
-  // is a real overlap — adjacent port drops (x and x+1) must stay orthogonal.
-  const sa = longestVertical(a);
-  const sb = longestVertical(b);
-  if (sa && sb && sa.x === sb.x) {
-    return { axis: 'x' };
+  // Compare vertical runs: same column with overlapping Y (stacked leaf drops).
+  // Prefer any overlapping pair — longest-only missed short stubs that still paint together.
+  {
+    const va = verticalsOf(a);
+    const vb = verticalsOf(b);
+    for (let i = 0; i < va.length; i += 1) {
+      for (let j = 0; j < vb.length; j += 1) {
+        if (va[i].x !== vb[j].x) continue;
+        const y0 = Math.max(va[i].y0, vb[j].y0);
+        const y1 = Math.min(va[i].y1, vb[j].y1);
+        if (y1 - y0 >= 1) {
+          return { axis: 'x' };
+        }
+      }
+    }
   }
   // Stacked switches, same port index: both still drop on the port column
   // (a successful 45° untangle moves the long vertical off port.x).
@@ -510,7 +526,13 @@ const preferredDiagonalSigns = (
 export const resolveOverlapsWithTargetDiagonal = (
   routes: Record<string, Coords[]>
 ): Record<string, Coords[]> => {
-  const next: Record<string, Coords[]> = { ...routes };
+  const next: Record<string, Coords[]> = {};
+  Object.entries(routes).forEach(([id, path]) => {
+    // Skip empty bend lists from straight/short fan paths — nothing to untangle.
+    if (isUsableRoutePath(path)) {
+      next[id] = path;
+    }
+  });
   const ids = Object.keys(next);
 
   const conflictsAny = (id: string, path: Coords[]): boolean => {
@@ -587,7 +609,8 @@ export const resolveOverlapsWithTargetDiagonal = (
     if (!moved) break;
   }
 
-  return next;
+  // Keep short/empty fan paths the caller already produced (no bends to untangle).
+  return { ...routes, ...next };
 };
 
 /**

@@ -4,8 +4,11 @@ import {
   getShape2dPortAtTile,
   isShape2dPortUnavailable,
   setWindowCursor,
-  BLACK_CROSSHAIR_CURSOR
+  BLACK_CROSSHAIR_CURSOR,
+  screenToTile2dContinuous,
+  diagonalFanShape2dRoutes
 } from 'src/utils';
+import { resolveOverlapsWithTargetDiagonal } from 'src/v3/densityGroupBuses';
 import { routeNewConnection, type RoutedConnector } from 'src/v3/routing';
 
 /**
@@ -16,8 +19,8 @@ import { routeNewConnection, type RoutedConnector } from 'src/v3/routing';
  *   MOUSEMOVE — move `mode.preview` only. No model write, so no routing runs
  *               while the pointer is moving; the drag renders as a straight
  *               hint line instead of a live path.
- *   MOUSEUP   — validate the destination. If it holds, run A* once and
- *               materialize the bends as real anchors; otherwise discard.
+ *   MOUSEUP   — validate the destination. If it holds, route with the same
+ *               diagonal-fan algorithm as context-menu "Test" (fallback: A*).
  *
  * Connections stay ordered `anchors` arrays throughout — there is no
  * source/target pair anywhere in this flow.
@@ -26,14 +29,30 @@ import { routeNewConnection, type RoutedConnector } from 'src/v3/routing';
 const portUnderCursor = ({
   scene,
   model,
-  tile
+  tile,
+  screen,
+  zoom,
+  scroll,
+  rendererSize
 }: {
   scene: Parameters<NonNullable<ModeActions['mousedown']>>[0]['scene'];
   model: Parameters<NonNullable<ModeActions['mousedown']>>[0]['model'];
   tile: { x: number; y: number };
+  screen: { x: number; y: number };
+  zoom: number;
+  scroll: Parameters<NonNullable<ModeActions['mousedown']>>[0]['uiState']['scroll'];
+  rendererSize: { width: number; height: number };
 }) => {
+  const point = screenToTile2dContinuous({
+    mouse: screen,
+    zoom,
+    scroll,
+    rendererSize
+  });
+
   return getShape2dPortAtTile({
     tile,
+    point,
     scene,
     modelItems: model.items
   });
@@ -48,13 +67,17 @@ export const ConnectorV3: ModeActions = {
     setWindowCursor('default');
   },
 
-  mousedown: ({ uiState, scene, model, isRendererInteraction }) => {
+  mousedown: ({ uiState, scene, model, isRendererInteraction, rendererSize }) => {
     if (uiState.mode.type !== 'CONNECTOR_V3' || !isRendererInteraction) return;
 
     const hit = portUnderCursor({
       scene,
       model,
-      tile: uiState.mouse.position.tile
+      tile: uiState.mouse.position.tile,
+      screen: uiState.mouse.position.screen,
+      zoom: uiState.zoom,
+      scroll: uiState.scroll,
+      rendererSize
     });
 
     // Nothing to start from — stay armed rather than creating a stray cable.
@@ -108,7 +131,7 @@ export const ConnectorV3: ModeActions = {
     });
   },
 
-  mouseup: ({ uiState, scene, model }) => {
+  mouseup: ({ uiState, scene, model, rendererSize }) => {
     if (uiState.mode.type !== 'CONNECTOR_V3') return;
 
     const { id, start } = uiState.mode;
@@ -132,7 +155,11 @@ export const ConnectorV3: ModeActions = {
     const hit = portUnderCursor({
       scene,
       model,
-      tile: uiState.mouse.position.tile
+      tile: uiState.mouse.position.tile,
+      screen: uiState.mouse.position.screen,
+      zoom: uiState.zoom,
+      scroll: uiState.scroll,
+      rendererSize
     });
 
     const sameJack =
@@ -157,31 +184,65 @@ export const ConnectorV3: ModeActions = {
     }
 
     const end = { item: hit.itemId, port: hit.portId };
+    const startAnchor = {
+      id: generateId(),
+      ref: { item: start.item, port: start.port }
+    };
+    const endAnchor = {
+      id: generateId(),
+      ref: { item: end.item, port: end.port }
+    };
 
-    // One routing pass, now that both endpoints are known and validated.
-    const routed = routeNewConnection({
-      from: { itemId: start.item, portId: start.port },
-      to: { itemId: end.item, portId: end.port },
-      items: scene.items,
-      modelItems: model.items,
-      existingConnectors: (scene.connectors ?? []) as RoutedConnector[],
-      excludeConnectorId: id
+    // Provisional endpoints so the Test/diagonal-fan router sees a real cable.
+    const connectorsForRoute = (scene.currentView.connectors ?? []).map(
+      (connector) => {
+        if (connector.id !== id) return connector;
+        return { ...connector, anchors: [startAnchor, endAnchor] };
+      }
+    );
+
+    const selectedItems = scene.items.filter((item) => {
+      return item.id === start.item || item.id === end.item;
     });
 
-    if (!routed) {
-      scene.deleteConnector(id);
-      scene.endHistoryTransaction();
-      rearm();
-      return;
+    let midWaypoints: { x: number; y: number }[] = [];
+
+    if (selectedItems.length >= 1) {
+      const fanRoutes = diagonalFanShape2dRoutes({
+        selectedItems,
+        allItems: scene.items,
+        modelItems: model.items,
+        connectors: connectorsForRoute
+      });
+      const resolved = resolveOverlapsWithTargetDiagonal(fanRoutes);
+      midWaypoints = resolved[id] ?? fanRoutes[id] ?? [];
     }
 
-    // Materialize the path bends as real anchors between the two endpoints.
+    // Fallback: classic A* when the fan has nothing to say (e.g. odd topology).
+    if (midWaypoints.length === 0) {
+      const routed = routeNewConnection({
+        from: { itemId: start.item, portId: start.port },
+        to: { itemId: end.item, portId: end.port },
+        items: scene.items,
+        modelItems: model.items,
+        existingConnectors: (scene.connectors ?? []) as RoutedConnector[],
+        excludeConnectorId: id
+      });
+      if (!routed) {
+        scene.deleteConnector(id);
+        scene.endHistoryTransaction();
+        rearm();
+        return;
+      }
+      midWaypoints = routed.waypoints;
+    }
+
     const anchors = [
-      { id: generateId(), ref: { item: start.item, port: start.port } },
-      ...routed.waypoints.map((tile) => {
+      startAnchor,
+      ...midWaypoints.map((tile) => {
         return { id: generateId(), ref: { tile } };
       }),
-      { id: generateId(), ref: { item: end.item, port: end.port } }
+      endAnchor
     ];
 
     scene.updateConnector(id, { anchors }, { overlapResolve: 'off' });

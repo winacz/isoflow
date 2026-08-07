@@ -15,7 +15,8 @@ Snapshot of behaviour the user confirmed as “coraz lepiej” (2026-08-07), plu
 - Lane stack by travel direction / switch above-below (nearest port owns the band edge toward the switch).
 - No rozbiegówka: `SWITCH_PORT_RUNWAY_TILES = 0`, `switchPortApproach` = snapped port world.
 - Climb/drop on the port column first — no shared horizontal on `leafExit.y`.
-- Inter-group occupancy: later bundles avoid already claimed horizontal Ys (same Y is enough — stacked switches with the same port index share a highway). Prefer upward `busYOffset` / large upward offset on the **bus only**. Never translate whole leaf groups from Magistrala / Diagonalny — in-group leaf swaps (`untangleGroupTowardExit`) stay; group seating is "Ułóż grupy".
+- Inter-group occupancy: later bundles avoid already claimed horizontal Ys (same Y is enough — stacked switches with the same port index share a highway). Prefer upward `busYOffset` / large upward offset on the **bus only**. Never translate whole leaf groups from Magistrala / Diagonalny — in-group leaf swaps (`untangleGroupTowardExit`) stay; group seating is "Ułóż grupy" / "Ułóż grupy (magistrale)".
+- `Ułóż grupy (magistrale)`: same hub-and-spoke engine with profile `mode: 'magistrala'` — larger circle/hub gaps, thick bus+spoke corridors, place largest groups first, score seats to minimise spoke crossings. Does not change default "Ułóż grupy".
 - Final Magistala pass (`resolveOverlapsWithTargetDiagonal`): shared **exact** approach column or main bus Y → short 45° stub (`TARGET_DIAG_STUB_TILES`). Adjacent port columns stay orthogonal. Never long diagonals — farther freeX uses orthogonal drop + short stub. Do not Y-nudge from failed X fans (destroys lane stack).
 - `Prosty z grup`: straight port↔port (`exitStyle: 'simple'`, `simplePaths`) — no bus / corridor math. Only in-group leaf swaps (port order → slot reading order). Empty mid-waypoints.
 - `Magistrala z grup`: orthogonal (`exitStyle: 'orthogonal'`).

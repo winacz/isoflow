@@ -32,7 +32,9 @@ import {
   setWindowCursor,
   screenToTile2dContinuous,
   isPlanProjection,
-  supportsConnectorTools
+  supportsConnectorTools,
+  supportsDrawingConnections,
+  connectorModeForProjection
 } from 'src/utils';
 import { useScene } from 'src/hooks/useScene';
 import { isShape2dIcon, getShape2dSize } from 'src/config';
@@ -643,19 +645,27 @@ export const Cursor: ModeActions = {
       mousedown(state);
     }
   },
-  mousemove: ({ scene, uiState, model }) => {
+  mousemove: ({ scene, uiState, model, rendererSize }) => {
     if (uiState.mode.type !== 'CURSOR' || !hasMovedTile(uiState.mouse)) return;
 
-    // 2D: drag from an empty port → start connector tool from that port.
-    // 2D v3 opts out: connections there come from a different library.
+    // Plan: drag from an empty port → start the view's connection mode.
+    // Classic 2D uses CONNECTOR (live waypoints); 2D v3 uses CONNECTOR_V3
+    // (preview-only drag, route once on mouseup).
     if (
       isPlanProjection(uiState.projectionMode) &&
-      supportsConnectorTools(uiState.projectionMode) &&
+      supportsDrawingConnections(uiState.projectionMode) &&
       uiState.mode.mousedownItem?.type === 'ITEM' &&
       uiState.mouse.mousedown
     ) {
+      const mousedownPoint = screenToTile2dContinuous({
+        mouse: uiState.mouse.mousedown.screen,
+        zoom: uiState.zoom,
+        scroll: uiState.scroll,
+        rendererSize
+      });
       const portHit = getShape2dPortAtTile({
         tile: uiState.mouse.mousedown.tile,
+        point: mousedownPoint,
         scene,
         modelItems: model.items
       });
@@ -675,6 +685,34 @@ export const Cursor: ModeActions = {
           item: portHit.itemId,
           port: portHit.portId
         };
+        const modeType = connectorModeForProjection(uiState.projectionMode);
+
+        if (modeType === 'CONNECTOR_V3') {
+          const newConnector: ConnectorI = {
+            id: generateId(),
+            color: scene.colors[0]?.id,
+            anchors: [
+              { id: generateId(), ref: { ...startRef } },
+              { id: generateId(), ref: { ...startRef } }
+            ]
+          };
+
+          scene.beginHistoryTransaction();
+          scene.createConnector(newConnector);
+          uiState.actions.setFocusedPortId(portHit.portId);
+          uiState.actions.setMode({
+            type: 'CONNECTOR_V3',
+            showCursor: true,
+            id: newConnector.id,
+            start: startRef,
+            preview: { ...uiState.mouse.position.tile }
+          });
+          setWindowCursor(BLACK_CROSSHAIR_CURSOR);
+          return;
+        }
+
+        if (!supportsConnectorTools(uiState.projectionMode)) return;
+
         const endRef = {
           tile: uiState.mouse.position.tile
         };

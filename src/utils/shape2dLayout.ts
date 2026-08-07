@@ -1726,6 +1726,72 @@ const connectorAnchorPolyline = (
 };
 
 /**
+ * Walk sparse bend/anchor polylines into adjacent tiles so edge occupancy
+ * matches walked fan routes (diagonal when both axes change, else ortho).
+ */
+const expandPolylineToTiles = (points: Coords[]): Coords[] => {
+  if (points.length === 0) return [];
+  const out: Coords[] = [];
+  const push = (tile: Coords) => {
+    const last = out[out.length - 1];
+    if (last && last.x === tile.x && last.y === tile.y) return;
+    out.push({ x: Math.round(tile.x), y: Math.round(tile.y) });
+  };
+  push(points[0]);
+  for (let i = 1; i < points.length; i += 1) {
+    let cur = { ...out[out.length - 1] };
+    const end = {
+      x: Math.round(points[i].x),
+      y: Math.round(points[i].y)
+    };
+    let guard = 0;
+    while ((cur.x !== end.x || cur.y !== end.y) && guard < 800) {
+      guard += 1;
+      const dx = Math.sign(end.x - cur.x);
+      const dy = Math.sign(end.y - cur.y);
+      cur = { x: cur.x + dx, y: cur.y + dy };
+      push(cur);
+    }
+  }
+  return out;
+};
+
+/** Longest same-Y horizontal span on a walked / bend path (bus lane). */
+const longestHorizontalSpan = (
+  path: Coords[]
+): { y: number; x0: number; x1: number } | null => {
+  let best: { y: number; x0: number; x1: number } | null = null;
+  let bestLen = 0;
+  for (let i = 1; i < path.length; i += 1) {
+    if (path[i].y !== path[i - 1].y) continue;
+    const y = path[i].y;
+    let x0 = Math.min(path[i].x, path[i - 1].x);
+    let x1 = Math.max(path[i].x, path[i - 1].x);
+    let j = i;
+    while (j + 1 < path.length && path[j + 1].y === y) {
+      j += 1;
+      x0 = Math.min(x0, path[j].x);
+      x1 = Math.max(x1, path[j].x);
+    }
+    const len = x1 - x0;
+    if (len > bestLen) {
+      bestLen = len;
+      best = { y, x0, x1 };
+    }
+    i = j;
+  }
+  return bestLen >= 1 ? best : null;
+};
+
+const horizontalSpansOverlap = (
+  a: { y: number; x0: number; x1: number },
+  b: { y: number; x0: number; x1: number }
+): boolean => {
+  if (a.y !== b.y) return false;
+  return a.x0 <= b.x1 && b.x0 <= a.x1;
+};
+
+/**
  * Perpendicular distance from point P to the infinite diagonal line through
  * origin with direction (sx, sy) where |sx|=|sy|=1.
  */
@@ -1915,6 +1981,7 @@ export const diagonalFanShape2dRoutes = ({
 
   const routes: Record<string, Coords[]> = {};
   const usedEdges = new Set<string>();
+  const occupiedBusSpans: { y: number; x0: number; x1: number }[] = [];
 
   // Respect waypoints already on the diagram (other cables / prior runs).
   const rerouteIds = new Set(
@@ -1924,8 +1991,38 @@ export const diagonalFanShape2dRoutes = ({
   );
   connectors.forEach((connector) => {
     if (rerouteIds.has(connector.id)) return;
-    const poly = connectorAnchorPolyline(connector, itemById, iconById);
+    const poly = expandPolylineToTiles(
+      connectorAnchorPolyline(connector, itemById, iconById)
+    );
     markPathEdges(poly, usedEdges);
+    const span = longestHorizontalSpan(poly);
+    if (span) occupiedBusSpans.push(span);
+  });
+
+  const pathHitsBusyBus = (path: Coords[]): boolean => {
+    const span = longestHorizontalSpan(path);
+    if (!span) return false;
+    return occupiedBusSpans.some((occupied) => {
+      return horizontalSpansOverlap(span, occupied);
+    });
+  };
+
+  // Seed vertical occupancy from existing cables (expanded tile walks).
+  const seedVerticals: { x: number; y0: number; y1: number }[] = [];
+  connectors.forEach((connector) => {
+    if (rerouteIds.has(connector.id)) return;
+    const poly = expandPolylineToTiles(
+      connectorAnchorPolyline(connector, itemById, iconById)
+    );
+    for (let i = 1; i < poly.length; i += 1) {
+      if (poly[i].x !== poly[i - 1].x) continue;
+      if (poly[i].y === poly[i - 1].y) continue;
+      seedVerticals.push({
+        x: poly[i].x,
+        y0: Math.min(poly[i].y, poly[i - 1].y),
+        y1: Math.max(poly[i].y, poly[i - 1].y)
+      });
+    }
   });
 
   groups.forEach((group, hubId) => {
@@ -1988,12 +2085,77 @@ export const diagonalFanShape2dRoutes = ({
     const laneDirY = Math.sign(hubCenter.y - leafCy) || 1;
 
     /**
-     * Route hub→leaf with the long horizontal "magistrala" on the leaf-side
-     * lane row (leaf.y + laneDirY * k). Lane 0 stays on the port row → straight
-     * horizontal into the node. Higher lanes ride a parallel row and reach the
-     * port with a short vertical stub → cables never stack near the nodes.
+     * Leaves stacked in one column share port.x — without a sideways jog their
+     * vertical drops paint on top of each other (top cable runs through the
+     * device below). Closest-to-hub keeps port.x; farther leaves fan ±1, ±2…
      */
-    const buildLaneRoute = (cable: FanCable, k: number): Coords[] => {
+    const approachXByConnector = new Map<string, number>();
+    {
+      const byCol = new Map<number, FanCable[]>();
+      ordered.forEach((cable) => {
+        const key = Math.round(cable.leafPort.x);
+        const list = byCol.get(key) ?? [];
+        list.push(cable);
+        byCol.set(key, list);
+      });
+      byCol.forEach((colCables, colX) => {
+        // Closest to the hub / bus first (same side as laneDirY).
+        const ranked = [...colCables].sort((a, b) => {
+          return laneDirY * (b.leafPort.y - a.leafPort.y);
+        });
+        ranked.forEach((cable, rank) => {
+          const offset =
+            rank === 0
+              ? 0
+              : Math.ceil(rank / 2) * (rank % 2 === 1 ? 1 : -1);
+          approachXByConnector.set(
+            cable.connectorId,
+            colX + offset
+          );
+        });
+      });
+    }
+
+    const occupiedVerticals: { x: number; y0: number; y1: number }[] = [
+      ...seedVerticals
+    ];
+
+    const verticalSpansOf = (
+      path: Coords[]
+    ): { x: number; y0: number; y1: number }[] => {
+      const segs: { x: number; y0: number; y1: number }[] = [];
+      for (let i = 1; i < path.length; i += 1) {
+        if (path[i].x !== path[i - 1].x) continue;
+        if (path[i].y === path[i - 1].y) continue;
+        segs.push({
+          x: path[i].x,
+          y0: Math.min(path[i].y, path[i - 1].y),
+          y1: Math.max(path[i].y, path[i - 1].y)
+        });
+      }
+      return segs;
+    };
+
+    const pathHitsBusyVertical = (path: Coords[]): boolean => {
+      return verticalSpansOf(path).some((span) => {
+        if (span.y1 - span.y0 < 1) return false;
+        return occupiedVerticals.some((occ) => {
+          if (occ.x !== span.x) return false;
+          return span.y0 < occ.y1 && occ.y0 < span.y1;
+        });
+      });
+    };
+
+    /**
+     * Route hub→leaf with the long horizontal "magistrala" on the leaf-side
+     * lane row (leaf.y + laneDirY * k). Vertical drop uses `dropX` (may differ
+     * from the port column when leaves share an X) then a short stub into the port.
+     */
+    const buildLaneRoute = (
+      cable: FanCable,
+      k: number,
+      dropX: number
+    ): Coords[] => {
       // Integer tiles only — fractional ports/centers make bare `!==` walks loop forever.
       const start = {
         x: Math.round(cable.hubPort.x),
@@ -2004,6 +2166,7 @@ export const diagonalFanShape2dRoutes = ({
         y: Math.round(cable.leafPort.y)
       };
       const laneY = end.y + laneDirY * k;
+      const approachX = Math.round(dropX);
 
       const path: Coords[] = [{ ...start }];
       let cur = { ...start };
@@ -2015,11 +2178,11 @@ export const diagonalFanShape2dRoutes = ({
         return s === 0 ? 0 : s;
       };
 
-      // Diagonal toward (leaf column, lane row).
-      while (guard < maxSteps && cur.x !== end.x && cur.y !== laneY) {
+      // Diagonal toward (approach column, lane row).
+      while (guard < maxSteps && cur.x !== approachX && cur.y !== laneY) {
         guard += 1;
         cur = {
-          x: cur.x + stepToward(cur.x, end.x),
+          x: cur.x + stepToward(cur.x, approachX),
           y: cur.y + stepToward(cur.y, laneY)
         };
         path.push({ ...cur });
@@ -2029,14 +2192,21 @@ export const diagonalFanShape2dRoutes = ({
         cur = { x: cur.x, y: cur.y + stepToward(cur.y, laneY) };
         path.push({ ...cur });
       }
-      while (guard < maxSteps && cur.x !== end.x) {
+      while (guard < maxSteps && cur.x !== approachX) {
         guard += 1;
-        cur = { x: cur.x + stepToward(cur.x, end.x), y: cur.y };
+        cur = { x: cur.x + stepToward(cur.x, approachX), y: cur.y };
         path.push({ ...cur });
       }
+      // Vertical on the (possibly staggered) approach column.
       while (guard < maxSteps && cur.y !== end.y) {
         guard += 1;
         cur = { x: cur.x, y: cur.y + stepToward(cur.y, end.y) };
+        path.push({ ...cur });
+      }
+      // Short horizontal stub into the port when approach X was shifted.
+      while (guard < maxSteps && cur.x !== end.x) {
+        guard += 1;
+        cur = { x: cur.x + stepToward(cur.x, end.x), y: cur.y };
         path.push({ ...cur });
       }
 
@@ -2044,21 +2214,56 @@ export const diagonalFanShape2dRoutes = ({
     };
 
     ordered.forEach((cable, orderIndex) => {
-      // Nearest-to-hub keeps lane 0 (straight to port); farther cables stack.
-      let path = buildLaneRoute(cable, orderIndex);
+      const baseApproach =
+        approachXByConnector.get(cable.connectorId) ??
+        Math.round(cable.leafPort.x);
 
-      // Deterministic lanes rarely collide, but bump the offset if they do.
-      if (pathUsesBusyEdge(path, usedEdges)) {
-        for (let extra = 1; extra <= group.length + 2; extra += 1) {
-          const candidate = buildLaneRoute(cable, orderIndex + extra);
-          if (!pathUsesBusyEdge(candidate, usedEdges)) {
+      // Nearest-to-hub keeps lane 0 (straight to port); farther cables stack.
+      let path = buildLaneRoute(cable, orderIndex, baseApproach);
+      const isBlocked = (candidate: Coords[]) => {
+        return (
+          pathUsesBusyEdge(candidate, usedEdges) ||
+          pathHitsBusyBus(candidate) ||
+          pathHitsBusyVertical(candidate)
+        );
+      };
+
+      // Bump lane Y first, then fan the approach X if the column is still busy.
+      if (isBlocked(path)) {
+        let cleared = false;
+        for (let extra = 1; extra <= group.length + 24 && !cleared; extra += 1) {
+          const candidate = buildLaneRoute(
+            cable,
+            orderIndex + extra,
+            baseApproach
+          );
+          if (!isBlocked(candidate)) {
             path = candidate;
-            break;
+            cleared = true;
+          }
+        }
+        if (!cleared) {
+          for (let dx = 1; dx <= group.length + 8 && !cleared; dx += 1) {
+            for (const sign of [1, -1] as const) {
+              const candidate = buildLaneRoute(
+                cable,
+                orderIndex,
+                baseApproach + sign * dx
+              );
+              if (!isBlocked(candidate)) {
+                path = candidate;
+                cleared = true;
+                break;
+              }
+            }
           }
         }
       }
 
       markPathEdges(path, usedEdges);
+      const span = longestHorizontalSpan(path);
+      if (span) occupiedBusSpans.push(span);
+      occupiedVerticals.push(...verticalSpansOf(path));
 
       const bends = pathBendWaypoints(path);
       routes[cable.connectorId] = cable.leafFirst

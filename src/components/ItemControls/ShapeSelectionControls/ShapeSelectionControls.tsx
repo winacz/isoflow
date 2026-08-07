@@ -57,7 +57,7 @@ import {
   ensureDeviceTemplateIcons,
   syncDeviceTemplateCache,
   isDeviceTemplateId,
-  supportsConnectorTools
+  supportsDrawingConnections
 } from 'src/utils';
 
 const CATEGORY_ORDER = [
@@ -637,7 +637,7 @@ export const ShapeSelectionControls = () => {
             </Typography>
             <Alert severity="info">
               Wybierz urządzenie, potem kliknij na canvas.
-              {supportsConnectorTools(projectionMode)
+              {supportsDrawingConnections(projectionMode)
                 ? ' Connector łączy porty RJ45.'
                 : ''}
             </Alert>

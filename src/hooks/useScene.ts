@@ -23,8 +23,9 @@ import {
 } from 'src/stores/historyStore';
 import * as reducers from 'src/stores/reducers';
 import type { State } from 'src/stores/reducers/types';
-import { routeDensityGroupBuses } from 'src/v3/densityGroupBuses';
+import { routeDensityGroupBuses, resolveOverlapsWithTargetDiagonal } from 'src/v3/densityGroupBuses';
 import { arrangeDensityGroups } from 'src/v3/densityGroupLayout';
+import { computeDensityGroups } from 'src/v3/densityGroups';
 import { isSwitchLikeIcon } from 'src/utils/shape2dLayout';
 import {
   getItemByIdOrThrow,
@@ -691,6 +692,127 @@ export const useScene = () => {
     ]
   );
 
+  /**
+   * 2D v3 "Test": same tidy + diagonal-fan pipeline as classic MultiNode
+   * Controls, applied per density group (no selection required).
+   * After all groups route, separate cables that share a bus Y.
+   */
+  const runTestLayoutForDensityGroups = useCallback(() => {
+    const state = getState();
+    const view = getItemByIdOrThrow(state.model.views, currentViewId).value;
+    const viewItems = view.items ?? [];
+    if (viewItems.length === 0) {
+      return { groupCount: 0 };
+    }
+
+    const groups = computeDensityGroups({
+      items: viewItems,
+      modelItems: state.model.items
+    });
+    if (groups.length === 0) {
+      return { groupCount: 0 };
+    }
+
+    beginHistoryTransaction();
+
+    const collectedRoutes: Record<string, Coords[]> = {};
+
+    groups.forEach((group) => {
+      const ids = group.memberIds;
+      if (ids.length === 0) return;
+
+      const live = getState();
+      const liveView = getItemByIdOrThrow(live.model.views, currentViewId).value;
+      const selectedItems = (liveView.items ?? []).filter((item) => {
+        return ids.includes(item.id);
+      });
+      if (selectedItems.length === 0) return;
+
+      if (selectedItems.length >= 2) {
+        const targets = tidyShape2dItems({
+          selectedItems,
+          allItems: liveView.items ?? [],
+          modelItems: live.model.items,
+          connectors: liveView.connectors ?? []
+        });
+
+        Object.entries(targets).forEach(([id, tile]) => {
+          const newState = reducers.view({
+            action: 'UPDATE_VIEWITEM',
+            payload: { id, tile, skipConnectorSync: true },
+            ctx: { viewId: currentViewId, state: getState() }
+          });
+          setState(newState, { skipHistory: true });
+        });
+      }
+
+      const afterTidy = getState();
+      const viewAfterTidy = getItemByIdOrThrow(
+        afterTidy.model.views,
+        currentViewId
+      ).value;
+      const selectedAfterTidy = (viewAfterTidy.items ?? []).filter((item) => {
+        return ids.includes(item.id);
+      });
+      if (selectedAfterTidy.length === 0) return;
+
+      const routes = diagonalFanShape2dRoutes({
+        selectedItems: selectedAfterTidy,
+        allItems: viewAfterTidy.items ?? [],
+        modelItems: afterTidy.model.items,
+        connectors: viewAfterTidy.connectors ?? []
+      });
+      Object.assign(collectedRoutes, routes);
+    });
+
+    const resolvedRoutes = resolveOverlapsWithTargetDiagonal(collectedRoutes);
+    const finalState = getState();
+    const finalView = getItemByIdOrThrow(
+      finalState.model.views,
+      currentViewId
+    ).value;
+
+    Object.entries(resolvedRoutes).forEach(([connectorId, routeTiles]) => {
+      const connector = (finalView.connectors ?? []).find((candidate) => {
+        return candidate.id === connectorId;
+      });
+      if (!connector) return;
+
+      const endpointAnchors = connector.anchors.filter((anchor) => {
+        return Boolean(anchor.ref.item);
+      });
+      if (endpointAnchors.length < 2) return;
+
+      const anchors = [
+        endpointAnchors[0],
+        ...routeTiles.map((tile) => {
+          return { id: generateId(), ref: { tile } };
+        }),
+        endpointAnchors[endpointAnchors.length - 1]
+      ];
+
+      const newState = reducers.view({
+        action: 'UPDATE_CONNECTOR',
+        payload: {
+          id: connectorId,
+          anchors,
+          overlapResolve: 'off'
+        },
+        ctx: { viewId: currentViewId, state: getState() }
+      });
+      setState(newState, { skipHistory: true });
+    });
+
+    endHistoryTransaction();
+    return { groupCount: groups.length };
+  }, [
+    beginHistoryTransaction,
+    endHistoryTransaction,
+    getState,
+    setState,
+    currentViewId
+  ]);
+
   const runSmartLayoutForItems = useCallback(
     (ids: string[]) => {
       if (ids.length === 0) return;
@@ -1127,44 +1249,49 @@ export const useScene = () => {
   /**
    * 2D v3: place density groups near their switch targets so inter-group
    * cables cross less. Moves nodes only — does not rewrite routes.
+   * `mode: 'magistrala'` uses wider gaps and thick bus corridors.
    */
-  const runArrangeDensityGroups = useCallback(() => {
-    const state = getState();
-    const view = getItemByIdOrThrow(state.model.views, currentViewId).value;
-    const viewItems = view.items ?? [];
-    const viewConnectors = view.connectors ?? [];
-    if (viewItems.length === 0) {
-      return { groupCount: 0, movedNodes: 0, targets: {} };
-    }
+  const runArrangeDensityGroups = useCallback(
+    (options?: { mode?: 'default' | 'magistrala' }) => {
+      const state = getState();
+      const view = getItemByIdOrThrow(state.model.views, currentViewId).value;
+      const viewItems = view.items ?? [];
+      const viewConnectors = view.connectors ?? [];
+      if (viewItems.length === 0) {
+        return { groupCount: 0, movedNodes: 0, targets: {} };
+      }
 
-    const result = arrangeDensityGroups({
-      items: viewItems,
-      modelItems: state.model.items,
-      connectors: viewConnectors,
-      gridStep: getGridSnapStep(gridStyle)
-    });
-
-    if (result.movedNodes === 0) return result;
-
-    beginHistoryTransaction();
-    Object.entries(result.targets).forEach(([id, tile]) => {
-      const newState = reducers.view({
-        action: 'UPDATE_VIEWITEM',
-        payload: { id, tile },
-        ctx: { viewId: currentViewId, state: getState() }
+      const result = arrangeDensityGroups({
+        items: viewItems,
+        modelItems: state.model.items,
+        connectors: viewConnectors,
+        gridStep: getGridSnapStep(gridStyle),
+        mode: options?.mode ?? 'default'
       });
-      setState(newState, { skipHistory: true });
-    });
-    endHistoryTransaction();
-    return result;
-  }, [
-    beginHistoryTransaction,
-    endHistoryTransaction,
-    getState,
-    setState,
-    currentViewId,
-    gridStyle
-  ]);
+
+      if (result.movedNodes === 0) return result;
+
+      beginHistoryTransaction();
+      Object.entries(result.targets).forEach(([id, tile]) => {
+        const newState = reducers.view({
+          action: 'UPDATE_VIEWITEM',
+          payload: { id, tile },
+          ctx: { viewId: currentViewId, state: getState() }
+        });
+        setState(newState, { skipHistory: true });
+      });
+      endHistoryTransaction();
+      return result;
+    },
+    [
+      beginHistoryTransaction,
+      endHistoryTransaction,
+      getState,
+      setState,
+      currentViewId,
+      gridStyle
+    ]
+  );
 
   /** Soft compat for leftover AlgorithmsPopup — alias / no-op after 88e2dab restore. */
   const runSmartLayout3ForItems = runSmartLayout2ForItems;
@@ -1475,6 +1602,7 @@ export const useScene = () => {
       tidyItemsInPlace,
       routeDiagonalFanForItems,
       runTestLayoutForItems,
+      runTestLayoutForDensityGroups,
       runSmartLayoutForItems,
       runSmartLayout2ForItems,
       runAutoLayoutForItems,
@@ -1522,6 +1650,7 @@ export const useScene = () => {
       tidyItemsInPlace,
       routeDiagonalFanForItems,
       runTestLayoutForItems,
+      runTestLayoutForDensityGroups,
       runSmartLayoutForItems,
       runSmartLayout2ForItems,
       runAutoLayoutForItems,

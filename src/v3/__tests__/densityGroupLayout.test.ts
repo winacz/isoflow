@@ -1,6 +1,7 @@
 import { SHAPE_2D_PC_ID, SHAPE_2D_SWITCH_ID, getModelItemSize } from 'src/config';
 import {
   arrangeDensityGroups,
+  arrangeProfileForMode,
   buildBusCorridor,
   buildSpokeCorridor,
   circlesOverlap,
@@ -14,9 +15,23 @@ import {
   snapGroupTranslation,
   spokeAngleForIndex,
   GROUP_CIRCLE_GAP,
-  HUB_CHILD_CIRCLE_GAP
+  HUB_CHILD_CIRCLE_GAP,
+  ARRANGE_PROFILE_MAGISTRALA
 } from '../densityGroupLayout';
 import { computeDensityGroups, densityCirclePadForMemberCount } from '../densityGroups';
+
+describe('arrangeProfileForMode', () => {
+  test('default keeps classic gaps; magistrala is wider', () => {
+    const def = arrangeProfileForMode('default');
+    const mag = arrangeProfileForMode('magistrala');
+    expect(def.circleGap).toBe(GROUP_CIRCLE_GAP);
+    expect(mag.circleGap).toBeGreaterThan(def.circleGap);
+    expect(mag.largestFirst).toBe(true);
+    expect(mag.crossingWeight).toBeGreaterThan(0);
+    expect(def.crossingWeight).toBe(0);
+    expect(mag).toEqual(ARRANGE_PROFILE_MAGISTRALA);
+  });
+});
 
 describe('spokeAngleForIndex', () => {
   test('single group prefers top (3π/2)', () => {
@@ -952,5 +967,116 @@ describe('arrangeDensityGroups hub-and-spoke', () => {
     expect(circlesOverlap(leaf.circle, obstacle.circle, GROUP_CIRCLE_GAP)).toBe(
       false
     );
+  });
+
+  test('magistrala mode keeps wider peer gaps and clears thick spokes', () => {
+    const items = [
+      { id: 'o1', tile: { x: 0, y: 0 } },
+      { id: 'o2', tile: { x: w, y: 0 } },
+      { id: 'o3', tile: { x: 0, y: h } },
+      { id: 'o4', tile: { x: w, y: h } },
+      { id: 'i1', tile: { x: 50, y: 2 } },
+      { id: 'i2', tile: { x: 50 + w, y: 2 } },
+      { id: 'sw', tile: { x: 120, y: 0 } }
+    ];
+    const modelItems = [
+      { id: 'o1', icon: SHAPE_2D_PC_ID, name: 'o1' },
+      { id: 'o2', icon: SHAPE_2D_PC_ID, name: 'o2' },
+      { id: 'o3', icon: SHAPE_2D_PC_ID, name: 'o3' },
+      { id: 'o4', icon: SHAPE_2D_PC_ID, name: 'o4' },
+      { id: 'i1', icon: SHAPE_2D_PC_ID, name: 'i1' },
+      { id: 'i2', icon: SHAPE_2D_PC_ID, name: 'i2' },
+      { id: 'sw', icon: SHAPE_2D_SWITCH_ID, name: 'sw' }
+    ];
+    const connectors = [
+      {
+        id: 'co1',
+        anchors: [
+          { id: '1', ref: { item: 'o1', port: 'port-1' } },
+          { id: '2', ref: { item: 'sw', port: 'port-bottom-1' } }
+        ]
+      },
+      {
+        id: 'co2',
+        anchors: [
+          { id: '3', ref: { item: 'o2', port: 'port-1' } },
+          { id: '4', ref: { item: 'sw', port: 'port-bottom-2' } }
+        ]
+      },
+      {
+        id: 'co3',
+        anchors: [
+          { id: '5', ref: { item: 'o3', port: 'port-1' } },
+          { id: '6', ref: { item: 'sw', port: 'port-bottom-3' } }
+        ]
+      },
+      {
+        id: 'co4',
+        anchors: [
+          { id: '7', ref: { item: 'o4', port: 'port-1' } },
+          { id: '8', ref: { item: 'sw', port: 'port-bottom-4' } }
+        ]
+      },
+      {
+        id: 'ci1',
+        anchors: [
+          { id: '9', ref: { item: 'i1', port: 'port-1' } },
+          { id: '10', ref: { item: 'sw', port: 'port-bottom-5' } }
+        ]
+      },
+      {
+        id: 'ci2',
+        anchors: [
+          { id: '11', ref: { item: 'i2', port: 'port-1' } },
+          { id: '12', ref: { item: 'sw', port: 'port-bottom-6' } }
+        ]
+      }
+    ];
+
+    const result = arrangeDensityGroups({
+      items,
+      modelItems: modelItems as never,
+      connectors,
+      mode: 'magistrala'
+    });
+    expect(result.groupCount).toBeGreaterThanOrEqual(2);
+    expect(result.movedNodes).toBeGreaterThan(0);
+
+    const tileOf = (id: string) => {
+      return result.targets[id] ?? items.find((item) => item.id === id)!.tile;
+    };
+    const placed = items.map((item) => {
+      return { ...item, tile: tileOf(item.id) };
+    });
+    const groups = computeDensityGroups({ items: placed, modelItems });
+    const outer = groups.find((g) => g.memberIds.includes('o1'))!;
+    const inner = groups.find((g) => g.memberIds.includes('i1'))!;
+    expect(outer).toBeDefined();
+    expect(inner).toBeDefined();
+    const magGap = arrangeProfileForMode('magistrala').circleGap;
+    expect(circlesOverlap(outer.circle, inner.circle, magGap)).toBe(false);
+
+    const hub = {
+      x: tileOf('sw').x + sw.width / 2,
+      y: tileOf('sw').y + sw.height / 2
+    };
+    const hubR =
+      Math.sqrt((sw.width / 2) ** 2 + (sw.height / 2) ** 2) +
+      arrangeProfileForMode('magistrala').hubClearancePad;
+    const outerSpoke = buildSpokeCorridor({
+      groupCenter: { x: outer.circle.cx, y: outer.circle.cy },
+      groupR: outer.circle.r,
+      hub,
+      hubR,
+      halfWidth: estimateSpokeHalfWidth(
+        outer.circle.r,
+        4,
+        arrangeProfileForMode('magistrala').spokeHalfWidthFactor,
+        arrangeProfileForMode('magistrala').magistralaBandPad
+      )
+    });
+    expect(
+      circleHitsSpokeCorridor(inner.circle, outerSpoke, magGap)
+    ).toBe(false);
   });
 });

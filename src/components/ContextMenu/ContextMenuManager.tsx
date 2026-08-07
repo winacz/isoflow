@@ -66,7 +66,8 @@ export const ContextMenuManager = ({ anchorEl }: Props) => {
     runAutoLayoutForItems,
     runAutoRouteForItems,
     runDensityGroupBuses,
-    runArrangeDensityGroups
+    runArrangeDensityGroups,
+    runTestLayoutForDensityGroups
   } = scene;
 
   const densityVisible = useDensityGroupsDebugStore((state) => {
@@ -159,6 +160,36 @@ export const ContextMenuManager = ({ anchorEl }: Props) => {
     onClose
   ]);
 
+  /** Classic 2D "Test" (tidy + diagonal fan), applied per density group. */
+  const buildV3TestLayoutItems = useCallback((): ContextMenuEntry[] => {
+    if (projectionMode !== 'TWO_D_V3') return [];
+
+    return [
+      {
+        label: 'Porządkowanie',
+        isHeader: true,
+        dividerBefore: true
+      },
+      {
+        label: 'Test',
+        disabled: groupCount === 0,
+        onClick: () => {
+          setDensityVisible(true);
+          setTimeout(() => {
+            runTestLayoutForDensityGroups();
+          }, 0);
+          onClose();
+        }
+      }
+    ];
+  }, [
+    projectionMode,
+    groupCount,
+    setDensityVisible,
+    runTestLayoutForDensityGroups,
+    onClose
+  ]);
+
   const buildDensityGroupItems = useCallback((): ContextMenuEntry[] => {
     if (projectionMode !== 'TWO_D_V3') return [];
 
@@ -247,6 +278,7 @@ export const ContextMenuManager = ({ anchorEl }: Props) => {
 
     const layoutItems = [
       ...buildAutoLayoutItems(),
+      ...buildV3TestLayoutItems(),
       ...buildDensityGroupItems()
     ];
 
@@ -615,6 +647,7 @@ export const ContextMenuManager = ({ anchorEl }: Props) => {
     modelItems,
     uiStateActions,
     buildAutoLayoutItems,
+    buildV3TestLayoutItems,
     buildDensityGroupItems
   ]);
 

@@ -1142,6 +1142,27 @@ describe('routeDensityGroupBuses', () => {
     expect(horizY(out.a)).not.toBe(horizY(out.b));
   });
 
+  test('resolveOverlapsWithTargetDiagonal tolerates empty fan bend lists', () => {
+    const routes = {
+      short: [] as { x: number; y: number }[],
+      a: [
+        { x: 30, y: 8 },
+        { x: 5, y: 8 },
+        { x: 5, y: 2 }
+      ],
+      b: [
+        { x: 28, y: 8 },
+        { x: 6, y: 8 },
+        { x: 6, y: 2 }
+      ]
+    };
+    expect(() => resolveOverlapsWithTargetDiagonal(routes)).not.toThrow();
+    const out = resolveOverlapsWithTargetDiagonal(routes);
+    expect(out.short).toEqual([]);
+    expect(out.a.length).toBeGreaterThan(0);
+    expect(out.b.length).toBeGreaterThan(0);
+  });
+
   test('resolveOverlaps: lower target fans off occupied approach X at 45°', () => {
     // Same port column X=10 on stacked targets — Y ranges need not overlap.
     const routes = {

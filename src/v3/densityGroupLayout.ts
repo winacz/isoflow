@@ -151,6 +151,66 @@ export const MAGISTRALA_BAND_PAD = 1;
 /** Fraction of group radius used as spoke half-width (cable fan). */
 export const SPOKE_HALF_WIDTH_RADIUS_FACTOR = 0.4;
 
+/** Layout flavour for `arrangeDensityGroups`. */
+export type ArrangeDensityMode = 'default' | 'magistrala';
+
+export type ArrangeDensityProfile = {
+  circleGap: number;
+  hubChildCircleGap: number;
+  hubChildGap: number;
+  hubClearancePad: number;
+  spokeHalfWidthFactor: number;
+  magistralaBandPad: number;
+  /** Place larger groups first so their corridors claim space early. */
+  largestFirst: boolean;
+  /** Cost per proper crossing with an already-reserved spoke. */
+  crossingWeight: number;
+  portMisalignWeight: number;
+  parentPenaltyWeight: number;
+  distWeight: number;
+  /** Penalise seats below the hub (neater left→top→right fan). */
+  belowHubWeight: number;
+};
+
+export const ARRANGE_PROFILE_DEFAULT: ArrangeDensityProfile = {
+  circleGap: GROUP_CIRCLE_GAP,
+  hubChildCircleGap: HUB_CHILD_CIRCLE_GAP,
+  hubChildGap: HUB_CHILD_GAP,
+  hubClearancePad: HUB_CLEARANCE_PAD,
+  spokeHalfWidthFactor: SPOKE_HALF_WIDTH_RADIUS_FACTOR,
+  magistralaBandPad: MAGISTRALA_BAND_PAD,
+  largestFirst: false,
+  crossingWeight: 0,
+  portMisalignWeight: 18,
+  parentPenaltyWeight: 28,
+  distWeight: 0.25,
+  belowHubWeight: 0
+};
+
+/** Wider gaps + thick magistrala corridors; largest groups first; minimise crossings. */
+export const ARRANGE_PROFILE_MAGISTRALA: ArrangeDensityProfile = {
+  circleGap: 5,
+  hubChildCircleGap: 4,
+  hubChildGap: 3,
+  hubClearancePad: 3,
+  spokeHalfWidthFactor: 0.7,
+  magistralaBandPad: 3,
+  largestFirst: true,
+  crossingWeight: 60,
+  portMisalignWeight: 8,
+  parentPenaltyWeight: 32,
+  distWeight: 0.08,
+  belowHubWeight: 36
+};
+
+export const arrangeProfileForMode = (
+  mode: ArrangeDensityMode = 'default'
+): ArrangeDensityProfile => {
+  return mode === 'magistrala'
+    ? ARRANGE_PROFILE_MAGISTRALA
+    : ARRANGE_PROFILE_DEFAULT;
+};
+
 /** Density-circle radius without the visual pad — used for hub↔child proximity. */
 export const barePackingRadius = (
   circleR: number,
@@ -393,13 +453,12 @@ export const segmentSegmentDistance = (
  */
 export const estimateSpokeHalfWidth = (
   groupR: number,
-  cableCount: number
+  cableCount: number,
+  factor = SPOKE_HALF_WIDTH_RADIUS_FACTOR,
+  pad = MAGISTRALA_BAND_PAD
 ): number => {
-  const busHalf = estimateMagistralaThickness(cableCount) / 2;
-  return (
-    Math.max(groupR * SPOKE_HALF_WIDTH_RADIUS_FACTOR, busHalf) +
-    MAGISTRALA_BAND_PAD
-  );
+  const busHalf = estimateMagistralaThickness(cableCount, MAGISTRALA_LANE_PITCH, pad) / 2;
+  return Math.max(groupR * factor, busHalf) + pad;
 };
 
 /**
@@ -876,14 +935,18 @@ export const arrangeDensityGroups = ({
   items,
   modelItems,
   connectors,
-  gridStep = { x: 1, y: 1 }
+  gridStep = { x: 1, y: 1 },
+  mode = 'default'
 }: {
   items: ViewItem[];
   modelItems: ModelItem[];
   connectors: LayoutConnector[];
   /** Active 2D snap step (same as place/drag — e.g. RACK cell). */
   gridStep?: { x: number; y: number };
+  /** `magistrala` = wider gaps, thick bus corridors, largest-first, fewer crossings. */
+  mode?: ArrangeDensityMode;
 }): ArrangeDensityGroupsResult => {
+  const profile = arrangeProfileForMode(mode);
   const originalTiles = new Map(
     items.map((item) => {
       return [item.id, { ...item.tile }] as const;
@@ -899,7 +962,8 @@ export const arrangeDensityGroups = ({
       items: workingItems,
       modelItems,
       connectors,
-      gridStep
+      gridStep,
+      profile
     });
     groupCount = passResult.groupCount;
     if (passResult.movedNodes === 0) break;
@@ -936,12 +1000,14 @@ const arrangeDensityGroupsPass = ({
   items,
   modelItems,
   connectors,
-  gridStep = { x: 1, y: 1 }
+  gridStep = { x: 1, y: 1 },
+  profile = ARRANGE_PROFILE_DEFAULT
 }: {
   items: ViewItem[];
   modelItems: ModelItem[];
   connectors: LayoutConnector[];
   gridStep?: { x: number; y: number };
+  profile?: ArrangeDensityProfile;
 }): ArrangeDensityGroupsResult => {
   const groups = computeDensityGroups({
     items,
@@ -1013,7 +1079,11 @@ const arrangeDensityGroupsPass = ({
       switchId,
       medianPortKey: median(portKeys),
       cableCount,
-      busThickness: estimateMagistralaThickness(cableCount),
+      busThickness: estimateMagistralaThickness(
+        cableCount,
+        MAGISTRALA_LANE_PITCH,
+        profile.magistralaBandPad
+      ),
       cableLinks: switchLinks
     });
     group.memberIds.forEach((id) => {
@@ -1107,7 +1177,7 @@ const arrangeDensityGroupsPass = ({
     const hub = itemCenter(switchItem, iconById);
     const switchFp = itemFootprint(switchItem, iconById);
     const hubR =
-      circumRadius(switchFp.w, switchFp.h) + HUB_CLEARANCE_PAD;
+      circumRadius(switchFp.w, switchFp.h) + profile.hubClearancePad;
 
     const parentId = dependsOn.get(switchId);
     const parentItem = parentId ? workingById.get(parentId) : undefined;
@@ -1143,7 +1213,17 @@ const arrangeDensityGroupsPass = ({
       angleById.set(entry.group.id, normalizeAngle0to2Pi(prefer));
     });
     const placeOrder = [...ordered].sort((a, b) => {
-      if (b.busThickness !== a.busThickness) {
+      if (profile.largestFirst) {
+        if (b.memberIds.length !== a.memberIds.length) {
+          return b.memberIds.length - a.memberIds.length;
+        }
+        if (b.cableCount !== a.cableCount) {
+          return b.cableCount - a.cableCount;
+        }
+        if (b.circle.r !== a.circle.r) {
+          return b.circle.r - a.circle.r;
+        }
+      } else if (b.busThickness !== a.busThickness) {
         return b.busThickness - a.busThickness;
       }
       if (a.medianPortKey !== b.medianPortKey) {
@@ -1184,10 +1264,10 @@ const arrangeDensityGroupsPass = ({
       const corridors = [...settledCorridors, ...placedCorridors];
       const spokes = [...settledSpokes, ...placedSpokes];
       const minHubDist = hubGroupCircle
-        ? hubGroupCircle.r + entry.circle.r + HUB_CHILD_CIRCLE_GAP
+        ? hubGroupCircle.r + entry.circle.r + profile.hubChildCircleGap
         : hubR +
           barePackingRadius(entry.circle.r, entry.memberIds.length) +
-          HUB_CHILD_GAP;
+          profile.hubChildGap;
 
       // Dense angle samples: assigned spoke + anti-uplink fan + full compass
       // so we can pick the shortest clear seat, not just the first.
@@ -1245,23 +1325,23 @@ const arrangeDensityGroupsPass = ({
         const hitsHubChassis = circlesOverlap(
           { cx: placedCircle.cx, cy: placedCircle.cy, r: barePlacedR },
           { cx: hub.x, cy: hub.y, r: hubR },
-          HUB_CHILD_GAP
+          profile.hubChildGap
         );
         const hitsHubRing = hubGroupCircle
           ? circlesOverlap(
               placedCircle,
               hubGroupCircle,
-              HUB_CHILD_CIRCLE_GAP
+              profile.hubChildCircleGap
             )
           : false;
         const hitsPeer = peerObstacles.some((obs) => {
-          return circlesOverlap(placedCircle, obs);
+          return circlesOverlap(placedCircle, obs, profile.circleGap);
         });
         const hitsCorridor = corridors.some((band) => {
-          return circleHitsCorridor(placedCircle, band);
+          return circleHitsCorridor(placedCircle, band, profile.circleGap);
         });
         const hitsSpoke = spokes.some((spoke) => {
-          return circleHitsSpokeCorridor(placedCircle, spoke);
+          return circleHitsSpokeCorridor(placedCircle, spoke, profile.circleGap);
         });
         const hitsBounds = [...settledBoundsList, ...placedBoundsList].some(
           (other, index) => {
@@ -1270,7 +1350,10 @@ const arrangeDensityGroupsPass = ({
               const circle = settledCircles[index];
               if (circle?.memberIds.includes(switchId)) return false;
             }
-            return aabbChebyshevGap(placedBounds, other) < 2;
+            return (
+              aabbChebyshevGap(placedBounds, other) <
+              Math.max(2, Math.floor(profile.circleGap))
+            );
           }
         );
         if (
@@ -1293,14 +1376,24 @@ const arrangeDensityGroupsPass = ({
           groupCenter,
           hub,
           hubR,
-          thickness: entry.busThickness
+          thickness: estimateMagistralaThickness(
+            entry.cableCount,
+            MAGISTRALA_LANE_PITCH,
+            profile.magistralaBandPad
+          ),
+          pad: profile.magistralaBandPad
         });
         const spoke = buildSpokeCorridor({
           groupCenter,
           groupR: placedCircle.r,
           hub,
           hubR,
-          halfWidth: estimateSpokeHalfWidth(placedCircle.r, entry.cableCount)
+          halfWidth: estimateSpokeHalfWidth(
+            placedCircle.r,
+            entry.cableCount,
+            profile.spokeHalfWidthFactor,
+            profile.magistralaBandPad
+          )
         });
         const peerCircles = [...settledCircles, ...placedCircles].filter(
           (circle) => {
@@ -1310,12 +1403,12 @@ const arrangeDensityGroupsPass = ({
         const corridorBlocked =
           peerCircles.some((circle) => {
             return (
-              circleHitsCorridor(circle, corridor) ||
-              circleHitsSpokeCorridor(circle, spoke)
+              circleHitsCorridor(circle, corridor, profile.circleGap) ||
+              circleHitsSpokeCorridor(circle, spoke, profile.circleGap)
             );
           }) ||
           corridors.some((band) => {
-            return corridorsOverlap(corridor, band);
+            return corridorsOverlap(corridor, band, profile.circleGap);
           });
         if (corridorBlocked) return null;
 
@@ -1334,11 +1427,38 @@ const arrangeDensityGroupsPass = ({
           groupCenter.x - hub.x
         );
         const portMisalign = angleDeltaAbs(seatAngle, portAngle) / Math.PI;
+        let crossings = 0;
+        if (profile.crossingWeight > 0) {
+          const allSpokes = [...settledSpokes, ...placedSpokes];
+          allSpokes.forEach((other) => {
+            if (
+              segmentsProperlyIntersect(
+                groupCenter,
+                hub,
+                { x: other.ax, y: other.ay },
+                { x: other.bx, y: other.by }
+              )
+            ) {
+              crossings += 1;
+            }
+          });
+        }
+        const belowPenalty =
+          profile.belowHubWeight > 0 && groupCenter.y > hub.y + 1
+            ? profile.belowHubWeight
+            : 0;
         const score =
           cableLength +
-          parentSidePenalty({ hub, parentHub, seat: groupCenter, weight: 28 }) +
-          portMisalign * 18 +
-          dist * 0.25;
+          parentSidePenalty({
+            hub,
+            parentHub,
+            seat: groupCenter,
+            weight: profile.parentPenaltyWeight
+          }) +
+          portMisalign * profile.portMisalignWeight +
+          dist * profile.distWeight +
+          crossings * profile.crossingWeight +
+          belowPenalty;
 
         return {
           dist,
@@ -1404,31 +1524,7 @@ const arrangeDensityGroupsPass = ({
       });
       const ranked = (pool.length > 0 ? pool : candidates).slice();
       ranked.sort((a, b) => {
-        const pa = parentSidePenalty({
-          hub,
-          parentHub: parentHubCoords,
-          seat: a.centre,
-          weight: 28
-        });
-        const pb = parentSidePenalty({
-          hub,
-          parentHub: parentHubCoords,
-          seat: b.centre,
-          weight: 28
-        });
-        const aAng = Math.atan2(a.centre.y - hub.y, a.centre.x - hub.x);
-        const bAng = Math.atan2(b.centre.y - hub.y, b.centre.x - hub.x);
-        const scoreA =
-          a.cableLength +
-          pa +
-          (angleDeltaAbs(aAng, portAngle) / Math.PI) * 18 +
-          a.dist * 0.25;
-        const scoreB =
-          b.cableLength +
-          pb +
-          (angleDeltaAbs(bAng, portAngle) / Math.PI) * 18 +
-          b.dist * 0.25;
-        if (Math.abs(scoreA - scoreB) > 0.25) return scoreA - scoreB;
+        if (Math.abs(a.score - b.score) > 0.25) return a.score - b.score;
         const aStay = a.dx === 0 && a.dy === 0 ? 0 : 1;
         const bStay = b.dx === 0 && b.dy === 0 ? 0 : 1;
         if (aStay !== bStay) return aStay - bStay;
@@ -1444,7 +1540,7 @@ const arrangeDensityGroupsPass = ({
             !circlesOverlap(
               seat.placedCircle,
               hubGroupCircle,
-              HUB_CHILD_CIRCLE_GAP
+              profile.hubChildCircleGap
             )
           ) {
             break;
@@ -1509,7 +1605,8 @@ const arrangeDensityGroupsPass = ({
     iconById,
     itemById,
     targets,
-    gridStep
+    gridStep,
+    profile
   });
 
   return {
@@ -1530,7 +1627,8 @@ const separateOverlappingGroupCircles = ({
   iconById,
   itemById,
   targets,
-  gridStep
+  gridStep,
+  profile = ARRANGE_PROFILE_DEFAULT
 }: {
   movable: MovableGroup[];
   workingById: Map<string, ViewItem>;
@@ -1539,6 +1637,7 @@ const separateOverlappingGroupCircles = ({
   itemById: Map<string, ViewItem>;
   targets: Record<string, Coords>;
   gridStep: { x: number; y: number };
+  profile?: ArrangeDensityProfile;
 }) => {
   for (let guard = 0; guard < 80; guard += 1) {
     const seats = movable
@@ -1577,14 +1676,15 @@ const separateOverlappingGroupCircles = ({
           b.circle,
           a.entry.memberIds.includes(b.entry.switchId) ||
             b.entry.memberIds.includes(a.entry.switchId)
-            ? HUB_CHILD_CIRCLE_GAP
-            : GROUP_CIRCLE_GAP
+            ? profile.hubChildCircleGap
+            : profile.circleGap
         );
         const mergeHit =
           a.entry.memberIds.includes(b.entry.switchId) ||
           b.entry.memberIds.includes(a.entry.switchId)
             ? false
-            : aabbChebyshevGap(a.bounds, b.bounds) < 2;
+            : aabbChebyshevGap(a.bounds, b.bounds) <
+              Math.max(2, Math.floor(profile.circleGap));
         if (!circleHit && !mergeHit) continue;
 
         const pushSeat = a.circle.cx >= b.circle.cx ? a : b;

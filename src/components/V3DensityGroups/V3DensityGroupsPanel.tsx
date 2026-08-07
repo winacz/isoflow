@@ -5,7 +5,8 @@ import {
   AccountTreeOutlined,
   TimelineOutlined,
   DashboardCustomizeOutlined,
-  ShowChartOutlined
+  ShowChartOutlined,
+  HubOutlined
 } from '@mui/icons-material';
 import { UiElement } from 'src/components/UiElement/UiElement';
 import { useScene } from 'src/hooks/useScene';
@@ -90,6 +91,32 @@ export const V3DensityGroupsPanel = () => {
     }, 0);
   }, [runArrangeDensityGroups, setVisible]);
 
+  const runArrangeMagistrala = useCallback(() => {
+    setBusBusy(true);
+    setVisible(true);
+    setTimeout(() => {
+      try {
+        const result = runArrangeDensityGroups({ mode: 'magistrala' });
+        setBusSummary(
+          result.groupCount === 0
+            ? 'Brak grup do ułożenia'
+            : `Magistrale: ułożono ${result.groupCount} ${
+                result.groupCount === 1
+                  ? 'grupę'
+                  : result.groupCount < 5
+                    ? 'grupy'
+                    : 'grup'
+              }` +
+                (result.movedNodes
+                  ? ` · przesunięto ${result.movedNodes}`
+                  : '')
+        );
+      } finally {
+        setBusBusy(false);
+      }
+    }, 0);
+  }, [runArrangeDensityGroups, setVisible]);
+
   return (
     <UiElement sx={{ px: 1.25, py: 1, width: 240 }}>
       <Typography
@@ -136,6 +163,23 @@ export const V3DensityGroupsPanel = () => {
           }}
         >
           Ułóż grupy
+        </Button>
+        <Button
+          size="small"
+          variant="contained"
+          color="secondary"
+          startIcon={<HubOutlined />}
+          disabled={busBusy || groupCount === 0}
+          onClick={runArrangeMagistrala}
+          title="Jak Ułóż grupy, ale z większymi odstępami: najpierw największe grupy, grube korytarze magistrali, minimalizacja przecięć spoków."
+          sx={{
+            justifyContent: 'flex-start',
+            textTransform: 'none',
+            fontSize: 12,
+            py: 0.4
+          }}
+        >
+          Ułóż grupy (magistrale)
         </Button>
         <Button
           size="small"

@@ -17,7 +17,8 @@ export const isPlan2dCanvas = (mode: ProjectionMode | string): boolean => {
 /**
  * Views that ship the *classic* cable tooling — the 2D waypoint editor, the
  * four routing styles and the Auto-Układ / Smart Layout panels. 2D v3 opts
- * out: connections use ConnectorV3 + walkable-node routing instead.
+ * out of that UI; drawing new cables still works via CONNECTOR_V3
+ * (`supportsDrawingConnections`).
  */
 export const supportsConnectorTools = (
   mode: ProjectionMode | string
