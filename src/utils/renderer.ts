@@ -1458,18 +1458,27 @@ export const getShape2dPortAtPoint = ({
   scene,
   modelItems,
   isPortAvailable,
-  stickyHover = null
+  stickyHover = null,
+  highlightedItemIds
 }: {
   point: Coords;
   scene: GetShape2dItemAtTile['scene'];
   modelItems: GetShape2dItemAtTile['modelItems'];
   isPortAvailable?: (hit: Shape2dPortHit) => boolean;
   stickyHover?: Shape2dPortHover | null;
+  /**
+   * Item ids currently highlighted (CSS scale 1.15). Port positions are
+   * adjusted to match the visual layout so hit-testing stays accurate.
+   */
+  highlightedItemIds?: Set<string> | null;
 }): Shape2dPortHit | null => {
   const baseHalf = SHAPE_2D_PORT_VISUAL_SIZE_TILES / 2;
   const stickyHalf = baseHalf * SHAPE_2D_PORT_HOVER_SCALE;
   let best: Shape2dPortHit | null = null;
   let bestDistSq = Infinity;
+
+  /** Visual highlight scale applied to non-cabinet nodes (must match Nodes.tsx). */
+  const HIGHLIGHT_SCALE = 1.15;
 
   const map = new Map(modelItems.map((i) => [i.id, i]));
   for (const viewItem of scene.items) {
@@ -1477,12 +1486,35 @@ export const getShape2dPortAtPoint = ({
 
     if (!modelItem?.icon) continue;
 
+    // Is this item visually scaled by the highlight effect?
+    const isScaled =
+      highlightedItemIds?.has(viewItem.id) &&
+      modelItem.icon !== SHAPE_2D_CABINET_ID;
+
+    // Device center in tile-space (CSS transform origin for the scale).
+    let deviceCenterTile: { x: number; y: number } | null = null;
+    if (isScaled) {
+      const size = getModelItemSize(modelItem) ?? { width: 1, height: 1 };
+      deviceCenterTile = {
+        x: viewItem.tile.x + size.width / 2,
+        y: viewItem.tile.y + size.height / 2
+      };
+    }
+
     const ports = getModelItemPorts(modelItem);
 
     for (const port of ports) {
       const worldTile = getShape2dPortWorldTile(viewItem.tile, port.tile);
-      const cx = worldTile.x + 0.5;
-      const cy = worldTile.y + 0.5;
+      let cx = worldTile.x + 0.5;
+      let cy = worldTile.y + 0.5;
+
+      // Compensate for the CSS scale(1.15) on highlighted nodes:
+      // visual position = center + HIGHLIGHT_SCALE * (port - center).
+      if (isScaled && deviceCenterTile) {
+        cx = deviceCenterTile.x + HIGHLIGHT_SCALE * (cx - deviceCenterTile.x);
+        cy = deviceCenterTile.y + HIGHLIGHT_SCALE * (cy - deviceCenterTile.y);
+      }
+
       const dx = Math.abs(point.x - cx);
       const dy = Math.abs(point.y - cy);
       const isSticky =

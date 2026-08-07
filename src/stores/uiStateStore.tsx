@@ -60,6 +60,7 @@ const initialState = () => {
       shape2dPortHover: null,
       sviHover: null,
       showGrid: INITIAL_UI_STATE.showGrid,
+      showLoupe: INITIAL_UI_STATE.showLoupe,
       gridStyle: INITIAL_UI_STATE.gridStyle,
       canvasByMode: INITIAL_UI_STATE.canvasByMode,
       viewTransformByMode: INITIAL_UI_STATE.viewTransformByMode,
@@ -345,8 +346,14 @@ const initialState = () => {
         setShowGrid: (showGrid) => {
           set({ showGrid });
         },
+        setShowLoupe: (showLoupe) => {
+          set({ showLoupe });
+        },
         toggleShowGrid: () => {
           set({ showGrid: !get().showGrid });
+        },
+        toggleShowLoupe: () => {
+          set({ showLoupe: !get().showLoupe });
         },
         setGridStyle: (gridStyle) => {
           set({ gridStyle, showGrid: true });

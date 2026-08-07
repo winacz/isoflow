@@ -1,14 +1,18 @@
 import { SHAPE_2D_PC_ID, SHAPE_2D_SWITCH_ID, getModelItemSize } from 'src/config';
 import {
   arrangeDensityGroups,
+  buildBusCorridor,
   circlesOverlap,
+  circleHitsCorridor,
   countP2PCrossings,
+  estimateMagistralaThickness,
   findClearSpokeDistance,
   pointOnSpoke,
+  snapGroupTranslation,
   spokeAngleForIndex,
   GROUP_CIRCLE_GAP
 } from '../densityGroupLayout';
-import { computeDensityGroups, DENSITY_CIRCLE_PAD_TILES } from '../densityGroups';
+import { computeDensityGroups, densityCirclePadForMemberCount } from '../densityGroups';
 
 describe('spokeAngleForIndex', () => {
   test('single group prefers top (3π/2)', () => {
@@ -21,9 +25,7 @@ describe('spokeAngleForIndex', () => {
       const a = spokeAngleForIndex(i, n);
       expect(a).toBeGreaterThanOrEqual(Math.PI);
       expect(a).toBeLessThanOrEqual(2 * Math.PI);
-      // Bottom would be π/2 — not in this range.
       const y = Math.sin(a);
-      // Top half: sin ≤ 0 in standard maths (Y up); with Y-down screen, sin(3π/2)=-1 is up.
       expect(y).toBeLessThanOrEqual(1e-9);
     }
   });
@@ -32,6 +34,50 @@ describe('spokeAngleForIndex', () => {
     const a0 = spokeAngleForIndex(0, 4);
     const a3 = spokeAngleForIndex(3, 4);
     expect(Math.cos(a0)).toBeLessThan(Math.cos(a3));
+  });
+});
+
+describe('magistrala thickness / corridors', () => {
+  test('estimateMagistralaThickness grows with cable count', () => {
+    expect(estimateMagistralaThickness(1)).toBeLessThan(
+      estimateMagistralaThickness(4)
+    );
+    expect(estimateMagistralaThickness(4)).toBe(4 + 1);
+  });
+
+  test('buildBusCorridor makes a horizontal band below a left-side group', () => {
+    const corridor = buildBusCorridor({
+      groupBounds: { x: 0, y: 10, w: 18, h: 9 },
+      groupCenter: { x: 9, y: 14.5 },
+      hub: { x: 40, y: 30 },
+      hubR: 8,
+      thickness: 6
+    });
+    expect(corridor.x1).toBeGreaterThan(corridor.x0);
+    // Switch below → band starts at the bottom face of the group.
+    expect(corridor.y0).toBeGreaterThanOrEqual(10 + 9 - 1);
+    expect(corridor.y1 - corridor.y0).toBeGreaterThanOrEqual(6);
+  });
+
+  test('findClearSpokeDistance skips a corridor blocking the spoke', () => {
+    const hub = { x: 50, y: 50 };
+    const angle = Math.PI; // left
+    const groupR = 4;
+    const hubR = 5;
+    const corridors = [{ x0: 20, y0: 40, x1: 45, y1: 60 }];
+    const dist = findClearSpokeDistance({
+      hub,
+      angle,
+      groupR,
+      hubR,
+      obstacles: [{ cx: hub.x, cy: hub.y, r: hubR }],
+      corridors
+    });
+    expect(dist).not.toBeNull();
+    const centre = pointOnSpoke(hub, angle, dist!);
+    expect(
+      circleHitsCorridor({ cx: centre.x, cy: centre.y, r: groupR }, corridors[0])
+    ).toBe(false);
   });
 });
 
@@ -47,10 +93,9 @@ describe('circlesOverlap / findClearSpokeDistance', () => {
 
   test('pushes outward until clear of an obstacle on the spoke', () => {
     const hub = { x: 0, y: 0 };
-    const angle = Math.PI; // left
+    const angle = Math.PI;
     const groupR = 5;
     const hubR = 4;
-    // Obstacle sitting on the left spoke just outside the hub.
     const obstacles = [{ cx: -15, cy: 0, r: 4 }];
     const dist = findClearSpokeDistance({
       hub,
@@ -75,8 +120,13 @@ describe('arrangeDensityGroups hub-and-spoke', () => {
   if (!pc || !sw) throw new Error('sizes missing');
   const { width: w, height: h } = pc;
 
-  test('circles are larger with the layout pad', () => {
-    expect(DENSITY_CIRCLE_PAD_TILES).toBeGreaterThanOrEqual(3);
+  test('circles use dynamic pad by member count', () => {
+    expect(densityCirclePadForMemberCount(1)).toBe(4);
+    expect(densityCirclePadForMemberCount(10)).toBe(7);
+    expect(densityCirclePadForMemberCount(20)).toBe(7);
+    expect(densityCirclePadForMemberCount(1)).toBeLessThan(
+      densityCirclePadForMemberCount(5)
+    );
     const items = [
       { id: 'a', tile: { x: 0, y: 0 } },
       { id: 'b', tile: { x: w, y: 0 } }
@@ -86,7 +136,10 @@ describe('arrangeDensityGroups hub-and-spoke', () => {
     });
     const [group] = computeDensityGroups({ items, modelItems });
     const bare = Math.sqrt((group.bounds.w / 2) ** 2 + (group.bounds.h / 2) ** 2);
-    expect(group.circle.r).toBeGreaterThanOrEqual(bare + 3);
+    expect(group.circle.r).toBeCloseTo(
+      bare + densityCirclePadForMemberCount(2),
+      5
+    );
   });
 
   test('orders by port key on left→top→right arc without P2P crossings', () => {
@@ -104,7 +157,6 @@ describe('arrangeDensityGroups hub-and-spoke', () => {
       { id: 'b2', icon: SHAPE_2D_PC_ID, name: 'b2' },
       { id: 'sw', icon: SHAPE_2D_SWITCH_ID, name: 'sw' }
     ];
-    // Crossed wiring: top group → high ports; bottom group → low ports.
     const connectors = [
       {
         id: 'cA1',
@@ -159,31 +211,133 @@ describe('arrangeDensityGroups hub-and-spoke', () => {
     expect(groupA).toBeDefined();
     expect(groupB).toBeDefined();
 
-    // Low ports (B) → earlier spoke (more left); high ports (A) → more right.
     expect(groupB.circle.cx).toBeLessThan(groupA.circle.cx);
-
-    // Circles must not overlap.
     expect(
       circlesOverlap(groupA.circle, groupB.circle, GROUP_CIRCLE_GAP)
     ).toBe(false);
 
-    // Neither group prefers the bottom of the hub (centres not below switch).
     const swItem = placed.find((i) => i.id === 'sw')!;
-    const hubY = swItem.tile.y + sw.height / 2;
-    expect(groupA.circle.cy).toBeLessThanOrEqual(hubY + 1);
-    expect(groupB.circle.cy).toBeLessThanOrEqual(hubY + 1);
-
-    // Straight P2P group-centre → hub must not cross.
     const hub = {
       x: swItem.tile.x + sw.width / 2,
-      y: hubY
+      y: swItem.tile.y + sw.height / 2
     };
+    const hubR = Math.sqrt((sw.width / 2) ** 2 + (sw.height / 2) ** 2) + 2;
+    const corridorA = buildBusCorridor({
+      groupBounds: groupA.bounds,
+      groupCenter: { x: groupA.circle.cx, y: groupA.circle.cy },
+      hub,
+      hubR,
+      thickness: estimateMagistralaThickness(2)
+    });
+    const corridorB = buildBusCorridor({
+      groupBounds: groupB.bounds,
+      groupCenter: { x: groupB.circle.cx, y: groupB.circle.cy },
+      hub,
+      hubR,
+      thickness: estimateMagistralaThickness(2)
+    });
+    expect(circleHitsCorridor(groupA.circle, corridorB)).toBe(false);
+    expect(circleHitsCorridor(groupB.circle, corridorA)).toBe(false);
+
+    expect(groupA.circle.cy).toBeLessThanOrEqual(hub.y + 1);
+    expect(groupB.circle.cy).toBeLessThanOrEqual(hub.y + 1);
+
     expect(
       countP2PCrossings([
         { from: { x: groupA.circle.cx, y: groupA.circle.cy }, to: hub },
         { from: { x: groupB.circle.cx, y: groupB.circle.cy }, to: hub }
       ])
     ).toBe(0);
+  });
+
+  test('wide magistrala forces the other group off its corridor', () => {
+    const items = [
+      { id: 'f1', tile: { x: 0, y: 0 } },
+      { id: 'f2', tile: { x: w, y: 0 } },
+      { id: 'f3', tile: { x: 0, y: h } },
+      { id: 'f4', tile: { x: w, y: h } },
+      { id: 't1', tile: { x: 80, y: 0 } },
+      { id: 'sw', tile: { x: 50, y: 40 } }
+    ];
+    const modelItems = [
+      { id: 'f1', icon: SHAPE_2D_PC_ID, name: 'f1' },
+      { id: 'f2', icon: SHAPE_2D_PC_ID, name: 'f2' },
+      { id: 'f3', icon: SHAPE_2D_PC_ID, name: 'f3' },
+      { id: 'f4', icon: SHAPE_2D_PC_ID, name: 'f4' },
+      { id: 't1', icon: SHAPE_2D_PC_ID, name: 't1' },
+      { id: 'sw', icon: SHAPE_2D_SWITCH_ID, name: 'sw' }
+    ];
+    const connectors = [
+      {
+        id: 'cf1',
+        anchors: [
+          { id: '1', ref: { item: 'f1', port: 'port-1' } },
+          { id: '2', ref: { item: 'sw', port: 'port-bottom-1' } }
+        ]
+      },
+      {
+        id: 'cf2',
+        anchors: [
+          { id: '3', ref: { item: 'f2', port: 'port-1' } },
+          { id: '4', ref: { item: 'sw', port: 'port-bottom-2' } }
+        ]
+      },
+      {
+        id: 'cf3',
+        anchors: [
+          { id: '5', ref: { item: 'f3', port: 'port-1' } },
+          { id: '6', ref: { item: 'sw', port: 'port-bottom-3' } }
+        ]
+      },
+      {
+        id: 'cf4',
+        anchors: [
+          { id: '7', ref: { item: 'f4', port: 'port-1' } },
+          { id: '8', ref: { item: 'sw', port: 'port-bottom-4' } }
+        ]
+      },
+      {
+        id: 'ct1',
+        anchors: [
+          { id: '9', ref: { item: 't1', port: 'port-1' } },
+          { id: '10', ref: { item: 'sw', port: 'port-bottom-8' } }
+        ]
+      }
+    ];
+
+    const result = arrangeDensityGroups({
+      items,
+      modelItems: modelItems as never,
+      connectors
+    });
+    expect(result.groupCount).toBe(2);
+
+    const tileOf = (id: string) => {
+      return result.targets[id] ?? items.find((item) => item.id === id)!.tile;
+    };
+    const placed = items.map((item) => {
+      return { ...item, tile: tileOf(item.id) };
+    });
+    const after = computeDensityGroups({ items: placed, modelItems });
+    const fat = after.find((g) => g.memberIds.includes('f1'))!;
+    const thin = after.find((g) => g.memberIds.includes('t1'))!;
+    expect(fat).toBeDefined();
+    expect(thin).toBeDefined();
+
+    const swItem = placed.find((i) => i.id === 'sw')!;
+    const hub = {
+      x: swItem.tile.x + sw.width / 2,
+      y: swItem.tile.y + sw.height / 2
+    };
+    const hubR = Math.sqrt((sw.width / 2) ** 2 + (sw.height / 2) ** 2) + 2;
+    const fatCorridor = buildBusCorridor({
+      groupBounds: fat.bounds,
+      groupCenter: { x: fat.circle.cx, y: fat.circle.cy },
+      hub,
+      hubR,
+      thickness: estimateMagistralaThickness(4)
+    });
+    expect(circleHitsCorridor(thin.circle, fatCorridor)).toBe(false);
   });
 
   test('keeps relative layout inside a group (rigid translate)', () => {
@@ -223,6 +377,91 @@ describe('arrangeDensityGroups hub-and-spoke', () => {
     const t2 = result.targets.a2 ?? items[1].tile;
     expect(t2.x - t1.x).toBe(w);
     expect(t2.y - t1.y).toBe(0);
+    // All placed tiles sit on the integer grid.
+    Object.values(result.targets).forEach((tile) => {
+      expect(Number.isInteger(tile.x)).toBe(true);
+      expect(Number.isInteger(tile.y)).toBe(true);
+    });
+  });
+
+  test('snaps group translation to gridStep', () => {
+    const snapped = snapGroupTranslation({
+      bounds: { x: 0, y: 0, w: 18, h: 9 },
+      rawDx: 10.4,
+      rawDy: -3.7,
+      gridStep: { x: 1, y: 1 }
+    });
+    expect(snapped).toEqual({ dx: 10, dy: -4 });
+    const rack = snapGroupTranslation({
+      bounds: { x: 0, y: 0, w: 18, h: 9 },
+      rawDx: 14,
+      rawDy: 20,
+      gridStep: { x: 9, y: 9 }
+    });
+    expect(rack.dx % 9).toBe(0);
+    expect(rack.dy % 9).toBe(0);
+  });
+
+  test('leaf switch group and PC group circles do not overlap', () => {
+    // Mirrors the SZAFA scene: SW-FLOOR (leaf switch) + PC pair → same core hub.
+    const items = [
+      { id: 'floor', tile: { x: 30, y: 20 } },
+      { id: 'pc1', tile: { x: 70, y: 20 } },
+      { id: 'pc2', tile: { x: 70 + w, y: 20 } },
+      { id: 'core', tile: { x: 0, y: 20 } }
+    ];
+    const modelItems = [
+      { id: 'floor', icon: SHAPE_2D_SWITCH_ID, name: 'floor' },
+      { id: 'pc1', icon: SHAPE_2D_PC_ID, name: 'pc1' },
+      { id: 'pc2', icon: SHAPE_2D_PC_ID, name: 'pc2' },
+      { id: 'core', icon: SHAPE_2D_SWITCH_ID, name: 'core' }
+    ];
+    const connectors = [
+      {
+        id: 'cFloor',
+        anchors: [
+          { id: '1', ref: { item: 'floor', port: 'port-bottom-1' } },
+          { id: '2', ref: { item: 'core', port: 'port-bottom-8' } }
+        ]
+      },
+      {
+        id: 'cPc1',
+        anchors: [
+          { id: '3', ref: { item: 'pc1', port: 'port-1' } },
+          { id: '4', ref: { item: 'core', port: 'port-bottom-1' } }
+        ]
+      },
+      {
+        id: 'cPc2',
+        anchors: [
+          { id: '5', ref: { item: 'pc2', port: 'port-1' } },
+          { id: '6', ref: { item: 'core', port: 'port-bottom-2' } }
+        ]
+      }
+    ];
+
+    const result = arrangeDensityGroups({
+      items,
+      modelItems: modelItems as never,
+      connectors
+    });
+    expect(result.groupCount).toBeGreaterThanOrEqual(2);
+
+    const tileOf = (id: string) => {
+      return result.targets[id] ?? items.find((item) => item.id === id)!.tile;
+    };
+    const placed = items.map((item) => {
+      return { ...item, tile: tileOf(item.id) };
+    });
+    const after = computeDensityGroups({ items: placed, modelItems });
+    const floorG = after.find((g) => g.memberIds.includes('floor'))!;
+    const pcs = after.find((g) => g.memberIds.includes('pc1'))!;
+    expect(floorG).toBeDefined();
+    expect(pcs).toBeDefined();
+    expect(floorG.memberIds.sort().join()).not.toBe(pcs.memberIds.sort().join());
+    expect(circlesOverlap(floorG.circle, pcs.circle, GROUP_CIRCLE_GAP)).toBe(
+      false
+    );
   });
 
   test('skips locked groups', () => {

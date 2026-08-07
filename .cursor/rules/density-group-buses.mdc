@@ -1,0 +1,33 @@
+---
+description: Baseline for Plan 2D v3 density-group magistrala routing — preserve working behaviour when changing buses
+globs: src/v3/densityGroupBuses.ts,src/v3/**/densityGroup*.ts,src/hooks/useScene.ts
+alwaysApply: false
+---
+
+# Density-group buses (magistrala) — known-good baseline
+
+Snapshot of behaviour the user confirmed as “coraz lepiej” (2026-08-07), plus inter-group avoidance.
+
+## Keep
+
+- Horizontal bus from the leaf group toward the switch (not a vertical trunk on the group edge).
+- Placement: Magistrala = shortest cable first, then stack next leaves above (`untangleGroupTowardExit`). Diagonalny = zip switch-port order onto slot reading order (top→bottom, left→right) to cut crossings.
+- Lane stack by travel direction / switch above-below (nearest port owns the band edge toward the switch).
+- No rozbiegówka: `SWITCH_PORT_RUNWAY_TILES = 0`, `switchPortApproach` = snapped port world.
+- Climb/drop on the port column first — no shared horizontal on `leafExit.y`.
+- Inter-group occupancy: later bundles avoid already claimed horizontal Ys (same Y is enough — stacked switches with the same port index share a highway). Prefer upward `busYOffset` / large upward offset on the **bus only**. Never translate whole leaf groups from Magistrala / Diagonalny — in-group leaf swaps (`untangleGroupTowardExit`) stay; group seating is "Ułóż grupy".
+- Final Magistala pass (`resolveOverlapsWithTargetDiagonal`): shared **exact** approach column or main bus Y → short 45° stub (`TARGET_DIAG_STUB_TILES`). Adjacent port columns stay orthogonal. Never long diagonals — farther freeX uses orthogonal drop + short stub. Do not Y-nudge from failed X fans (destroys lane stack).
+- `Prosty z grup`: straight port↔port (`exitStyle: 'simple'`, `simplePaths`) — no bus / corridor math. Only in-group leaf swaps (port order → slot reading order). Empty mid-waypoints.
+- `Magistrala z grup`: orthogonal (`exitStyle: 'orthogonal'`).
+- `Diagonalny z grup`: horizontal stub + offset, then free-angle diagonal (`exitStyle: 'oneBend'`, `fastPath`). Free-angle segments must **not** be Chebyshev-densified in `getConnectorPathPreview` (that creates zigzags); only ortho / 45° are densified. Within a group, all diagonals share one exit angle (`pickSharedOneBendSlope` → median natural slope). Bus lanes use `ONE_BEND_LANE_PITCH` (>1) so long parallel runs do not visually merge. Travel direction is always the group trunk side — clamp the knee into the trunk-side gap so a close/overlapping target cannot flip cables left↔right or shoot bends past the switch.
+
+## Do not regress to
+
+- Chassis-edge runway stubs / reverse “pik” into ports.
+- Drop-bundle / fan-only-at-switch experiments that replaced the magistrala shape.
+- Collapsing all lanes onto one Y via TOP clamp.
+- Routing each group in isolation without reading prior horizontals.
+
+## Tests
+
+`src/v3/__tests__/densityGroupBuses.test.ts` — including two stacked switches on the same port index.

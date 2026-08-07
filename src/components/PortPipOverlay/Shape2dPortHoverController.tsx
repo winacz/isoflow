@@ -100,11 +100,19 @@ export const Shape2dPortHoverController = () => {
       }))
     } as any;
 
+    // When a port is hovered the device gets CSS scale(1.15) — tell the
+    // hit-test about it so port positions match the visual layout.
+    let highlightedItemIds: Set<string> | null = null;
+    if (shape2dPortHover) {
+      highlightedItemIds = new Set([shape2dPortHover.itemId]);
+    }
+
     const portHit = getShape2dPortAtPoint({
       point,
       scene: mockScene,
       modelItems: model.items,
-      stickyHover: shape2dPortHover
+      stickyHover: shape2dPortHover,
+      highlightedItemIds
     });
 
     if (!portHit) {

@@ -294,6 +294,7 @@ export interface UiState {
   projectionMode: ProjectionMode;
   /** Whether the background grid is drawn (logical snap grid is always active). */
   showGrid: boolean;
+  showLoupe: boolean;
   /**
    * Visual density of the 2D background grid (snap is 1 tile unless `rack`).
    * - fine: every tile
@@ -378,7 +379,9 @@ export interface UiStateActions {
   setRendererEl: (el: HTMLDivElement) => void;
   setProjectionMode: (projectionMode: ProjectionMode) => void;
   setShowGrid: (showGrid: boolean) => void;
+  setShowLoupe: (showLoupe: boolean) => void;
   toggleShowGrid: () => void;
+  toggleShowLoupe: () => void;
   setGridStyle: (gridStyle: GridStyle) => void;
   /** Temporary: override grid line color for the active projection mode. */
   setGridColor: (color: string | null) => void;

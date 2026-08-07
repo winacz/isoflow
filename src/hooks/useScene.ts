@@ -1016,7 +1016,7 @@ export const useScene = () => {
    * Untangles leaf↔port order by swapping nodes, then rewrites mid-waypoints.
    */
   const runDensityGroupBuses = useCallback(
-    (options?: { exitStyle?: 'orthogonal' | 'oneBend' }) => {
+    (options?: { exitStyle?: 'orthogonal' | 'oneBend' | 'simple' }) => {
     const state = getState();
     const view = getItemByIdOrThrow(state.model.views, currentViewId).value;
     const viewItems = view.items ?? [];
@@ -1062,6 +1062,25 @@ export const useScene = () => {
         return Boolean(anchor.ref.item);
       });
       if (endpointAnchors.length < 2) return;
+
+      // Prosty: port↔port only — drop every mid WP, no bus geometry.
+      if (exitStyle === 'simple') {
+        const newState = reducers.view({
+          action: 'UPDATE_CONNECTOR',
+          payload: {
+            id: connectorId,
+            anchors: [
+              endpointAnchors[0],
+              endpointAnchors[endpointAnchors.length - 1]
+            ],
+            overlapResolve: 'off',
+            simplePaths: true
+          },
+          ctx: { viewId: currentViewId, state: getState() }
+        });
+        setState(newState, { skipHistory: true });
+        return;
+      }
 
       // Routes are always leaf→switch; flip when the connector is stored switch→leaf.
       const firstItemId = endpointAnchors[0].ref.item!;
@@ -1121,7 +1140,8 @@ export const useScene = () => {
     const result = arrangeDensityGroups({
       items: viewItems,
       modelItems: state.model.items,
-      connectors: viewConnectors
+      connectors: viewConnectors,
+      gridStep: getGridSnapStep(gridStyle)
     });
 
     if (result.movedNodes === 0) return result;
@@ -1142,7 +1162,8 @@ export const useScene = () => {
     endHistoryTransaction,
     getState,
     setState,
-    currentViewId
+    currentViewId,
+    gridStyle
   ]);
 
   /** Soft compat for leftover AlgorithmsPopup — alias / no-op after 88e2dab restore. */

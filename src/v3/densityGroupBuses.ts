@@ -13,7 +13,7 @@ export type DensityGroupBusResult = {
 };
 
 /** How cables leave the leaf group toward the shared bus / target. */
-export type DensityBusExitStyle = 'orthogonal' | 'oneBend';
+export type DensityBusExitStyle = 'orthogonal' | 'oneBend' | 'simple';
 
 type LayoutConnector = {
   id: string;
@@ -1921,6 +1921,9 @@ export const buildOneBendTiles = ({
 /**
  * For each density group: swap leaves so earlier switch ports sit on
  * top / exit-near slots (matches horizontal-bus lanes), then route.
+ *
+ * `simple`: only in-group leaf untangle + empty mid-waypoints (straight
+ * port↔port). No magistrala / corridor math.
  */
 export const routeDensityGroupBuses = ({
   items,
@@ -1947,7 +1950,7 @@ export const routeDensityGroupBuses = ({
     })
   );
 
-  // --- Phase 1: leaf placement (magistrala = shortest+stack; diagonal = port order).
+  // --- Phase 1: leaf placement (magistrala = shortest+stack; diagonal/simple = port order).
   groups.forEach((group) => {
     if (group.memberIds.length < 2) return;
     const memberSet = new Set(group.memberIds);
@@ -1975,7 +1978,10 @@ export const routeDensityGroupBuses = ({
       modelItems,
       connectors,
       trunkSide: dominant.trunkSide,
-      placement: exitStyle === 'oneBend' ? 'diagonal' : 'magistrala'
+      placement:
+        exitStyle === 'oneBend' || exitStyle === 'simple'
+          ? 'diagonal'
+          : 'magistrala'
     });
     Object.assign(targets, swaps);
   });
@@ -1984,6 +1990,36 @@ export const routeDensityGroupBuses = ({
     const tile = targets[item.id];
     return tile ? { ...item, tile } : item;
   });
+
+  // --- Phase 2a: Prosty — register leaf↔switch cables with no mid tiles.
+  if (exitStyle === 'simple') {
+    const routes: Record<string, Coords[]> = {};
+    const itemByIdSimple = new Map(
+      placedItems.map((item) => {
+        return [item.id, item] as const;
+      })
+    );
+    groups.forEach((group) => {
+      if (group.memberIds.length === 0) return;
+      const memberSet = new Set(group.memberIds);
+      const cables = collectCables({
+        connectors,
+        memberSet,
+        itemById: itemByIdSimple,
+        iconById
+      });
+      cables.forEach((cable) => {
+        routes[cable.connectorId] = [];
+      });
+    });
+    return {
+      routes,
+      targets,
+      groupCount: groups.length,
+      cableCount: Object.keys(routes).length,
+      swappedNodes: Object.keys(targets).length
+    };
+  }
 
   // --- Phase 2: route buses on the untangled placement (top groups first).
   const routes: Record<string, Coords[]> = {};
@@ -2041,11 +2077,6 @@ export const routeDensityGroupBuses = ({
       const switchItem = itemById.get(switchId);
       if (!switchItem) return;
 
-      // Exclude the switch from leaf shifts even if it is somehow in the group.
-      const leafMemberIds = group.memberIds.filter((id) => {
-        return id !== switchId;
-      });
-
       const groupCenter = {
         x: group.bounds.x + group.bounds.w / 2,
         y: group.bounds.y + group.bounds.h / 2
@@ -2066,7 +2097,8 @@ export const routeDensityGroupBuses = ({
         exitStyle
       });
 
-      // Prefer a large upward bus offset before moving the leaf group.
+      // Prefer a large upward bus offset. Never translate whole groups here —
+      // in-group leaf swaps happen in Phase 1; group placement is "Ułóż grupy".
       if (bundle.busYOffset === null) {
         const clearUp = findUpwardClearOffset({
           laneYs: bundle.naturalLaneYs,
@@ -2094,47 +2126,6 @@ export const routeDensityGroupBuses = ({
             });
           if (Object.keys(nudged.routes).length > 0 && !nudgedHits) {
             bundle = nudged;
-          }
-        }
-
-        if (bundle.busYOffset === null && clearUp !== null && leafMemberIds.length > 0) {
-          const shifts = shiftGroupMembersUp({
-            memberIds: leafMemberIds,
-            dy: clearUp,
-            itemById,
-            iconById
-          });
-          Object.entries(shifts).forEach(([id, tile]) => {
-            targets[id] = tile;
-            const prev = itemById.get(id);
-            if (!prev) return;
-            const next = { ...prev, tile };
-            itemById.set(id, next);
-            workingItems = workingItems.map((item) => {
-              return item.id === id ? next : item;
-            });
-          });
-
-          cables = collectCables({
-            connectors: groupConnectors,
-            memberSet,
-            itemById,
-            iconById
-          });
-          const refreshed = cables.filter((cable) => {
-            return cable.switchId === switchId;
-          });
-          if (refreshed.length > 0) {
-            bundle = routeBundleToSwitch({
-              cables: refreshed,
-              group,
-              switchItem,
-              iconById,
-              itemById,
-              trunkSide,
-              occupiedHorizontals,
-              exitStyle
-            });
           }
         }
       }

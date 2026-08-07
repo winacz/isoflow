@@ -3,6 +3,9 @@ import {
   aabbChebyshevGap,
   aabbEdgeGaps,
   computeDensityGroups,
+  densityCirclePadForMemberCount,
+  DENSITY_CIRCLE_PAD_MAX,
+  DENSITY_CIRCLE_PAD_MIN,
   footprintBounds
 } from '../densityGroups';
 import type { Footprint } from 'src/utils/autoLayout/types';
@@ -35,6 +38,20 @@ describe('aabb gaps', () => {
     const a = footprintBounds(fp('a', 0, 0, 2, 2));
     const b = footprintBounds(fp('b', 4, 0, 2, 2));
     expect(aabbChebyshevGap(a, b)).toBe(2);
+  });
+});
+
+describe('densityCirclePadForMemberCount', () => {
+  test('interpolates 4 → 7 and caps above 10 members', () => {
+    expect(densityCirclePadForMemberCount(1)).toBe(DENSITY_CIRCLE_PAD_MIN);
+    expect(densityCirclePadForMemberCount(10)).toBe(DENSITY_CIRCLE_PAD_MAX);
+    expect(densityCirclePadForMemberCount(99)).toBe(DENSITY_CIRCLE_PAD_MAX);
+    expect(densityCirclePadForMemberCount(5.5)).toBeCloseTo(
+      DENSITY_CIRCLE_PAD_MIN +
+        ((5.5 - 1) / 9) * (DENSITY_CIRCLE_PAD_MAX - DENSITY_CIRCLE_PAD_MIN)
+    );
+    // Midpoint-ish: 1 + 4.5 ≈ between 1 and 10
+    expect(densityCirclePadForMemberCount(5)).toBeCloseTo(4 + (4 / 9) * 3);
   });
 });
 

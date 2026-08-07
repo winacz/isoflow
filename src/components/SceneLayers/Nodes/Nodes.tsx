@@ -44,7 +44,7 @@ const connectorUsesPort = (
   portId: string
 ) => {
   return connector.anchors.some((anchor) => {
-    return anchor.ref.item === itemId && anchor.ref.port === portId;
+    return anchor.ref.item === itemId && (!anchor.ref.port || anchor.ref.port === portId);
   });
 };
 

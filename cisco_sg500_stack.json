@@ -1,0 +1,763 @@
+{
+  "title": "Cisco SG500 Stack",
+  "version": "1.0",
+  "icons": [],
+  "colors": [
+    "#0f172a",
+    "#1e293b",
+    "#cbd5e1"
+  ],
+  "deviceTemplates": [
+    {
+      "id": "id_fn540q1",
+      "name": "Cisco SG500-52",
+      "kind": "SWITCH",
+      "formFactor": "RACK",
+      "numbering": "ODD_EVEN",
+      "switchRole": "SW",
+      "sections": [
+        {
+          "id": "rj45",
+          "media": "RJ45",
+          "ports": 48
+        },
+        {
+          "id": "sfp",
+          "media": "SFP",
+          "ports": 2
+        }
+      ]
+    }
+  ],
+  "items": [
+    {
+      "id": "id_zmbd38g",
+      "name": "SG500 Unit 1",
+      "description": "Management: 10.0.111.2/24 (VLAN 1111), Default: 10.64.200.10/24 (VLAN 1)",
+      "icon": "id_fn540q1",
+      "ports": {
+        "rj45-p1": {
+          "vlan": "100",
+          "allowedVlans": [
+            "50"
+          ],
+          "type": "trunk",
+          "name": "AP"
+        },
+        "rj45-p2": {
+          "vlan": "100",
+          "allowedVlans": [
+            "50"
+          ],
+          "type": "trunk",
+          "name": "AP"
+        },
+        "rj45-p3": {
+          "vlan": "100",
+          "allowedVlans": [
+            "50"
+          ],
+          "type": "trunk",
+          "name": "AP"
+        },
+        "rj45-p4": {
+          "vlan": "100",
+          "allowedVlans": [
+            "50"
+          ],
+          "type": "trunk",
+          "name": "AP"
+        },
+        "rj45-p5": {
+          "vlan": "100",
+          "allowedVlans": [
+            "50"
+          ],
+          "type": "trunk",
+          "name": "AP"
+        },
+        "rj45-p6": {
+          "vlan": "100",
+          "name": "Wolny"
+        },
+        "rj45-p7": {
+          "vlan": "100",
+          "name": "Wolny"
+        },
+        "rj45-p8": {
+          "vlan": "100",
+          "name": "Wolny"
+        },
+        "rj45-p9": {
+          "vlan": "100",
+          "name": "Wolny"
+        },
+        "rj45-p10": {
+          "vlan": "100",
+          "name": "Wolny"
+        },
+        "rj45-p11": {
+          "vlan": "100",
+          "name": "Wolny"
+        },
+        "rj45-p12": {
+          "vlan": "100",
+          "name": "Stacja_Ladowania"
+        },
+        "rj45-p13": {
+          "vlan": "100",
+          "name": "Wolny"
+        },
+        "rj45-p14": {
+          "vlan": "100",
+          "name": "Wolny"
+        },
+        "rj45-p15": {
+          "vlan": "100",
+          "name": "Wolny"
+        },
+        "rj45-p16": {
+          "vlan": "100",
+          "name": "Wolny"
+        },
+        "rj45-p17": {
+          "vlan": "100",
+          "name": "Wolny"
+        },
+        "rj45-p18": {
+          "vlan": "100",
+          "name": "Wolny"
+        },
+        "rj45-p19": {
+          "vlan": "100",
+          "name": "Wolny"
+        },
+        "rj45-p20": {
+          "vlan": "100",
+          "name": "Wolny"
+        },
+        "rj45-p21": {
+          "vlan": "100",
+          "name": "Wolny"
+        },
+        "rj45-p22": {
+          "vlan": "100",
+          "name": "Wolny"
+        },
+        "rj45-p23": {
+          "vlan": "100",
+          "name": "Telefon_1"
+        },
+        "rj45-p24": {
+          "vlan": "100",
+          "name": "Telefon_2"
+        },
+        "rj45-p25": {
+          "vlan": "999",
+          "allowedVlans": [
+            "50",
+            "100",
+            "200",
+            "300",
+            "400",
+            "500",
+            "1111"
+          ],
+          "type": "trunk",
+          "name": "Wolny"
+        },
+        "rj45-p26": {
+          "vlan": "999",
+          "allowedVlans": [
+            "50",
+            "100",
+            "200",
+            "300",
+            "400",
+            "500",
+            "1111"
+          ],
+          "type": "trunk",
+          "name": "Wolny"
+        },
+        "rj45-p27": {
+          "vlan": "1",
+          "name": "Wolny"
+        },
+        "rj45-p28": {
+          "vlan": "1",
+          "name": "Wolny"
+        },
+        "rj45-p29": {
+          "vlan": "1",
+          "name": "Wolny"
+        },
+        "rj45-p30": {
+          "vlan": "1",
+          "name": "Wolny"
+        },
+        "rj45-p31": {
+          "vlan": "1",
+          "name": "Wolny"
+        },
+        "rj45-p32": {
+          "vlan": "1",
+          "name": "Wolny"
+        },
+        "rj45-p33": {
+          "vlan": "1",
+          "name": "Wolny"
+        },
+        "rj45-p34": {
+          "vlan": "1",
+          "name": "Wolny"
+        },
+        "rj45-p35": {
+          "vlan": "1",
+          "name": "Wolny"
+        },
+        "rj45-p36": {
+          "vlan": "1",
+          "name": "Wolny"
+        },
+        "rj45-p37": {
+          "vlan": "1",
+          "name": "Wolny"
+        },
+        "rj45-p38": {
+          "vlan": "1",
+          "name": "Wolny"
+        },
+        "rj45-p39": {
+          "vlan": "1",
+          "name": "Wolny"
+        },
+        "rj45-p40": {
+          "vlan": "1",
+          "name": "Wolny"
+        },
+        "rj45-p41": {
+          "vlan": "1",
+          "name": "Wolny"
+        },
+        "rj45-p42": {
+          "vlan": "1",
+          "name": "Wolny"
+        },
+        "rj45-p43": {
+          "vlan": "1",
+          "name": "Wolny"
+        },
+        "rj45-p44": {
+          "vlan": "1",
+          "name": "Wolny"
+        },
+        "rj45-p45": {
+          "vlan": "1",
+          "name": "Wolny"
+        },
+        "rj45-p46": {
+          "vlan": "1",
+          "name": "Wolny"
+        },
+        "rj45-p47": {
+          "vlan": "1",
+          "name": "Wolny"
+        },
+        "rj45-p48": {
+          "vlan": "1",
+          "name": "Wolny"
+        },
+        "sfp-p1": {
+          "vlan": "1",
+          "name": "Wolny"
+        },
+        "sfp-p2": {
+          "vlan": "1",
+          "name": "Wolny"
+        }
+      },
+      "svis": [
+        {
+          "id": "id_yhztmhv",
+          "vlan": "1",
+          "ip": "10.64.200.10/24"
+        },
+        {
+          "id": "id_sppsohp",
+          "vlan": "1111",
+          "ip": "10.0.111.2/24"
+        }
+      ]
+    },
+    {
+      "id": "id_f1h7kte",
+      "name": "SG500 Unit 2",
+      "icon": "id_fn540q1",
+      "ports": {
+        "rj45-p1": {
+          "vlan": "300",
+          "name": "Kamera"
+        },
+        "rj45-p2": {
+          "vlan": "300",
+          "name": "Kamera"
+        },
+        "rj45-p3": {
+          "vlan": "300",
+          "name": "Kamera"
+        },
+        "rj45-p4": {
+          "vlan": "300",
+          "name": "Kamera"
+        },
+        "rj45-p5": {
+          "vlan": "300",
+          "name": "Kamera"
+        },
+        "rj45-p6": {
+          "vlan": "300",
+          "name": "Wolny"
+        },
+        "rj45-p7": {
+          "vlan": "300",
+          "name": "Wolny"
+        },
+        "rj45-p8": {
+          "vlan": "300",
+          "name": "Wolny"
+        },
+        "rj45-p9": {
+          "vlan": "300",
+          "name": "Wolny"
+        },
+        "rj45-p10": {
+          "vlan": "300",
+          "name": "Wolny"
+        },
+        "rj45-p11": {
+          "vlan": "300",
+          "name": "Wolny"
+        },
+        "rj45-p12": {
+          "vlan": "300",
+          "name": "Wolny"
+        },
+        "rj45-p13": {
+          "vlan": "300",
+          "name": "Wolny"
+        },
+        "rj45-p14": {
+          "vlan": "300",
+          "name": "Wolny"
+        },
+        "rj45-p15": {
+          "vlan": "300",
+          "name": "Wolny"
+        },
+        "rj45-p16": {
+          "vlan": "300",
+          "name": "Wolny"
+        },
+        "rj45-p17": {
+          "vlan": "300",
+          "name": "Wolny"
+        },
+        "rj45-p18": {
+          "vlan": "300",
+          "name": "Wolny"
+        },
+        "rj45-p19": {
+          "vlan": "300",
+          "name": "Wolny"
+        },
+        "rj45-p20": {
+          "vlan": "300",
+          "name": "Wolny"
+        },
+        "rj45-p21": {
+          "vlan": "300",
+          "name": "Rejestrator"
+        },
+        "rj45-p22": {
+          "vlan": "300",
+          "name": "Rejestrator"
+        },
+        "rj45-p23": {
+          "vlan": "300",
+          "name": "Rejestrator"
+        },
+        "rj45-p24": {
+          "vlan": "300",
+          "name": "Rejestrator"
+        },
+        "rj45-p25": {
+          "vlan": "300",
+          "name": "Wolny"
+        },
+        "rj45-p26": {
+          "vlan": "300",
+          "name": "Jarek_Pensjonat"
+        },
+        "rj45-p27": {
+          "vlan": "1",
+          "name": "Wolny"
+        },
+        "rj45-p28": {
+          "vlan": "1",
+          "name": "Wolny"
+        },
+        "rj45-p29": {
+          "vlan": "1",
+          "name": "Wolny"
+        },
+        "rj45-p30": {
+          "vlan": "1",
+          "name": "Wolny"
+        },
+        "rj45-p31": {
+          "vlan": "1",
+          "name": "Wolny"
+        },
+        "rj45-p32": {
+          "vlan": "1",
+          "name": "Wolny"
+        },
+        "rj45-p33": {
+          "vlan": "1",
+          "name": "Wolny"
+        },
+        "rj45-p34": {
+          "vlan": "1",
+          "name": "Wolny"
+        },
+        "rj45-p35": {
+          "vlan": "1",
+          "name": "Wolny"
+        },
+        "rj45-p36": {
+          "vlan": "1",
+          "name": "Wolny"
+        },
+        "rj45-p37": {
+          "vlan": "1",
+          "name": "Wolny"
+        },
+        "rj45-p38": {
+          "vlan": "1",
+          "name": "Wolny"
+        },
+        "rj45-p39": {
+          "vlan": "1",
+          "name": "Wolny"
+        },
+        "rj45-p40": {
+          "vlan": "1",
+          "name": "Wolny"
+        },
+        "rj45-p41": {
+          "vlan": "1",
+          "name": "Wolny"
+        },
+        "rj45-p42": {
+          "vlan": "1",
+          "name": "Wolny"
+        },
+        "rj45-p43": {
+          "vlan": "1",
+          "name": "Wolny"
+        },
+        "rj45-p44": {
+          "vlan": "1",
+          "name": "Wolny"
+        },
+        "rj45-p45": {
+          "vlan": "1",
+          "name": "Wolny"
+        },
+        "rj45-p46": {
+          "vlan": "1",
+          "name": "Wolny"
+        },
+        "rj45-p47": {
+          "vlan": "1",
+          "name": "Wolny"
+        },
+        "rj45-p48": {
+          "vlan": "1",
+          "name": "Wolny"
+        },
+        "sfp-p1": {
+          "vlan": "1",
+          "name": "Wolny"
+        },
+        "sfp-p2": {
+          "vlan": "1",
+          "name": "Wolny"
+        }
+      }
+    },
+    {
+      "id": "id_adrrbpy",
+      "name": "SG500 Unit 5",
+      "icon": "id_fn540q1",
+      "ports": {
+        "rj45-p1": {
+          "vlan": "100",
+          "name": "Biuro_Dol_1"
+        },
+        "rj45-p2": {
+          "vlan": "100",
+          "name": "Biuro_Dol_2"
+        },
+        "rj45-p3": {
+          "vlan": "100",
+          "name": "Biuro_Dol_3"
+        },
+        "rj45-p4": {
+          "vlan": "100",
+          "name": "Biuro_Dol_4"
+        },
+        "rj45-p5": {
+          "vlan": "100",
+          "name": "Biuro_Dol_5"
+        },
+        "rj45-p6": {
+          "vlan": "100",
+          "name": "Biuro_Dol_6"
+        },
+        "rj45-p7": {
+          "vlan": "100",
+          "name": "Kasa_Magazyn_1"
+        },
+        "rj45-p8": {
+          "vlan": "100",
+          "name": "Kasa_Magazyn_2"
+        },
+        "rj45-p9": {
+          "vlan": "100",
+          "name": "TEST_NAZWY"
+        },
+        "rj45-p10": {
+          "vlan": "100",
+          "name": "Sklep_1"
+        },
+        "rj45-p11": {
+          "vlan": "100",
+          "name": "Sklep_2"
+        },
+        "rj45-p12": {
+          "vlan": "100",
+          "name": "Sklep_3"
+        },
+        "rj45-p13": {
+          "vlan": "100",
+          "name": "Sklep_4"
+        },
+        "rj45-p14": {
+          "vlan": "100",
+          "name": "Sklep_5"
+        },
+        "rj45-p15": {
+          "vlan": "100",
+          "name": "Kuchnia_1"
+        },
+        "rj45-p16": {
+          "vlan": "100",
+          "name": "Kuchnia_2"
+        },
+        "rj45-p17": {
+          "vlan": "100",
+          "name": "Kuchnia_3"
+        },
+        "rj45-p18": {
+          "vlan": "100",
+          "name": "Kuchnia_4"
+        },
+        "rj45-p19": {
+          "vlan": "100",
+          "name": "Biuro_Marcin_1"
+        },
+        "rj45-p20": {
+          "vlan": "100",
+          "name": "Biuro_Marcin_2"
+        },
+        "rj45-p21": {
+          "vlan": "100",
+          "name": "TEST_NAZWY"
+        },
+        "rj45-p22": {
+          "vlan": "100",
+          "name": "Biuro_Marcin_4"
+        },
+        "rj45-p23": {
+          "vlan": "100",
+          "name": "Sala_Gora_1"
+        },
+        "rj45-p24": {
+          "vlan": "100",
+          "name": "Sala_Gora_2"
+        },
+        "rj45-p25": {
+          "vlan": "100",
+          "name": "Bar"
+        },
+        "rj45-p26": {
+          "vlan": "100",
+          "name": "Bar"
+        },
+        "rj45-p27": {
+          "vlan": "100",
+          "name": "Bar"
+        },
+        "rj45-p28": {
+          "vlan": "100",
+          "name": "Bar"
+        },
+        "rj45-p29": {
+          "vlan": "100",
+          "name": "Bar"
+        },
+        "rj45-p30": {
+          "vlan": "100",
+          "name": "Bar"
+        },
+        "rj45-p31": {
+          "vlan": "100",
+          "name": "Grill"
+        },
+        "rj45-p32": {
+          "vlan": "100",
+          "name": "Grill"
+        },
+        "rj45-p33": {
+          "vlan": "100",
+          "name": "Centrala_tel"
+        },
+        "rj45-p34": {
+          "vlan": "100",
+          "name": "Serwer_Net"
+        },
+        "rj45-p35": {
+          "vlan": "100",
+          "name": "Fotowoltaika"
+        },
+        "rj45-p36": {
+          "vlan": "100",
+          "name": "Fotowoltaika"
+        },
+        "rj45-p37": {
+          "vlan": "100",
+          "name": "TEST_NAZWY"
+        },
+        "rj45-p38": {
+          "vlan": "100",
+          "name": "TEST_NAZWY"
+        },
+        "rj45-p39": {
+          "vlan": "100",
+          "name": "TEST_NAZWY"
+        },
+        "rj45-p40": {
+          "vlan": "100",
+          "name": "Alarm"
+        },
+        "rj45-p41": {
+          "vlan": "100",
+          "name": "TEST_NAZWY"
+        },
+        "rj45-p42": {
+          "vlan": "100",
+          "name": "TEST_NAZWY"
+        },
+        "rj45-p43": {
+          "vlan": "100",
+          "name": "TEST_NAZWY"
+        },
+        "rj45-p44": {
+          "vlan": "100",
+          "name": "TEST_NAZWY"
+        },
+        "rj45-p45": {
+          "vlan": "100",
+          "name": "TEST_NAZWY"
+        },
+        "rj45-p46": {
+          "vlan": "100",
+          "name": "TEST_NAZWY"
+        },
+        "rj45-p47": {
+          "vlan": "100",
+          "name": "TEST_NAZWY"
+        },
+        "rj45-p48": {
+          "vlan": "100",
+          "name": "TEST_NAZWY"
+        },
+        "sfp-p1": {
+          "vlan": "999",
+          "allowedVlans": [
+            "50",
+            "100",
+            "200",
+            "300",
+            "400",
+            "500",
+            "1111"
+          ],
+          "type": "trunk",
+          "name": "Trunk_Mikrotik"
+        },
+        "sfp-p2": {
+          "vlan": "999",
+          "allowedVlans": [
+            "50",
+            "100",
+            "200",
+            "300",
+            "400",
+            "500",
+            "1111"
+          ],
+          "type": "trunk",
+          "name": "Trunk_Serwer"
+        }
+      }
+    }
+  ],
+  "views": [
+    {
+      "id": "id_1n4f9em",
+      "name": "Plan",
+      "items": [
+        {
+          "id": "id_toqw8f9",
+          "item": "id_zmbd38g",
+          "tile": {
+            "x": 10,
+            "y": 10
+          }
+        },
+        {
+          "id": "id_gzai9mz",
+          "item": "id_f1h7kte",
+          "tile": {
+            "x": 10,
+            "y": 20
+          }
+        },
+        {
+          "id": "id_yqb22yt",
+          "item": "id_adrrbpy",
+          "tile": {
+            "x": 10,
+            "y": 30
+          }
+        }
+      ],
+      "connectors": [],
+      "textBoxes": [],
+      "rectangles": []
+    }
+  ]
+}

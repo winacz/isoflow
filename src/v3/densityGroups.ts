@@ -27,11 +27,34 @@ export type DensityGroup = {
 
 /** Test threshold: ≤1 tile between footprints → same group. */
 export const DEFAULT_DENSITY_MAX_GAP_TILES = 1;
+
+/** Circle pad for a 1-node group (tiles beyond bbox circumradius). */
+export const DENSITY_CIRCLE_PAD_MIN = 4;
+/** Circle pad for large groups (≥ `DENSITY_CIRCLE_PAD_MAX_AT` members). */
+export const DENSITY_CIRCLE_PAD_MAX = 7;
+/** Member count at which pad reaches the max (larger groups stay capped). */
+export const DENSITY_CIRCLE_PAD_MAX_AT = 10;
+
 /**
- * Extra radius beyond the bbox half-diagonal.
- * Sized for layout packing (hub-and-spoke uses these circles) and the overlay.
+ * @deprecated Prefer `densityCirclePadForMemberCount` — kept as the mid default
+ * when a fixed override is needed.
  */
-export const DENSITY_CIRCLE_PAD_TILES = 3.5;
+export const DENSITY_CIRCLE_PAD_TILES = DENSITY_CIRCLE_PAD_MIN;
+
+/**
+ * Extra radius beyond the bbox half-diagonal, scaled by member count:
+ * 1 node → 4.0, ≥10 nodes → 7.0 (linear in between, hard-capped).
+ */
+export const densityCirclePadForMemberCount = (memberCount: number): number => {
+  const n = Math.max(1, memberCount);
+  if (n <= 1) return DENSITY_CIRCLE_PAD_MIN;
+  if (n >= DENSITY_CIRCLE_PAD_MAX_AT) return DENSITY_CIRCLE_PAD_MAX;
+  const t = (n - 1) / (DENSITY_CIRCLE_PAD_MAX_AT - 1);
+  return (
+    DENSITY_CIRCLE_PAD_MIN +
+    t * (DENSITY_CIRCLE_PAD_MAX - DENSITY_CIRCLE_PAD_MIN)
+  );
+};
 
 export const footprintBounds = (fp: Footprint): DensityGroupBounds => {
   return { x: fp.tile.x, y: fp.tile.y, w: fp.width, h: fp.height };
@@ -82,7 +105,10 @@ export type ComputeDensityGroupsArgs = {
   modelItems: DensityModelItem[];
   /** Max Chebyshev gap (tiles) still considered the same group. */
   maxGapTiles?: number;
-  /** Extra radius around the group bbox (tiles). */
+  /**
+   * Fixed extra radius for every group. When omitted, pad scales with member
+   * count via `densityCirclePadForMemberCount` (4 → 7).
+   */
   circlePadTiles?: number;
 };
 
@@ -94,7 +120,7 @@ export const computeDensityGroups = ({
   items,
   modelItems,
   maxGapTiles = DEFAULT_DENSITY_MAX_GAP_TILES,
-  circlePadTiles = DENSITY_CIRCLE_PAD_TILES
+  circlePadTiles
 }: ComputeDensityGroupsArgs): DensityGroup[] => {
   // Mounted cabinet gear sits inside another footprint — skip for grouping.
   const freeItems = items.filter((item) => {
@@ -158,7 +184,9 @@ export const computeDensityGroups = ({
     const h = Math.max(...bottoms) - y;
     const cx = x + w / 2;
     const cy = y + h / 2;
-    const r = Math.sqrt((w / 2) ** 2 + (h / 2) ** 2) + circlePadTiles;
+    const pad =
+      circlePadTiles ?? densityCirclePadForMemberCount(memberIds.length);
+    const r = Math.sqrt((w / 2) ** 2 + (h / 2) ** 2) + pad;
 
     groups.push({
       id: `density-group-${groupIndex}`,

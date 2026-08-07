@@ -3,7 +3,9 @@ import { Box, Typography } from '@mui/material';
 import { TILE_SIZE_2D } from 'src/config';
 import { useScene } from 'src/hooks/useScene';
 import { useModelStore } from 'src/stores/modelStore';
-import { computeDensityGroups } from 'src/v3/densityGroups';
+import {
+  computeDensityGroups
+} from 'src/v3/densityGroups';
 import { useDensityGroupsDebugStore } from 'src/v3/densityGroupsStore';
 
 const GROUP_COLORS = [
@@ -18,7 +20,8 @@ const GROUP_COLORS = [
 ];
 
 /**
- * Test overlay: draws a ring around each density group on the 2D v3 canvas.
+ * Overlay rings = the same circles `arrangeDensityGroups` packs
+ * (dynamic pad 4→7 by member count).
  */
 export const V3DensityGroupsOverlay = () => {
   const visible = useDensityGroupsDebugStore((state) => {
@@ -31,7 +34,10 @@ export const V3DensityGroupsOverlay = () => {
 
   const groups = useMemo(() => {
     if (!visible) return [];
-    return computeDensityGroups({ items, modelItems });
+    return computeDensityGroups({
+      items,
+      modelItems
+    });
   }, [visible, items, modelItems]);
 
   if (!visible || groups.length === 0) return null;
@@ -80,7 +86,8 @@ export const V3DensityGroupsOverlay = () => {
                 whiteSpace: 'nowrap'
               }}
             >
-              G{index + 1} · {group.memberIds.length}
+              G{index + 1} · {group.memberIds.length} · r
+              {Math.round(group.circle.r)}
             </Typography>
           </Box>
         );

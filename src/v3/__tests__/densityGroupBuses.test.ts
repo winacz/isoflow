@@ -778,6 +778,126 @@ describe('routeDensityGroupBuses', () => {
     });
   });
 
+  test('does not translate whole groups — only in-group leaf swaps', () => {
+    // Two separate density groups; Magistrala may swap leaves inside a group
+    // but must not move one group relative to the other.
+    const gap = 3;
+    const items = [
+      { id: 'a1', tile: { x: 40, y: 20 } },
+      { id: 'a2', tile: { x: 40 + w, y: 20 } },
+      { id: 'b1', tile: { x: 40 + w * 2 + gap, y: 30 } },
+      { id: 'b2', tile: { x: 40 + w * 3 + gap, y: 30 } },
+      { id: 'sw', tile: { x: 0, y: 20 } }
+    ];
+    const modelItems = [
+      { id: 'a1', icon: SHAPE_2D_PC_ID, name: 'a1' },
+      { id: 'a2', icon: SHAPE_2D_PC_ID, name: 'a2' },
+      { id: 'b1', icon: SHAPE_2D_PC_ID, name: 'b1' },
+      { id: 'b2', icon: SHAPE_2D_PC_ID, name: 'b2' },
+      { id: 'sw', icon: SHAPE_2D_SWITCH_ID, name: 'sw' }
+    ];
+    const connectors = [
+      {
+        id: 'cA1',
+        anchors: [
+          { id: '1', ref: { item: 'a1', port: 'port-1' } },
+          { id: '2', ref: { item: 'sw', port: 'port-bottom-1' } }
+        ]
+      },
+      {
+        id: 'cA2',
+        anchors: [
+          { id: '3', ref: { item: 'a2', port: 'port-1' } },
+          { id: '4', ref: { item: 'sw', port: 'port-bottom-2' } }
+        ]
+      },
+      {
+        id: 'cB1',
+        anchors: [
+          { id: '5', ref: { item: 'b1', port: 'port-1' } },
+          { id: '6', ref: { item: 'sw', port: 'port-bottom-3' } }
+        ]
+      },
+      {
+        id: 'cB2',
+        anchors: [
+          { id: '7', ref: { item: 'b2', port: 'port-1' } },
+          { id: '8', ref: { item: 'sw', port: 'port-bottom-4' } }
+        ]
+      }
+    ];
+
+    const result = routeDensityGroupBuses({
+      items,
+      modelItems: modelItems as never,
+      connectors
+    });
+
+    const tileOf = (id: string) => {
+      return result.targets[id] ?? items.find((item) => item.id === id)!.tile;
+    };
+    const centroid = (ids: string[]) => {
+      const tiles = ids.map(tileOf);
+      return {
+        x: tiles.reduce((s, t) => s + t.x, 0) / tiles.length,
+        y: tiles.reduce((s, t) => s + t.y, 0) / tiles.length
+      };
+    };
+    const beforeA = { x: 40 + w / 2, y: 20 };
+    const beforeB = { x: 40 + w * 2.5 + gap, y: 30 };
+    const afterA = centroid(['a1', 'a2']);
+    const afterB = centroid(['b1', 'b2']);
+    // Rigid group seats stay put (in-group swaps keep the centroid).
+    expect(afterA.x).toBeCloseTo(beforeA.x, 5);
+    expect(afterA.y).toBeCloseTo(beforeA.y, 5);
+    expect(afterB.x).toBeCloseTo(beforeB.x, 5);
+    expect(afterB.y).toBeCloseTo(beforeB.y, 5);
+  });
+
+  test('simple: empty mid-waypoints and swaps crossed leaves by port order', () => {
+    // Crossed wiring: left PC → later port, right PC → earlier port.
+    const items = [
+      { id: 'pcLeft', tile: { x: 40, y: 20 } },
+      { id: 'pcRight', tile: { x: 40 + w, y: 20 } },
+      { id: 'sw', tile: { x: 0, y: 20 } }
+    ];
+    const modelItems = [
+      { id: 'pcLeft', icon: SHAPE_2D_PC_ID, name: 'pcLeft' },
+      { id: 'pcRight', icon: SHAPE_2D_PC_ID, name: 'pcRight' },
+      { id: 'sw', icon: SHAPE_2D_SWITCH_ID, name: 'sw' }
+    ];
+    const connectors = [
+      {
+        id: 'cCross',
+        anchors: [
+          { id: '1', ref: { item: 'pcLeft', port: 'port-1' } },
+          { id: '2', ref: { item: 'sw', port: 'port-bottom-4' } }
+        ]
+      },
+      {
+        id: 'cEarly',
+        anchors: [
+          { id: '3', ref: { item: 'pcRight', port: 'port-1' } },
+          { id: '4', ref: { item: 'sw', port: 'port-bottom-1' } }
+        ]
+      }
+    ];
+
+    const result = routeDensityGroupBuses({
+      items,
+      modelItems: modelItems as never,
+      connectors,
+      exitStyle: 'simple'
+    });
+
+    expect(result.cableCount).toBe(2);
+    expect(result.routes.cCross).toEqual([]);
+    expect(result.routes.cEarly).toEqual([]);
+    // Port-bottom-1 (earlier) → left slot; port-bottom-4 → right slot.
+    expect(result.targets.pcLeft).toEqual({ x: 40 + w, y: 20 });
+    expect(result.targets.pcRight).toEqual({ x: 40, y: 20 });
+  });
+
   test('two stacked switches same port index: horizontals do not share Y', () => {
     // Leaves at same height; each hits port-bottom-2 on its own switch.
     // Switches stacked → port local Y matches, world bus often collides without

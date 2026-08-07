@@ -158,6 +158,14 @@ const continuousTileToWorld = (tile: { x: number; y: number }) => {
   };
 };
 
+/**
+ * Visual highlight scale applied to the node on the main canvas when a port
+ * is hovered (must match HIGHLIGHT_SCALE in Nodes.tsx / Node.tsx).
+ * The loupe renders the device UN-scaled, so we divide the cursor offset
+ * by this factor to keep the correct point centered in the glass.
+ */
+const NODE_HIGHLIGHT_SCALE = 1.15;
+
 function applyLoupeDom(
   loupeEl: HTMLDivElement | null,
   contentEl: HTMLDivElement | null,
@@ -171,8 +179,13 @@ function applyLoupeDom(
   loupeEl.style.height = `${diameter}px`;
   loupeEl.style.transform = `translate(${cursor.x - radius}px, ${cursor.y - radius}px)`;
   if (contentEl) {
-    // World point under the cursor stays at loupe center (true magnifier).
-    contentEl.style.transform = `translate(${-(cursor.x - deviceCenter.x)}px, ${-(cursor.y - deviceCenter.y)}px)`;
+    // The device on the canvas is CSS-scaled by NODE_HIGHLIGHT_SCALE around
+    // its center (because port hover highlights the node).  The cursor world
+    // position W maps to device-local offset (W − center) / scale.
+    // The loupe renders the device un-scaled, so we apply the inverse.
+    const offsetX = (cursor.x - deviceCenter.x) / NODE_HIGHLIGHT_SCALE;
+    const offsetY = (cursor.y - deviceCenter.y) / NODE_HIGHLIGHT_SCALE;
+    contentEl.style.transform = `translate(${-offsetX}px, ${-offsetY}px)`;
   }
 }
 
@@ -196,6 +209,9 @@ export const PortLoupeOverlay = () => {
   const hover = useUiStateStore((state) => {
     return state.shape2dPortHover;
   });
+  const showLoupe = useUiStateStore((state) => {
+    return state.showLoupe;
+  });
   const rendererEl = useUiStateStore((state) => {
     return state.rendererEl;
   });
@@ -206,8 +222,13 @@ export const PortLoupeOverlay = () => {
   });
 
   const device = useMemo((): LoupeDevice | null => {
-    if (!hover) return null;
+    if (!showLoupe || !hover) return null;
     if (!isPlanProjection(projectionMode) || projectionMode === 'TWO_D_V2') {
+      return null;
+    }
+
+    // Ukryj lupę przy przybliżeniu 30% i większym
+    if (zoom >= 0.3) {
       return null;
     }
 
@@ -229,7 +250,23 @@ export const PortLoupeOverlay = () => {
       getModelItemSize(modelItem) ??
       getShape2dSize(modelItem.icon) ?? { width: 1, height: 1 };
     const deviceCenter = getShape2dCenterPosition(viewItem.tile, size);
-    const diameter = LOUPE_SCREEN_PX / Math.max(0.15, zoom);
+    
+    // Oblicz rozmiar lupy na ekranie. 
+    // Od 30% w górę: ukryta. Poniżej 30% zaczyna od 248px.
+    // Osiąga maksymalny rozmiar przy 20% (ok. 400px).
+    let targetPx = 248;
+    const MAX_LOUPE_PX = 400;
+    if (zoom <= 0.2) {
+      targetPx = MAX_LOUPE_PX;
+    } else if (zoom < 0.3) {
+      const linearRatio = (0.3 - zoom) / (0.3 - 0.2);
+      // Nieliniowy przyrost (quartic ease-in): na początku rośnie jeszcze wolniej.
+      const ratio = Math.pow(linearRatio, 4);
+      targetPx = 248 + ratio * (MAX_LOUPE_PX - 248);
+    }
+
+    const loupeScreenPx = targetPx;
+    const diameter = loupeScreenPx / Math.max(0.01, zoom);
 
     return {
       itemId: hover.itemId,
@@ -505,7 +542,7 @@ export const PortLoupeOverlay = () => {
   const { modelItem, portId, deviceCenter, diameter } = content;
   const fadeMs = visible ? LOUPE_FADE_IN_MS : LOUPE_FADE_OUT_MS;
   // Compensate SceneLayer zoom so loupe magnification stays constant on screen.
-  const contentScale = LOUPE_MAG / Math.max(0.15, zoom);
+  const contentScale = LOUPE_MAG / Math.max(0.01, zoom);
   const loupeConnectors = relatedConnectors.filter((connector) => {
     return connector.anchors.some((anchor) => {
       return anchor.ref.item === content.itemId;

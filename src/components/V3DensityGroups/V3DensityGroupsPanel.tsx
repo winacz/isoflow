@@ -4,7 +4,8 @@ import {
   BubbleChartOutlined,
   AccountTreeOutlined,
   TimelineOutlined,
-  DashboardCustomizeOutlined
+  DashboardCustomizeOutlined,
+  ShowChartOutlined
 } from '@mui/icons-material';
 import { UiElement } from 'src/components/UiElement/UiElement';
 import { useScene } from 'src/hooks/useScene';
@@ -47,7 +48,9 @@ export const V3DensityGroupsPanel = () => {
           const result = runDensityGroupBuses({ exitStyle });
           setBusSummary(
             result.cableCount === 0
-              ? 'Brak kabli do magistrali'
+              ? exitStyle === 'simple'
+                ? 'Brak kabli do prostego układu'
+                : 'Brak kabli do magistrali'
               : `${label}: ${result.cableCount} kabli · ${result.groupCount} grup` +
                   (result.swappedNodes
                     ? ` · zamieniono ${result.swappedNodes}`
@@ -124,7 +127,7 @@ export const V3DensityGroupsPanel = () => {
           startIcon={<DashboardCustomizeOutlined />}
           disabled={busBusy || groupCount === 0}
           onClick={runArrange}
-          title="Hub-and-spoke: układa grupy wokół switcha po okręgach (bez nachodzenia), kąty left→top→right wg portów — proste P2P bez przecięć; dół najmniej preferowany."
+          title="Hub-and-spoke: okręgi layoutu (pad jak w algorytmie), kąty left→top→right; rezerwuje pas magistrali przy grupie i nie stawia innych grup na tej drodze."
           sx={{
             justifyContent: 'flex-start',
             textTransform: 'none',
@@ -133,6 +136,25 @@ export const V3DensityGroupsPanel = () => {
           }}
         >
           Ułóż grupy
+        </Button>
+        <Button
+          size="small"
+          variant="contained"
+          color="secondary"
+          startIcon={<ShowChartOutlined />}
+          disabled={busBusy || groupCount === 0}
+          onClick={() => {
+            return runBus('simple', 'Prosty');
+          }}
+          title="Proste linie port↔port (bez magistrali). W grupie przestawia nody wg kolejności portów, żeby było mniej przecięć."
+          sx={{
+            justifyContent: 'flex-start',
+            textTransform: 'none',
+            fontSize: 12,
+            py: 0.4
+          }}
+        >
+          Prosty z grup
         </Button>
         <Button
           size="small"

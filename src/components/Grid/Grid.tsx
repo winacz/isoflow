@@ -11,7 +11,7 @@ import {
 } from 'src/config';
 import { SizeUtils } from 'src/utils/SizeUtils';
 import { useResizeObserver } from 'src/hooks/useResizeObserver';
-import { isPlanProjection } from 'src/utils';
+import { isPlanProjection, projectionPrefsKey } from 'src/utils';
 
 type GridVisualConfig = {
   majorStepX: number;
@@ -100,14 +100,15 @@ export const Grid = () => {
   const projectionMode = useUiStateStore((state) => {
     return state.projectionMode;
   });
+  const modeKey = projectionPrefsKey(projectionMode);
   const gridStyle = useUiStateStore((state) => {
     return state.gridStyle;
   });
   const gridColor = useUiStateStore((state) => {
-    return state.canvasByMode.TWO_D.gridColor;
+    return state.canvasByMode[modeKey]?.gridColor;
   });
   const canvasTheme = useUiStateStore((state) => {
-    return state.canvasByMode.TWO_D.theme;
+    return state.canvasByMode[modeKey]?.theme ?? state.canvasByMode.TWO_D.theme;
   });
 
   const isTwoD = isPlanProjection(projectionMode);

@@ -13,7 +13,8 @@ import {
   Close as CloseIcon,
   ExpandLess,
   ExpandMore,
-  GridOffOutlined as GridOffIcon
+  GridOffOutlined as GridOffIcon,
+  Search as SearchIcon
 } from '@mui/icons-material';
 import { UiElement } from 'src/components/UiElement/UiElement';
 import { ColorWheelInput } from 'src/components/ColorSelector/ColorWheelInput';
@@ -66,7 +67,7 @@ export const BackgroundColorLab = ({ open, onClose }: Props) => {
     return state.actions.setVlan1CableColor;
   });
   const gridColor = useUiStateStore((state) => {
-    return state.canvasByMode.TWO_D.gridColor;
+    return state.canvasByMode[modeKey]?.gridColor;
   });
   const setGridColor = useUiStateStore((state) => {
     return state.actions.setGridColor;
@@ -82,6 +83,12 @@ export const BackgroundColorLab = ({ open, onClose }: Props) => {
   });
   const setShowGrid = useUiStateStore((state) => {
     return state.actions.setShowGrid;
+  });
+  const showLoupe = useUiStateStore((state) => {
+    return state.showLoupe;
+  });
+  const setShowLoupe = useUiStateStore((state) => {
+    return state.actions.setShowLoupe;
   });
   const canvasTheme = useUiStateStore((state) => {
     return state.canvasByMode[modeKey].theme;
@@ -183,23 +190,40 @@ export const BackgroundColorLab = ({ open, onClose }: Props) => {
                   justifyContent="space-between"
                 >
                   <Typography variant="caption" sx={{ fontWeight: 600 }}>
-                    Siatka
+                    Siatka i Lupa
                   </Typography>
-                  <Button
-                    size="small"
-                    startIcon={<GridOffIcon sx={{ fontSize: 14 }} />}
-                    onClick={() => {
-                      setShowGrid(!showGrid);
-                    }}
-                    sx={{
-                      textTransform: 'none',
-                      fontSize: 11,
-                      minHeight: 26,
-                      py: 0
-                    }}
-                  >
-                    {showGrid ? 'Ukryj' : 'Pokaż'}
-                  </Button>
+                  <Stack direction="row" spacing={1}>
+                    <Button
+                      size="small"
+                      startIcon={<SearchIcon sx={{ fontSize: 14 }} />}
+                      onClick={() => {
+                        setShowLoupe(!showLoupe);
+                      }}
+                      sx={{
+                        textTransform: 'none',
+                        fontSize: 11,
+                        minHeight: 26,
+                        py: 0
+                      }}
+                    >
+                      {showLoupe ? 'Lupa (Wł)' : 'Lupa (Wył)'}
+                    </Button>
+                    <Button
+                      size="small"
+                      startIcon={<GridOffIcon sx={{ fontSize: 14 }} />}
+                      onClick={() => {
+                        setShowGrid(!showGrid);
+                      }}
+                      sx={{
+                        textTransform: 'none',
+                        fontSize: 11,
+                        minHeight: 26,
+                        py: 0
+                      }}
+                    >
+                      {showGrid ? 'Siatka (Ukryj)' : 'Siatka (Pokaż)'}
+                    </Button>
+                  </Stack>
                 </Stack>
                 <ColorWheelInput
                   label="Kolor siatki"

@@ -4,7 +4,9 @@ import {
   Remove as ZoomOutIcon,
   CropFreeOutlined as FitToScreenIcon,
   GridOnOutlined as GridOnIcon,
-  GridOffOutlined as GridOffIcon
+  GridOffOutlined as GridOffIcon,
+  SearchOutlined as LoupeOnIcon,
+  SearchOffOutlined as LoupeOffIcon
 } from '@mui/icons-material';
 import { Stack, Box, Typography, Divider } from '@mui/material';
 import { toPx } from 'src/utils';
@@ -24,6 +26,9 @@ export const ZoomControls = () => {
   });
   const showGrid = useUiStateStore((state) => {
     return state.showGrid;
+  });
+  const showLoupe = useUiStateStore((state) => {
+    return state.showLoupe;
   });
   const projectionMode = useUiStateStore((state) => {
     return state.projectionMode;
@@ -76,6 +81,14 @@ export const ZoomControls = () => {
           Icon={showGrid ? <GridOnIcon /> : <GridOffIcon />}
           onClick={uiStateStoreActions.toggleShowGrid}
           isActive={showGrid}
+        />
+      </UiElement>
+      <UiElement>
+        <IconButton
+          name={showLoupe ? 'Wyłącz lupę' : 'Włącz lupę'}
+          Icon={showLoupe ? <LoupeOnIcon /> : <LoupeOffIcon />}
+          onClick={uiStateStoreActions.toggleShowLoupe}
+          isActive={showLoupe}
         />
       </UiElement>
     </Stack>
