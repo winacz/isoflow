@@ -686,6 +686,71 @@ describe('arrangeDensityGroups hub-and-spoke', () => {
     expect(circleHitsSpokeCorridor(outer.circle, innerSpoke)).toBe(false);
   });
 
+  test('second arrange is a no-op after the first converges', () => {
+    const items = [
+      { id: 'a1', tile: { x: 0, y: 0 } },
+      { id: 'a2', tile: { x: w, y: 0 } },
+      { id: 'b1', tile: { x: 0, y: h + 8 } },
+      { id: 'b2', tile: { x: w, y: h + 8 } },
+      { id: 'sw', tile: { x: w * 2 + 40, y: 30 } }
+    ];
+    const modelItems = [
+      { id: 'a1', icon: SHAPE_2D_PC_ID, name: 'a1' },
+      { id: 'a2', icon: SHAPE_2D_PC_ID, name: 'a2' },
+      { id: 'b1', icon: SHAPE_2D_PC_ID, name: 'b1' },
+      { id: 'b2', icon: SHAPE_2D_PC_ID, name: 'b2' },
+      { id: 'sw', icon: SHAPE_2D_SWITCH_ID, name: 'sw' }
+    ];
+    const connectors = [
+      {
+        id: 'cA1',
+        anchors: [
+          { id: '1', ref: { item: 'a1', port: 'port-1' } },
+          { id: '2', ref: { item: 'sw', port: 'port-bottom-1' } }
+        ]
+      },
+      {
+        id: 'cA2',
+        anchors: [
+          { id: '3', ref: { item: 'a2', port: 'port-1' } },
+          { id: '4', ref: { item: 'sw', port: 'port-bottom-2' } }
+        ]
+      },
+      {
+        id: 'cB1',
+        anchors: [
+          { id: '5', ref: { item: 'b1', port: 'port-1' } },
+          { id: '6', ref: { item: 'sw', port: 'port-bottom-3' } }
+        ]
+      },
+      {
+        id: 'cB2',
+        anchors: [
+          { id: '7', ref: { item: 'b2', port: 'port-1' } },
+          { id: '8', ref: { item: 'sw', port: 'port-bottom-4' } }
+        ]
+      }
+    ];
+
+    const first = arrangeDensityGroups({
+      items,
+      modelItems: modelItems as never,
+      connectors
+    });
+    expect(first.movedNodes).toBeGreaterThan(0);
+
+    const after = items.map((item) => {
+      const tile = first.targets[item.id];
+      return tile ? { ...item, tile } : item;
+    });
+    const second = arrangeDensityGroups({
+      items: after,
+      modelItems: modelItems as never,
+      connectors
+    });
+    expect(second.movedNodes).toBe(0);
+  });
+
   test('skips locked groups', () => {
     const items = [
       { id: 'a1', tile: { x: 0, y: 0 }, locked: true },

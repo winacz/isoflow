@@ -728,11 +728,13 @@ export const findClearSpokeDistance = ({
 /**
  * Place density groups in a hub-and-spoke ring around each dominant switch.
  *
- * - Sort by median switch-port key → angular order left→top→right (no bottom).
+ * - Sort by median switch-port key; angles prefer anti-uplink (or top).
  * - Reserve spoke wire capsules (group→hub) so later groups are not parked on
  *   Prosty / bus cable paths; also keep thin magistrala AABB bands.
  * - Centres sit on spokes; distance grows until circles clear peers and corridors.
  * - Members translate rigidly with the group centre.
+ * - Runs internal passes until positions stabilize so one click converges
+ *   (re-click is a no-op).
  */
 export const arrangeDensityGroups = ({
   items,
@@ -744,6 +746,65 @@ export const arrangeDensityGroups = ({
   modelItems: ModelItem[];
   connectors: LayoutConnector[];
   /** Active 2D snap step (same as place/drag — e.g. RACK cell). */
+  gridStep?: { x: number; y: number };
+}): ArrangeDensityGroupsResult => {
+  const originalTiles = new Map(
+    items.map((item) => {
+      return [item.id, { ...item.tile }] as const;
+    })
+  );
+  let workingItems = items.map((item) => {
+    return { ...item, tile: { ...item.tile } };
+  });
+  let groupCount = 0;
+
+  for (let pass = 0; pass < MAX_ARRANGE_PASSES; pass += 1) {
+    const passResult = arrangeDensityGroupsPass({
+      items: workingItems,
+      modelItems,
+      connectors,
+      gridStep
+    });
+    groupCount = passResult.groupCount;
+    if (passResult.movedNodes === 0) break;
+
+    const moved = new Map(Object.entries(passResult.targets));
+    workingItems = workingItems.map((item) => {
+      const tile = moved.get(item.id);
+      return tile ? { ...item, tile: { ...tile } } : item;
+    });
+  }
+
+  const targets: Record<string, Coords> = {};
+  workingItems.forEach((item) => {
+    const original = originalTiles.get(item.id);
+    if (
+      original &&
+      (original.x !== item.tile.x || original.y !== item.tile.y)
+    ) {
+      targets[item.id] = { ...item.tile };
+    }
+  });
+
+  return {
+    targets,
+    groupCount,
+    movedNodes: Object.keys(targets).length
+  };
+};
+
+/** How many converge passes one button click may run. */
+const MAX_ARRANGE_PASSES = 6;
+
+const arrangeDensityGroupsPass = ({
+  items,
+  modelItems,
+  connectors,
+  gridStep = { x: 1, y: 1 }
+}: {
+  items: ViewItem[];
+  modelItems: ModelItem[];
+  connectors: LayoutConnector[];
   gridStep?: { x: number; y: number };
 }): ArrangeDensityGroupsResult => {
   const groups = computeDensityGroups({
@@ -983,112 +1044,135 @@ export const arrangeDensityGroups = ({
         placedCircle: ObstacleCircle;
       } | null = null;
 
-      for (const angle of angleCandidates) {
-        let dist = hubR + entry.circle.r + GROUP_CIRCLE_GAP;
-        let lastSnapKey = '';
-        for (let guard = 0; guard <= MAX_RADIUS_PUSH; guard += 1) {
-          const rawCentre = pointOnSpoke(hub, angle, dist);
-          const { dx, dy } = snapGroupTranslation({
-            bounds: entry.bounds,
-            rawDx: rawCentre.x - entry.circle.cx,
-            rawDy: rawCentre.y - entry.circle.cy,
-            gridStep
-          });
-          const snapKey = `${dx},${dy}`;
-          if (snapKey === lastSnapKey) {
-            dist += 1;
-            continue;
+      const evaluateSeat = (
+        dx: number,
+        dy: number
+      ): typeof chosen => {
+        const placedBounds: DensityGroupBounds = {
+          x: entry.bounds.x + dx,
+          y: entry.bounds.y + dy,
+          w: entry.bounds.w,
+          h: entry.bounds.h
+        };
+        const placedCircle: ObstacleCircle = {
+          ...layoutCircleFromBounds(placedBounds, entry.memberIds.length),
+          memberIds: [...entry.memberIds]
+        };
+        const hitsCircle = obstacles.some((obs) => {
+          return circlesOverlap(placedCircle, obs);
+        });
+        const hitsCorridor = corridors.some((band) => {
+          return circleHitsCorridor(placedCircle, band);
+        });
+        const hitsSpoke = spokes.some((spoke) => {
+          return circleHitsSpokeCorridor(placedCircle, spoke);
+        });
+        const hitsBounds = [...settledBoundsList, ...placedBoundsList].some(
+          (other) => {
+            return aabbChebyshevGap(placedBounds, other) < 2;
           }
-          lastSnapKey = snapKey;
-
-          const placedBounds: DensityGroupBounds = {
-            x: entry.bounds.x + dx,
-            y: entry.bounds.y + dy,
-            w: entry.bounds.w,
-            h: entry.bounds.h
-          };
-          const placedCircle: ObstacleCircle = {
-            ...layoutCircleFromBounds(placedBounds, entry.memberIds.length),
-            memberIds: [...entry.memberIds]
-          };
-          const hitsCircle = obstacles.some((obs) => {
-            return circlesOverlap(placedCircle, obs);
-          });
-          const hitsCorridor = corridors.some((band) => {
-            return circleHitsCorridor(placedCircle, band);
-          });
-          const hitsSpoke = spokes.some((spoke) => {
-            return circleHitsSpokeCorridor(placedCircle, spoke);
-          });
-          const hitsBounds = [...settledBoundsList, ...placedBoundsList].some(
-            (other) => {
-              return aabbChebyshevGap(placedBounds, other) < 2;
-            }
-          );
-          if (hitsCircle || hitsCorridor || hitsSpoke || hitsBounds) {
-            dist += 1;
-            continue;
-          }
-
-          const groupCenter = {
-            x: placedCircle.cx,
-            y: placedCircle.cy
-          };
-          const corridor = buildBusCorridor({
-            groupBounds: placedBounds,
-            groupCenter,
-            hub,
-            hubR,
-            thickness: entry.busThickness
-          });
-          const spoke = buildSpokeCorridor({
-            groupCenter,
-            groupR: placedCircle.r,
-            hub,
-            hubR,
-            halfWidth: estimateSpokeHalfWidth(placedCircle.r, entry.cableCount)
-          });
-          // Peer circles only — the hub's own group circle always intersects
-          // the child→hub spoke end and must not reject every seat.
-          const peerCircles = [...settledCircles, ...placedCircles].filter(
-            (circle) => {
-              return !circle.memberIds.includes(switchId);
-            }
-          );
-          const corridorBlocked =
-            peerCircles.some((circle) => {
-              return (
-                circleHitsCorridor(circle, corridor) ||
-                circleHitsSpokeCorridor(circle, spoke)
-              );
-            }) ||
-            corridors.some((band) => {
-              return corridorsOverlap(corridor, band);
-            });
-          if (corridorBlocked) {
-            dist += 1;
-            continue;
-          }
-
-          chosen = {
-            dist,
-            centre: groupCenter,
-            corridor,
-            spoke,
-            dx,
-            dy,
-            placedBounds,
-            placedCircle
-          };
-          break;
+        );
+        if (hitsCircle || hitsCorridor || hitsSpoke || hitsBounds) {
+          return null;
         }
-        if (chosen) break;
+
+        const groupCenter = {
+          x: placedCircle.cx,
+          y: placedCircle.cy
+        };
+        const corridor = buildBusCorridor({
+          groupBounds: placedBounds,
+          groupCenter,
+          hub,
+          hubR,
+          thickness: entry.busThickness
+        });
+        const spoke = buildSpokeCorridor({
+          groupCenter,
+          groupR: placedCircle.r,
+          hub,
+          hubR,
+          halfWidth: estimateSpokeHalfWidth(placedCircle.r, entry.cableCount)
+        });
+        const peerCircles = [...settledCircles, ...placedCircles].filter(
+          (circle) => {
+            return !circle.memberIds.includes(switchId);
+          }
+        );
+        const corridorBlocked =
+          peerCircles.some((circle) => {
+            return (
+              circleHitsCorridor(circle, corridor) ||
+              circleHitsSpokeCorridor(circle, spoke)
+            );
+          }) ||
+          corridors.some((band) => {
+            return corridorsOverlap(corridor, band);
+          });
+        if (corridorBlocked) return null;
+
+        return {
+          dist: Math.hypot(groupCenter.x - hub.x, groupCenter.y - hub.y),
+          centre: groupCenter,
+          corridor,
+          spoke,
+          dx,
+          dy,
+          placedBounds,
+          placedCircle
+        };
+      };
+
+      // Keep current seat only when it is already clear AND near the assigned
+      // spoke — otherwise a far-but-clear start would never rearrange.
+      const angleDelta = (a: number, b: number) => {
+        let d = Math.abs(normalizeAngle0to2Pi(a) - normalizeAngle0to2Pi(b));
+        if (d > Math.PI) d = 2 * Math.PI - d;
+        return d;
+      };
+      const currentAngle = Math.atan2(
+        entry.circle.cy - hub.y,
+        entry.circle.cx - hub.x
+      );
+      const nearAssigned = angleCandidates.some((angle, index) => {
+        return index < 5 && angleDelta(currentAngle, angle) <= Math.PI / 7;
+      });
+      if (nearAssigned) {
+        chosen = evaluateSeat(0, 0);
+      }
+
+      if (!chosen) {
+        for (const angle of angleCandidates) {
+          let dist = hubR + entry.circle.r + GROUP_CIRCLE_GAP;
+          let lastSnapKey = '';
+          for (let guard = 0; guard <= MAX_RADIUS_PUSH; guard += 1) {
+            const rawCentre = pointOnSpoke(hub, angle, dist);
+            const { dx, dy } = snapGroupTranslation({
+              bounds: entry.bounds,
+              rawDx: rawCentre.x - entry.circle.cx,
+              rawDy: rawCentre.y - entry.circle.cy,
+              gridStep
+            });
+            const snapKey = `${dx},${dy}`;
+            if (snapKey === lastSnapKey) {
+              dist += 1;
+              continue;
+            }
+            lastSnapKey = snapKey;
+
+            chosen = evaluateSeat(dx, dy);
+            if (chosen) break;
+            dist += 1;
+          }
+          if (chosen) break;
+        }
       }
       if (!chosen) return;
 
       entry.memberIds.forEach((id) => {
         const item = workingById.get(id);
         if (!item) return;
+        if (chosen!.dx === 0 && chosen!.dy === 0) return;
         const next = snapTile2dToGrid(
           {
             x: item.tile.x + chosen!.dx,
