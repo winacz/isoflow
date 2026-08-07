@@ -134,10 +134,12 @@ export type SpokeCorridor = {
   halfWidth: number;
 };
 
-/** Extra tiles between non-overlapping layout circles. */
+/** Extra tiles between non-overlapping layout circles (peer groups). */
 export const GROUP_CIRCLE_GAP = 2;
-/** Hub clearance beyond the switch circumradius. */
-export const HUB_CLEARANCE_PAD = 2;
+/** Hub clearance beyond the switch circumradius (chassis only). */
+export const HUB_CLEARANCE_PAD = 1;
+/** Gap between child packing radius and hub chassis. */
+export const HUB_CHILD_GAP = 1;
 /** How far out we may push a spoke when the ring is crowded. */
 const MAX_RADIUS_PUSH = 200;
 /** Orthogonal magistrala lane pitch (tiles per cable). */
@@ -145,7 +147,16 @@ export const MAGISTRALA_LANE_PITCH = 1;
 /** Extra tiles around the estimated bus band. */
 export const MAGISTRALA_BAND_PAD = 1;
 /** Fraction of group radius used as spoke half-width (cable fan). */
-export const SPOKE_HALF_WIDTH_RADIUS_FACTOR = 0.55;
+export const SPOKE_HALF_WIDTH_RADIUS_FACTOR = 0.4;
+
+/** Density-circle radius without the visual pad — used for hub↔child proximity. */
+export const barePackingRadius = (
+  circleR: number,
+  memberCount: number
+): number => {
+  const pad = densityCirclePadForMemberCount(memberCount);
+  return Math.max(1, circleR - pad);
+};
 
 const snapTile = (tile: Coords): Coords => {
   return { x: Math.round(tile.x), y: Math.round(tile.y) };
@@ -1091,14 +1102,22 @@ const arrangeDensityGroupsPass = ({
 
     placeOrder.forEach((entry) => {
       const baseAngle = angleById.get(entry.group.id)!;
-      const obstacles: LayoutCircle[] = [
-        { cx: hub.x, cy: hub.y, r: hubR },
+      const bareR = barePackingRadius(
+        entry.circle.r,
+        entry.memberIds.length
+      );
+      // Peer groups keep full density circles; the hub itself is chassis-only
+      // so children can sit close (density rings may overlap the hub ring).
+      const peerObstacles: LayoutCircle[] = [
         ...clusterStatic,
-        ...settledCircles,
+        ...settledCircles.filter((circle) => {
+          return !circle.memberIds.includes(switchId);
+        }),
         ...placedCircles
       ];
       const corridors = [...settledCorridors, ...placedCorridors];
       const spokes = [...settledSpokes, ...placedSpokes];
+      const minHubDist = hubR + bareR + HUB_CHILD_GAP;
 
       // Dense angle samples: assigned spoke + anti-uplink fan + full compass
       // so we can pick the shortest clear seat, not just the first.
@@ -1148,7 +1167,16 @@ const arrangeDensityGroupsPass = ({
           ...layoutCircleFromBounds(placedBounds, entry.memberIds.length),
           memberIds: [...entry.memberIds]
         };
-        const hitsCircle = obstacles.some((obs) => {
+        const barePlacedR = barePackingRadius(
+          placedCircle.r,
+          entry.memberIds.length
+        );
+        const hitsHub = circlesOverlap(
+          { cx: placedCircle.cx, cy: placedCircle.cy, r: barePlacedR },
+          { cx: hub.x, cy: hub.y, r: hubR },
+          HUB_CHILD_GAP
+        );
+        const hitsPeer = peerObstacles.some((obs) => {
           return circlesOverlap(placedCircle, obs);
         });
         const hitsCorridor = corridors.some((band) => {
@@ -1158,11 +1186,18 @@ const arrangeDensityGroupsPass = ({
           return circleHitsSpokeCorridor(placedCircle, spoke);
         });
         const hitsBounds = [...settledBoundsList, ...placedBoundsList].some(
-          (other) => {
+          (other, index) => {
+            // settledBoundsList is parallel to settledCircles in push order —
+            // skip the hub group's own footprint so children can nest close.
+            const settledCount = settledBoundsList.length;
+            if (index < settledCount) {
+              const circle = settledCircles[index];
+              if (circle?.memberIds.includes(switchId)) return false;
+            }
             return aabbChebyshevGap(placedBounds, other) < 2;
           }
         );
-        if (hitsCircle || hitsCorridor || hitsSpoke || hitsBounds) {
+        if (hitsHub || hitsPeer || hitsCorridor || hitsSpoke || hitsBounds) {
           return null;
         }
 
@@ -1210,12 +1245,15 @@ const arrangeDensityGroupsPass = ({
         const parentHub = parentItem
           ? itemCenter(parentItem, iconById)
           : null;
+        const dist = Math.hypot(groupCenter.x - hub.x, groupCenter.y - hub.y);
+        // Soft pull-in: among similar cable lengths, prefer seats closer to hub.
         const score =
           cableLength +
-          parentSidePenalty({ hub, parentHub, seat: groupCenter });
+          parentSidePenalty({ hub, parentHub, seat: groupCenter }) +
+          dist * 0.35;
 
         return {
-          dist: Math.hypot(groupCenter.x - hub.x, groupCenter.y - hub.y),
+          dist,
           centre: groupCenter,
           corridor,
           spoke,
@@ -1236,7 +1274,7 @@ const arrangeDensityGroupsPass = ({
       consider(evaluateSeat(0, 0));
 
       for (const angle of angleCandidates) {
-        let dist = hubR + entry.circle.r + GROUP_CIRCLE_GAP;
+        let dist = minHubDist;
         let lastSnapKey = '';
         for (let guard = 0; guard <= MAX_RADIUS_PUSH; guard += 1) {
           const rawCentre = pointOnSpoke(hub, angle, dist);
@@ -1408,6 +1446,13 @@ const separateOverlappingGroupCircles = ({
         const circleHit = circlesOverlap(a.circle, b.circle, GROUP_CIRCLE_GAP);
         const mergeHit = aabbChebyshevGap(a.bounds, b.bounds) < 2;
         if (!circleHit && !mergeHit) continue;
+
+        // Hub group ↔ its leaf children may nest (density rings overlap); only
+        // peer groups around the same / different hubs must stay apart.
+        const hubChild =
+          a.entry.memberIds.includes(b.entry.switchId) ||
+          b.entry.memberIds.includes(a.entry.switchId);
+        if (hubChild) continue;
 
         const pushSeat = a.circle.cx >= b.circle.cx ? a : b;
         const other = pushSeat === a ? b : a;

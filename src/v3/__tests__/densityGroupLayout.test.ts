@@ -748,6 +748,68 @@ describe('arrangeDensityGroups hub-and-spoke', () => {
     expect(Math.abs(pcsCx - swCx)).toBeLessThan(50);
   });
 
+  test('child group sits close to its hub (density rings may nest)', () => {
+    const items = [
+      { id: 'floor', tile: { x: 40, y: 40 } },
+      { id: 'pc1', tile: { x: 90, y: 10 } },
+      { id: 'pc2', tile: { x: 90 + w, y: 10 } },
+      { id: 'core', tile: { x: 40, y: 90 } }
+    ];
+    const modelItems = [
+      { id: 'floor', icon: SHAPE_2D_SWITCH_ID, name: 'floor' },
+      { id: 'pc1', icon: SHAPE_2D_PC_ID, name: 'pc1' },
+      { id: 'pc2', icon: SHAPE_2D_PC_ID, name: 'pc2' },
+      { id: 'core', icon: SHAPE_2D_SWITCH_ID, name: 'core' }
+    ];
+    const connectors = [
+      {
+        id: 'cUp',
+        anchors: [
+          { id: '1', ref: { item: 'floor', port: 'port-bottom-1' } },
+          { id: '2', ref: { item: 'core', port: 'port-bottom-8' } }
+        ]
+      },
+      {
+        id: 'c1',
+        anchors: [
+          { id: '3', ref: { item: 'pc1', port: 'port-1' } },
+          { id: '4', ref: { item: 'floor', port: 'port-bottom-2' } }
+        ]
+      },
+      {
+        id: 'c2',
+        anchors: [
+          { id: '5', ref: { item: 'pc2', port: 'port-1' } },
+          { id: '6', ref: { item: 'floor', port: 'port-bottom-3' } }
+        ]
+      }
+    ];
+
+    const result = arrangeDensityGroups({
+      items,
+      modelItems: modelItems as never,
+      connectors
+    });
+    const tileOf = (id: string) => {
+      return result.targets[id] ?? items.find((item) => item.id === id)!.tile;
+    };
+    const placed = items.map((item) => {
+      return { ...item, tile: tileOf(item.id) };
+    });
+    const after = computeDensityGroups({ items: placed, modelItems });
+    const floorG = after.find((g) => g.memberIds.includes('floor'))!;
+    const pcs = after.find((g) => g.memberIds.includes('pc1'))!;
+    const dist = Math.hypot(
+      pcs.circle.cx - floorG.circle.cx,
+      pcs.circle.cy - floorG.circle.cy
+    );
+    // Chassis clearance only — must not require densityR+densityR (~25+).
+    const hubR =
+      Math.sqrt((sw.width / 2) ** 2 + (sw.height / 2) ** 2) + 1;
+    const barePcs = pcs.circle.r - densityCirclePadForMemberCount(2);
+    expect(dist).toBeLessThanOrEqual(hubR + barePcs + 6);
+  });
+
   test('second arrange is a no-op after the first converges', () => {
     const items = [
       { id: 'a1', tile: { x: 0, y: 0 } },
