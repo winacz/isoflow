@@ -16,13 +16,18 @@ import {
 
 interface Props {
   connectorId: string;
+  /** Fill the sidebar dock cell instead of the floating HUD card. */
+  embedded?: boolean;
 }
 
 /**
- * Fixed HUD panel (bottom-left) showing cable endpoints + VLAN while selected.
+ * Cable endpoints + VLAN while a connector is selected.
  * Endpoints are clickable — zoom/center on that port and open its device panel.
  */
-export const ConnectorRelationPanel = ({ connectorId }: Props) => {
+export const ConnectorRelationPanel = ({
+  connectorId,
+  embedded = false
+}: Props) => {
   const connector = useConnector(connectorId);
   const { items: viewItems, connectors: sceneConnectors } = useScene();
   const modelItems = useModelStore((state) => {
@@ -82,10 +87,26 @@ export const ConnectorRelationPanel = ({ connectorId }: Props) => {
   return (
     <UiElement
       sx={{
-        minWidth: 260,
-        maxWidth: 340,
-        px: 1.75,
-        py: 1.5,
+        ...(embedded
+          ? {
+              width: '100%',
+              height: '100%',
+              minWidth: 0,
+              maxWidth: 'none',
+              borderRadius: 0,
+              boxShadow: 'none',
+              display: 'flex',
+              flexDirection: 'column',
+              overflow: 'auto',
+              overscrollBehavior: 'contain',
+              '&::-webkit-scrollbar': { display: 'none' }
+            }
+          : {
+              minWidth: 260,
+              maxWidth: 340
+            }),
+        px: embedded ? 1.5 : 1.75,
+        py: embedded ? 1.25 : 1.5,
         boxSizing: 'border-box',
         border: isMismatchLink ? '2px solid' : undefined,
         borderColor: isMismatchLink ? TRUNK_MISMATCH_COLOR : undefined

@@ -23,7 +23,7 @@ import { SviHoverController } from 'src/components/UiOverlay/SviHoverController'
 import { WorkshopView } from 'src/components/Workshop/WorkshopView';
 import { ExportImageDialog } from '../ExportImageDialog/ExportImageDialog';
 import { useScene } from 'src/hooks/useScene';
-import { isPlanProjection } from 'src/utils';
+import { isPlanProjection, isPlan2dCanvas } from 'src/utils';
 
 const findConnectorIdForPort = (
   connectors: { id: string; anchors: { ref: { item?: string; port?: string } }[] }[],
@@ -123,7 +123,6 @@ export const UiOverlay = () => {
   const { connectors } = useScene();
   const { size: rendererSize } = useResizeObserver(rendererEl);
   const isTwoD = isPlanProjection(projectionMode);
-  const isClassic2d = projectionMode === 'TWO_D';
   // In the 2D plan the dock always has content: with nothing selected it shows
   // a short hint (layout tools are on the RMB context menu).
   const hasItemControlsContent = Boolean(itemControls) || isTwoD;
@@ -132,11 +131,11 @@ export const UiOverlay = () => {
     if (itemControls?.type === 'CONNECTOR') {
       return itemControls.id;
     }
-    if (mode.type === 'CONNECTOR') {
+    if (mode.type === 'CONNECTOR' || mode.type === 'CONNECTOR_V3') {
       return mode.id;
     }
     if (
-      isClassic2d &&
+      isPlan2dCanvas(projectionMode) &&
       itemControls?.type === 'ITEM' &&
       focusedPortIds.length > 0
     ) {
@@ -153,7 +152,7 @@ export const UiOverlay = () => {
   }, [
     itemControls,
     mode,
-    isClassic2d,
+    projectionMode,
     focusedPortIds,
     connectors
   ]);
@@ -254,11 +253,11 @@ export const UiOverlay = () => {
                     opacity: 0.85
                   }}
                 />
-                {/* Only this pane scrolls — port scroll-into-view targets it */}
+                {/* ~70% context / item controls */}
                 <Box
                   data-item-controls-scroll
                   sx={{
-                    flex: 1,
+                    flex: '7 1 0%',
                     minHeight: 0,
                     width: '100%',
                     overflowY: 'auto',
@@ -300,6 +299,59 @@ export const UiOverlay = () => {
                     </Box>
                   )}
                 </Box>
+                {/* ~30% cable relation tile */}
+                <Box
+                  aria-hidden
+                  sx={{
+                    flexShrink: 0,
+                    height: 3,
+                    bgcolor: 'grey.800',
+                    opacity: 0.85
+                  }}
+                />
+                <Box
+                  sx={{
+                    flex: '3 1 0%',
+                    minHeight: 0,
+                    width: '100%',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    bgcolor: 'background.paper',
+                    overflow: 'hidden'
+                  }}
+                >
+                  {selectedConnectorId ? (
+                    <ConnectorRelationPanel
+                      connectorId={selectedConnectorId}
+                      embedded
+                    />
+                  ) : (
+                    <Box sx={{ px: 1.5, py: 1.5 }}>
+                      <Typography
+                        sx={{
+                          fontSize: 11,
+                          fontWeight: 700,
+                          letterSpacing: 0.55,
+                          color: 'text.secondary',
+                          textTransform: 'uppercase',
+                          mb: 0.75
+                        }}
+                      >
+                        Połączenie
+                      </Typography>
+                      <Typography
+                        sx={{
+                          fontSize: 13,
+                          color: 'text.secondary',
+                          lineHeight: 1.45
+                        }}
+                      >
+                        Wybierz kabel lub port z połączeniem, aby zobaczyć
+                        relację.
+                      </Typography>
+                    </Box>
+                  )}
+                </Box>
               </UiElement>
             ) : (
               <Box
@@ -331,6 +383,11 @@ export const UiOverlay = () => {
                     <ChevronLeftIcon fontSize="small" />
                   </IconButton>
                 </UiElement>
+                {selectedConnectorId && (
+                  <Box sx={{ maxWidth: itemControlsWidth }}>
+                    <ConnectorRelationPanel connectorId={selectedConnectorId} />
+                  </Box>
+                )}
               </Box>
             )}
           </>
@@ -395,24 +452,6 @@ export const UiOverlay = () => {
             <ZoomControls />
           </Box>
         )}
-
-        {/* Bottom-left: cable relation while a connector is selected */}
-        {availableTools.includes('ZOOM_CONTROLS') &&
-          !isWorkshopOpen &&
-          isClassic2d &&
-          selectedConnectorId && (
-            <Box
-              sx={{
-                position: 'absolute'
-              }}
-              style={{
-                left: appPadding.x,
-                top: rendererSize.height - appPadding.y * 2 - spacing(28)
-              }}
-            >
-              <ConnectorRelationPanel connectorId={selectedConnectorId} />
-            </Box>
-          )}
 
         {/* Density group tools: RMB context menu (2D v3) */}
 

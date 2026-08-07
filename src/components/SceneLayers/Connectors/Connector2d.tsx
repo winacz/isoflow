@@ -107,6 +107,17 @@ export const Connector2d = memo(({
       });
   }, [connector.anchors]);
 
+  const endpointPorts = useMemo(() => {
+    return connector.anchors
+      .map((anchor) => {
+        if (anchor.ref.item && anchor.ref.port) {
+          return { itemId: anchor.ref.item, portId: anchor.ref.port };
+        }
+        return null;
+      })
+      .filter((p): p is { itemId: string; portId: string } => Boolean(p));
+  }, [connector.anchors]);
+
   // Fingerprint of live drag tiles that affect this cable — avoids model writes.
   const liveDragKey = useNodeDragStore((state) => {
     let key = '';
@@ -197,10 +208,9 @@ export const Connector2d = memo(({
       tiles: globalTiles,
       items,
       modelItems,
-      endpointItemIds,
       fadeCabinetRect
     });
-  }, [globalTiles, items, modelItems, endpointItemIds, softDim]);
+  }, [globalTiles, items, modelItems, endpointItemIds, endpointPorts, softDim]);
 
   const anchorPositions = useMemo(() => {
     if (!isSelected) return [];

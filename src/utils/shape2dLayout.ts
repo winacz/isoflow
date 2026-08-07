@@ -2087,9 +2087,17 @@ export const diagonalFanShape2dRoutes = ({
     /**
      * Leaves stacked in one column share port.x — without a sideways jog their
      * vertical drops paint on top of each other (top cable runs through the
-     * device below). Closest-to-hub keeps port.x; farther leaves fan ±1, ±2…
+     * device below). Closest-to-hub keeps port.x; farther leaves fan along the
+     * horizontal travel toward the hub so the bend into the diagonal does not
+     * cross:
+     *   hub LEFT of leaves  → farther leaves exit −X (left), then turn left
+     *   hub RIGHT of leaves → farther leaves exit +X (right), then turn right
+     * (The opposite sign put top cables on the inside and forced a cross.)
      */
     const approachXByConnector = new Map<string, number>();
+    // Horizontal direction from the leaf cluster toward the hub (= exit side).
+    const towardHubX =
+      Math.sign(hubCenter.x - leafCx) || (sx === 0 ? -1 : -sx);
     {
       const byCol = new Map<number, FanCable[]>();
       ordered.forEach((cable) => {
@@ -2103,15 +2111,12 @@ export const diagonalFanShape2dRoutes = ({
         const ranked = [...colCables].sort((a, b) => {
           return laneDirY * (b.leafPort.y - a.leafPort.y);
         });
+        // Per-column: prefer hub relative to this column when cluster mean is ambiguous.
+        const colTowardHub =
+          Math.sign(hubCenter.x - colX) || towardHubX;
         ranked.forEach((cable, rank) => {
-          const offset =
-            rank === 0
-              ? 0
-              : Math.ceil(rank / 2) * (rank % 2 === 1 ? 1 : -1);
-          approachXByConnector.set(
-            cable.connectorId,
-            colX + offset
-          );
+          const offset = rank * colTowardHub;
+          approachXByConnector.set(cable.connectorId, colX + offset);
         });
       });
     }
@@ -2243,8 +2248,11 @@ export const diagonalFanShape2dRoutes = ({
           }
         }
         if (!cleared) {
+          // Prefer fanning further toward the hub (same side as the stagger).
+          const bumpSigns =
+            towardHubX >= 0 ? ([1, -1] as const) : ([-1, 1] as const);
           for (let dx = 1; dx <= group.length + 8 && !cleared; dx += 1) {
-            for (const sign of [1, -1] as const) {
+            for (const sign of bumpSigns) {
               const candidate = buildLaneRoute(
                 cable,
                 orderIndex,

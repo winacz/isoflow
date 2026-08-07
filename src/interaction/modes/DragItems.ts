@@ -1367,36 +1367,42 @@ export const DragItems: ModeActions = {
           return !CoordsUtils.isEqual(origin, next);
         });
 
-        // Rebuild final A* for cables attached to moved nodes only.
-        // Do NOT run Test/Porządkuj here — that freezes/crashes the tab.
+        // 2D v3: same Test fan (+ untangle) as the context-menu button.
+        // Classic 2D: cheap A* rebuild of existing anchors only.
         if (didMove) {
-          const freshView = model.actions.get().views.find((candidate) => {
-            return candidate.id === uiState.view;
-          });
-          const freshConnectors = freshView?.connectors ?? scene.connectors;
-          const touched = new Set<string>();
-          draggedIds.forEach((id) => {
-            freshConnectors.forEach((connector) => {
-              if (
-                connector.anchors.some((anchor) => {
-                  return anchor.ref.item === id;
-                })
-              ) {
-                touched.add(connector.id);
-              }
+          if (uiState.projectionMode === 'TWO_D_V3') {
+            scene.routeTestFanForDensityGroups({
+              onlyItemIds: draggedIds
             });
-          });
-          touched.forEach((connectorId) => {
-            const connector = freshConnectors.find((candidate) => {
-              return candidate.id === connectorId;
+          } else {
+            const freshView = model.actions.get().views.find((candidate) => {
+              return candidate.id === uiState.view;
             });
-            if (!connector) return;
-            scene.updateConnector(
-              connectorId,
-              { anchors: connector.anchors },
-              { overlapResolve: 'off' }
-            );
-          });
+            const freshConnectors = freshView?.connectors ?? scene.connectors;
+            const touched = new Set<string>();
+            draggedIds.forEach((id) => {
+              freshConnectors.forEach((connector) => {
+                if (
+                  connector.anchors.some((anchor) => {
+                    return anchor.ref.item === id;
+                  })
+                ) {
+                  touched.add(connector.id);
+                }
+              });
+            });
+            touched.forEach((connectorId) => {
+              const connector = freshConnectors.find((candidate) => {
+                return candidate.id === connectorId;
+              });
+              if (!connector) return;
+              scene.updateConnector(
+                connectorId,
+                { anchors: connector.anchors },
+                { overlapResolve: 'off' }
+              );
+            });
+          }
         }
       } else {
         const touched = new Set<string>();

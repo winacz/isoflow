@@ -1227,6 +1227,25 @@ describe('routeDensityGroupBuses', () => {
     expect(sideA).toBe(sideB);
   });
 
+  test('resolveOverlaps: when bus is left of port, fan prefers left (no forced right jog)', () => {
+    // Shared drop column; bus sits to the left — untangle must not jog right into a cross.
+    const routes = {
+      upper: [
+        { x: 0, y: 1 },
+        { x: 10, y: 1 },
+        { x: 10, y: 3 }
+      ],
+      lower: [
+        { x: 0, y: 0 },
+        { x: 10, y: 0 },
+        { x: 10, y: 14 }
+      ]
+    };
+    const out = resolveOverlapsWithTargetDiagonal(routes);
+    const side = diagonalExitSideSign(out.lower);
+    expect(side).toBe(-1);
+  });
+
   test('resolveOverlaps: diagonal into the port stays ≤ TARGET_DIAG_STUB_TILES', () => {
     // Pack nearby approach columns so the old search would walk out to a long 45°.
     const routes: Record<string, { x: number; y: number }[]> = {

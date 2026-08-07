@@ -526,6 +526,7 @@ export const useScene = () => {
   /**
    * "Mój algorytm": diagonal fan from switch/hub toward selected leaves,
    * nearest-to-diagonal first, no shared grid edges between cables.
+   * Ends with the same Y/X untangle pass as context-menu Test.
    */
   const routeDiagonalFanForItems = useCallback(
     (ids: string[]) => {
@@ -539,18 +540,20 @@ export const useScene = () => {
 
       if (selectedItems.length === 0) return;
 
-      const routes = diagonalFanShape2dRoutes({
+      const fanRoutes = diagonalFanShape2dRoutes({
         selectedItems,
         allItems: view.items ?? [],
         modelItems: state.model.items,
         connectors: view.connectors ?? []
       });
+      const routes = resolveOverlapsWithTargetDiagonal(fanRoutes);
 
       if (Object.keys(routes).length === 0) return;
 
       beginHistoryTransaction();
 
       Object.entries(routes).forEach(([connectorId, tiles]) => {
+        if (!tiles || tiles.length === 0) return;
         const connector = (view.connectors ?? []).find((candidate) => {
           return candidate.id === connectorId;
         });
@@ -693,9 +696,140 @@ export const useScene = () => {
   );
 
   /**
-   * 2D v3 "Test": same tidy + diagonal-fan pipeline as classic MultiNode
-   * Controls, applied per density group (no selection required).
-   * After all groups route, separate cables that share a bus Y.
+   * 2D v3 Test routing only (diagonal-fan + overlap untangle) — keeps node
+   * positions. Used after drag and as the second half of the Test button.
+   * When `onlyItemIds` is set, only density groups touching those ids (plus
+   * ungrouped ids) are re-routed.
+   */
+  const routeTestFanForDensityGroups = useCallback(
+    (options?: { onlyItemIds?: string[]; skipHistory?: boolean }) => {
+      const state = getState();
+      const view = getItemByIdOrThrow(state.model.views, currentViewId).value;
+      const viewItems = view.items ?? [];
+      if (viewItems.length === 0) {
+        return { groupCount: 0, cableCount: 0 };
+      }
+
+      const groups = computeDensityGroups({
+        items: viewItems,
+        modelItems: state.model.items
+      });
+      const only = options?.onlyItemIds
+        ? new Set(options.onlyItemIds)
+        : null;
+
+      const collectedRoutes: Record<string, Coords[]> = {};
+      let groupsRouted = 0;
+
+      const fanForIds = (ids: string[]) => {
+        if (ids.length === 0) return;
+        const live = getState();
+        const liveView = getItemByIdOrThrow(
+          live.model.views,
+          currentViewId
+        ).value;
+        const selectedItems = (liveView.items ?? []).filter((item) => {
+          return ids.includes(item.id);
+        });
+        if (selectedItems.length === 0) return;
+
+        const routes = diagonalFanShape2dRoutes({
+          selectedItems,
+          allItems: liveView.items ?? [],
+          modelItems: live.model.items,
+          connectors: liveView.connectors ?? []
+        });
+        Object.assign(collectedRoutes, routes);
+      };
+
+      if (groups.length === 0) {
+        if (only) fanForIds([...only]);
+      } else {
+        groups.forEach((group) => {
+          if (only && !group.memberIds.some((id) => only.has(id))) return;
+          groupsRouted += 1;
+          fanForIds(group.memberIds);
+        });
+        if (only) {
+          const inGroup = new Set(
+            groups.flatMap((group) => {
+              return group.memberIds;
+            })
+          );
+          const orphans = [...only].filter((id) => {
+            return !inGroup.has(id);
+          });
+          if (orphans.length > 0) fanForIds(orphans);
+        }
+      }
+
+      if (Object.keys(collectedRoutes).length === 0) {
+        return { groupCount: groupsRouted, cableCount: 0 };
+      }
+
+      const resolvedRoutes = resolveOverlapsWithTargetDiagonal(collectedRoutes);
+      const finalState = getState();
+      const finalView = getItemByIdOrThrow(
+        finalState.model.views,
+        currentViewId
+      ).value;
+
+      if (!options?.skipHistory) {
+        beginHistoryTransaction();
+      }
+
+      Object.entries(resolvedRoutes).forEach(([connectorId, routeTiles]) => {
+        if (!routeTiles || routeTiles.length === 0) return;
+        const connector = (finalView.connectors ?? []).find((candidate) => {
+          return candidate.id === connectorId;
+        });
+        if (!connector) return;
+
+        const endpointAnchors = connector.anchors.filter((anchor) => {
+          return Boolean(anchor.ref.item);
+        });
+        if (endpointAnchors.length < 2) return;
+
+        const anchors = [
+          endpointAnchors[0],
+          ...routeTiles.map((tile) => {
+            return { id: generateId(), ref: { tile } };
+          }),
+          endpointAnchors[endpointAnchors.length - 1]
+        ];
+
+        const newState = reducers.view({
+          action: 'UPDATE_CONNECTOR',
+          payload: {
+            id: connectorId,
+            anchors,
+            overlapResolve: 'off'
+          },
+          ctx: { viewId: currentViewId, state: getState() }
+        });
+        setState(newState, { skipHistory: true });
+      });
+
+      if (!options?.skipHistory) {
+        endHistoryTransaction();
+      }
+
+      return {
+        groupCount: groupsRouted,
+        cableCount: Object.keys(resolvedRoutes).length
+      };
+    },
+    [
+      beginHistoryTransaction,
+      endHistoryTransaction,
+      getState,
+      setState,
+      currentViewId
+    ]
+  );
+
+  /**
+   * 2D v3 "Test": tidy per density group, then diagonal-fan + untangle.
    */
   const runTestLayoutForDensityGroups = useCallback(() => {
     const state = getState();
@@ -715,94 +849,35 @@ export const useScene = () => {
 
     beginHistoryTransaction();
 
-    const collectedRoutes: Record<string, Coords[]> = {};
-
     groups.forEach((group) => {
       const ids = group.memberIds;
-      if (ids.length === 0) return;
+      if (ids.length < 2) return;
 
       const live = getState();
       const liveView = getItemByIdOrThrow(live.model.views, currentViewId).value;
       const selectedItems = (liveView.items ?? []).filter((item) => {
         return ids.includes(item.id);
       });
-      if (selectedItems.length === 0) return;
+      if (selectedItems.length < 2) return;
 
-      if (selectedItems.length >= 2) {
-        const targets = tidyShape2dItems({
-          selectedItems,
-          allItems: liveView.items ?? [],
-          modelItems: live.model.items,
-          connectors: liveView.connectors ?? []
-        });
-
-        Object.entries(targets).forEach(([id, tile]) => {
-          const newState = reducers.view({
-            action: 'UPDATE_VIEWITEM',
-            payload: { id, tile, skipConnectorSync: true },
-            ctx: { viewId: currentViewId, state: getState() }
-          });
-          setState(newState, { skipHistory: true });
-        });
-      }
-
-      const afterTidy = getState();
-      const viewAfterTidy = getItemByIdOrThrow(
-        afterTidy.model.views,
-        currentViewId
-      ).value;
-      const selectedAfterTidy = (viewAfterTidy.items ?? []).filter((item) => {
-        return ids.includes(item.id);
+      const targets = tidyShape2dItems({
+        selectedItems,
+        allItems: liveView.items ?? [],
+        modelItems: live.model.items,
+        connectors: liveView.connectors ?? []
       });
-      if (selectedAfterTidy.length === 0) return;
 
-      const routes = diagonalFanShape2dRoutes({
-        selectedItems: selectedAfterTidy,
-        allItems: viewAfterTidy.items ?? [],
-        modelItems: afterTidy.model.items,
-        connectors: viewAfterTidy.connectors ?? []
+      Object.entries(targets).forEach(([id, tile]) => {
+        const newState = reducers.view({
+          action: 'UPDATE_VIEWITEM',
+          payload: { id, tile, skipConnectorSync: true },
+          ctx: { viewId: currentViewId, state: getState() }
+        });
+        setState(newState, { skipHistory: true });
       });
-      Object.assign(collectedRoutes, routes);
     });
 
-    const resolvedRoutes = resolveOverlapsWithTargetDiagonal(collectedRoutes);
-    const finalState = getState();
-    const finalView = getItemByIdOrThrow(
-      finalState.model.views,
-      currentViewId
-    ).value;
-
-    Object.entries(resolvedRoutes).forEach(([connectorId, routeTiles]) => {
-      const connector = (finalView.connectors ?? []).find((candidate) => {
-        return candidate.id === connectorId;
-      });
-      if (!connector) return;
-
-      const endpointAnchors = connector.anchors.filter((anchor) => {
-        return Boolean(anchor.ref.item);
-      });
-      if (endpointAnchors.length < 2) return;
-
-      const anchors = [
-        endpointAnchors[0],
-        ...routeTiles.map((tile) => {
-          return { id: generateId(), ref: { tile } };
-        }),
-        endpointAnchors[endpointAnchors.length - 1]
-      ];
-
-      const newState = reducers.view({
-        action: 'UPDATE_CONNECTOR',
-        payload: {
-          id: connectorId,
-          anchors,
-          overlapResolve: 'off'
-        },
-        ctx: { viewId: currentViewId, state: getState() }
-      });
-      setState(newState, { skipHistory: true });
-    });
-
+    routeTestFanForDensityGroups({ skipHistory: true });
     endHistoryTransaction();
     return { groupCount: groups.length };
   }, [
@@ -810,7 +885,8 @@ export const useScene = () => {
     endHistoryTransaction,
     getState,
     setState,
-    currentViewId
+    currentViewId,
+    routeTestFanForDensityGroups
   ]);
 
   const runSmartLayoutForItems = useCallback(
@@ -1603,6 +1679,7 @@ export const useScene = () => {
       routeDiagonalFanForItems,
       runTestLayoutForItems,
       runTestLayoutForDensityGroups,
+      routeTestFanForDensityGroups,
       runSmartLayoutForItems,
       runSmartLayout2ForItems,
       runAutoLayoutForItems,
@@ -1651,6 +1728,7 @@ export const useScene = () => {
       routeDiagonalFanForItems,
       runTestLayoutForItems,
       runTestLayoutForDensityGroups,
+      routeTestFanForDensityGroups,
       runSmartLayoutForItems,
       runSmartLayout2ForItems,
       runAutoLayoutForItems,

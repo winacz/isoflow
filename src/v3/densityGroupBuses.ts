@@ -486,13 +486,45 @@ export const diagonalExitSideSign = (path: Coords[]): number | null => {
 };
 
 /**
+ * Which way the cable already leaves the target port horizontally
+ * (toward the bus). Used so untangle fans keep that side instead of
+ * defaulting to the right and forcing a cross.
+ */
+export const inferPortExitSign = (path: Coords[]): 1 | -1 => {
+  if (path.length < 2) return -1;
+  const port = targetPortOf(path);
+  for (let i = path.length - 2; i >= 0; i -= 1) {
+    const dx = Math.sign(path[i].x - port.x);
+    if (dx !== 0) return dx > 0 ? 1 : -1;
+  }
+  const busY = longestHorizontalY(path);
+  if (busY !== null) {
+    let x0 = Infinity;
+    let x1 = -Infinity;
+    for (let i = 1; i < path.length; i += 1) {
+      if (path[i].y !== busY || path[i - 1].y !== busY) continue;
+      x0 = Math.min(x0, path[i].x, path[i - 1].x);
+      x1 = Math.max(x1, path[i].x, path[i - 1].x);
+    }
+    if (x0 !== Infinity) {
+      const mid = (x0 + x1) / 2;
+      const dx = Math.sign(mid - port.x);
+      if (dx !== 0) return dx > 0 ? 1 : -1;
+    }
+  }
+  return -1;
+};
+
+/**
  * Prefer the side that already has diagonal exits (same chassis row first),
  * so stacked-switch fans share one direction instead of a left/right V.
+ * When nothing exists yet, keep the victim's own travel side (not a hard-coded right).
  */
 const preferredDiagonalSigns = (
   routes: Record<string, Coords[]>,
   excludeId: string,
-  portY: number
+  portY: number,
+  victimPath: Coords[]
 ): Array<1 | -1> => {
   const tally = (sameRowOnly: boolean): { right: number; left: number } => {
     let right = 0;
@@ -516,7 +548,9 @@ const preferredDiagonalSigns = (
     ({ right, left } = tally(false));
   }
   if (left > right) return [-1, 1];
-  return [1, -1];
+  if (right > left) return [1, -1];
+  const inferred = inferPortExitSign(victimPath);
+  return inferred > 0 ? [1, -1] : [-1, 1];
 };
 
 /**
@@ -583,7 +617,7 @@ export const resolveOverlapsWithTargetDiagonal = (
 
         if (conflict.axis === 'x') {
           const occupiedXs = collectOccupiedApproachXs(next, victimId);
-          const signs = preferredDiagonalSigns(next, victimId, port.y);
+          const signs = preferredDiagonalSigns(next, victimId, port.y, victim);
           // Preferred side first (keeps fans from forming a V), smallest
           // offset next. Diagonal stub is always ≤ TARGET_DIAG_STUB_TILES.
           for (const sign of signs) {

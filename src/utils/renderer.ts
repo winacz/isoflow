@@ -456,26 +456,18 @@ export const splitConnectorPathByNodeBodies = ({
   tiles,
   items,
   modelItems,
-  endpointItemIds,
   fadeCabinetRect
 }: {
   tiles: Coords[];
   items: { id: string; tile: Coords }[];
   modelItems: { id: string; icon?: string }[];
-  /** Connector's own nodes — cable over these stays solid. */
-  endpointItemIds?: Iterable<string>;
   /** Cabinet AABB — segments inside get throughCabinet styling. */
   fadeCabinetRect?: Shape2dRect | null;
 }): ConnectorPathStyleRun[] => {
   if (tiles.length === 0) return [];
 
   const modelItemMap = new Map(modelItems.map(i => [i.id, i]));
-  const excludedSet = endpointItemIds ? new Set(endpointItemIds) : null;
-  const foreignItems = excludedSet 
-    ? items.filter((item) => !excludedSet.has(item.id))
-    : items;
-  const excludedArr = endpointItemIds ? [...endpointItemIds] : [];
-  const rects = getShape2dRects(foreignItems, undefined, modelItemMap);
+  const rects = getShape2dRects(items, undefined, modelItemMap);
 
   type RunKind = 'solid' | 'node' | 'cabinet';
   const kindOf = (tile: Coords): RunKind => {
@@ -487,8 +479,7 @@ export const splitConnectorPathByNodeBodies = ({
       isTileOnAnyShape2dBody({
         tile,
         items,
-        modelItemMap,
-        excludeItemIds: excludedArr
+        modelItemMap
       })
     ) {
       return 'node';
@@ -534,7 +525,7 @@ export const splitConnectorPathByNodeBodies = ({
     const prevCenter = tileCenter(tiles[i - 1]);
     const nextCenter = tileCenter(tiles[i]);
 
-    // Both outside nodes/cabinet — chord may still tunnel a foreign body.
+    // Both outside nodes/cabinet — chord may still tunnel a body.
     if (prevKind === 'solid' && nextKind === 'solid' && rects.length > 0) {
       const edges = segmentTunnelEdges(prevCenter, nextCenter, rects);
       if (edges.length >= 2) {
