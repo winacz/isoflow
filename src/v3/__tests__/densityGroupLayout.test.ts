@@ -498,6 +498,85 @@ describe('arrangeDensityGroups hub-and-spoke', () => {
     );
   });
 
+  test('PC group around leaf switch sits opposite the uplink (above FLOOR)', () => {
+    // Mirrors the screenshot: CORE below, FLOOR leaf, PC-MTG under FLOOR today.
+    // After arrange, PCs must sit on the anti-uplink side (above FLOOR) so
+    // FLOOR→CORE and PC→FLOOR cables do not weave.
+    const items = [
+      { id: 'floor', tile: { x: 40, y: 30 } },
+      { id: 'pc1', tile: { x: 55, y: 70 } },
+      { id: 'pc2', tile: { x: 55 + w, y: 70 } },
+      { id: 'labSw', tile: { x: 90, y: 40 } },
+      { id: 'labPc', tile: { x: 90 + sw.width + 2, y: 40 } },
+      { id: 'core', tile: { x: 50, y: 90 } }
+    ];
+    const modelItems = [
+      { id: 'floor', icon: SHAPE_2D_SWITCH_ID, name: 'floor' },
+      { id: 'pc1', icon: SHAPE_2D_PC_ID, name: 'pc1' },
+      { id: 'pc2', icon: SHAPE_2D_PC_ID, name: 'pc2' },
+      { id: 'labSw', icon: SHAPE_2D_SWITCH_ID, name: 'labSw' },
+      { id: 'labPc', icon: SHAPE_2D_PC_ID, name: 'labPc' },
+      { id: 'core', icon: SHAPE_2D_SWITCH_ID, name: 'core' }
+    ];
+    const connectors = [
+      {
+        id: 'cFloorCore',
+        anchors: [
+          { id: '1', ref: { item: 'floor', port: 'port-bottom-1' } },
+          { id: '2', ref: { item: 'core', port: 'port-bottom-8' } }
+        ]
+      },
+      {
+        id: 'cPc1',
+        anchors: [
+          { id: '3', ref: { item: 'pc1', port: 'port-1' } },
+          { id: '4', ref: { item: 'floor', port: 'port-bottom-2' } }
+        ]
+      },
+      {
+        id: 'cPc2',
+        anchors: [
+          { id: '5', ref: { item: 'pc2', port: 'port-1' } },
+          { id: '6', ref: { item: 'floor', port: 'port-bottom-3' } }
+        ]
+      },
+      {
+        id: 'cLab',
+        anchors: [
+          { id: '7', ref: { item: 'labSw', port: 'port-bottom-1' } },
+          { id: '8', ref: { item: 'core', port: 'port-bottom-4' } }
+        ]
+      },
+      {
+        id: 'cLabPc',
+        anchors: [
+          { id: '9', ref: { item: 'labPc', port: 'port-1' } },
+          { id: '10', ref: { item: 'labSw', port: 'port-bottom-2' } }
+        ]
+      }
+    ];
+
+    const result = arrangeDensityGroups({
+      items,
+      modelItems: modelItems as never,
+      connectors
+    });
+    expect(result.groupCount).toBeGreaterThanOrEqual(2);
+
+    const tileOf = (id: string) => {
+      return result.targets[id] ?? items.find((item) => item.id === id)!.tile;
+    };
+    // CORE must stay put (hub); FLOOR is the movable leaf — never invert.
+    expect(result.targets.core).toBeUndefined();
+    expect(result.targets.floor).toBeTruthy();
+    expect(result.targets.pc1 || result.targets.pc2).toBeTruthy();
+
+    const floorY = tileOf('floor').y;
+    const pcsY = (tileOf('pc1').y + tileOf('pc2').y) / 2;
+    // Screen Y grows downward — "above FLOOR" means smaller Y than FLOOR.
+    expect(pcsY).toBeLessThan(floorY);
+  });
+
   test('inner group is not left on outer group wire path to hub', () => {
     // Outer 4-node cluster + small 2-node cluster start co-linear with the hub
     // (same Y). After arrange, neither circle may sit on the other's spoke.

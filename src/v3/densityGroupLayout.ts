@@ -63,6 +63,30 @@ const connectorDegree = (
   return n;
 };
 
+/**
+ * How many switch↔switch cables touch this node. Access leaves often have
+ * high total degree (many PCs) but only one uplink; core has more switch peers.
+ */
+const switchPeerDegree = (
+  itemId: string,
+  connectors: LayoutConnector[],
+  iconById: Map<string, string | undefined>
+): number => {
+  let n = 0;
+  connectors.forEach((connector) => {
+    const ends = connector.anchors.filter((anchor) => {
+      return Boolean(anchor.ref.item);
+    });
+    if (ends.length < 2) return;
+    const a = ends[0].ref.item!;
+    const b = ends[ends.length - 1].ref.item!;
+    if (a !== itemId && b !== itemId) return;
+    const other = a === itemId ? b : a;
+    if (isSwitchLikeIcon(iconById.get(other))) n += 1;
+  });
+  return n;
+};
+
 export type LayoutCircle = {
   cx: number;
   cy: number;
@@ -432,6 +456,42 @@ export const spokeAngleForIndex = (
   return Math.PI + ((index + 0.5) / count) * Math.PI;
 };
 
+/** Angle from `hub` pointing away from `parent` (anti-uplink). */
+export const spokeAngleAwayFromParent = (
+  hub: Coords,
+  parent: Coords
+): number => {
+  return Math.atan2(hub.y - parent.y, hub.x - parent.x);
+};
+
+const normalizeAngle0to2Pi = (angle: number): number => {
+  let a = angle % (2 * Math.PI);
+  if (a < 0) a += 2 * Math.PI;
+  return a;
+};
+
+/**
+ * Port-ordered spoke angles centered on `prefer` (anti-uplink or top),
+ * spread across a half-turn so children stay off the parent cable.
+ */
+export const spokeAnglesAroundPrefer = ({
+  count,
+  prefer
+}: {
+  count: number;
+  prefer: number;
+}): number[] => {
+  if (count <= 0) return [];
+  if (count === 1) return [normalizeAngle0to2Pi(prefer)];
+  const spread = Math.PI;
+  const angles: number[] = [];
+  for (let i = 0; i < count; i += 1) {
+    const t = (i + 0.5) / count;
+    angles.push(normalizeAngle0to2Pi(prefer - spread / 2 + t * spread));
+  }
+  return angles;
+};
+
 export const pointOnSpoke = (
   hub: Coords,
   angle: number,
@@ -546,16 +606,21 @@ const collectGroupTargetLinks = ({
       leafAnchor = firstSwitch ? last : first;
     } else if (firstSwitch && lastSwitch) {
       // Switch ↔ switch: inside group is leaf only when the outside switch is
-      // the higher-degree hub (e.g. SW-FLOOR → SW-CORE). Same degree → skip
-      // so we never treat CORE as a leaf of FLOOR.
+      // the higher *switch-peer* hub (e.g. SW-FLOOR → SW-CORE). Total degree
+      // is wrong here — an access leaf with many PCs outranks CORE.
       const aIn = memberSet.has(first.ref.item);
       const bIn = memberSet.has(last.ref.item);
       if (aIn === bIn) return;
       const inside = aIn ? first : last;
       const outside = aIn ? last : first;
-      const inDeg = connectorDegree(inside.ref.item!, connectors);
-      const outDeg = connectorDegree(outside.ref.item!, connectors);
-      if (outDeg <= inDeg) return;
+      const inPeer = switchPeerDegree(inside.ref.item!, connectors, iconById);
+      const outPeer = switchPeerDegree(outside.ref.item!, connectors, iconById);
+      if (outPeer < inPeer) return;
+      if (outPeer === inPeer) {
+        const inDeg = connectorDegree(inside.ref.item!, connectors);
+        const outDeg = connectorDegree(outside.ref.item!, connectors);
+        if (outDeg <= inDeg) return;
+      }
       leafAnchor = inside;
       switchAnchor = outside;
     } else {
@@ -771,16 +836,16 @@ export const arrangeDensityGroups = ({
 
   // Place parent hubs before hubs that are themselves movable leaves
   // (e.g. move SW-FLOOR around CORE before seating PCs around SW-FLOOR).
+  const dependsOn = new Map<string, string>();
+  movable.forEach((entry) => {
+    entry.memberIds.forEach((id) => {
+      if (bySwitch.has(id) && id !== entry.switchId) {
+        dependsOn.set(id, entry.switchId);
+      }
+    });
+  });
   const orderedHubIds = (() => {
     const hubIds = [...bySwitch.keys()];
-    const dependsOn = new Map<string, string>();
-    movable.forEach((entry) => {
-      entry.memberIds.forEach((id) => {
-        if (bySwitch.has(id) && id !== entry.switchId) {
-          dependsOn.set(id, entry.switchId);
-        }
-      });
-    });
     const ordered: string[] = [];
     const seen = new Set<string>();
     const visit = (id: string) => {
@@ -831,7 +896,7 @@ export const arrangeDensityGroups = ({
     });
   });
 
-  const settledCircles: LayoutCircle[] = [];
+  const settledCircles: ObstacleCircle[] = [];
   const settledBoundsList: DensityGroupBounds[] = [];
   const settledCorridors: BusCorridor[] = [];
   const settledSpokes: SpokeCorridor[] = [];
@@ -846,6 +911,12 @@ export const arrangeDensityGroups = ({
     const hubR =
       circumRadius(switchFp.w, switchFp.h) + HUB_CLEARANCE_PAD;
 
+    const parentId = dependsOn.get(switchId);
+    const parentItem = parentId ? workingById.get(parentId) : undefined;
+    const preferAngle = parentItem
+      ? spokeAngleAwayFromParent(hub, itemCenter(parentItem, iconById))
+      : (3 * Math.PI) / 2;
+
     const ordered = [...cluster].sort((a, b) => {
       if (a.medianPortKey !== b.medianPortKey) {
         return a.medianPortKey - b.medianPortKey;
@@ -853,9 +924,13 @@ export const arrangeDensityGroups = ({
       return a.group.id.localeCompare(b.group.id);
     });
 
+    const preferredAngles = spokeAnglesAroundPrefer({
+      count: ordered.length,
+      prefer: preferAngle
+    });
     const angleById = new Map<string, number>();
     ordered.forEach((entry, index) => {
-      angleById.set(entry.group.id, spokeAngleForIndex(index, ordered.length));
+      angleById.set(entry.group.id, preferredAngles[index] ?? preferAngle);
     });
     const placeOrder = [...ordered].sort((a, b) => {
       if (b.busThickness !== a.busThickness) {
@@ -867,7 +942,7 @@ export const arrangeDensityGroups = ({
       return a.group.id.localeCompare(b.group.id);
     });
 
-    const placedCircles: LayoutCircle[] = [];
+    const placedCircles: ObstacleCircle[] = [];
     const placedBoundsList: DensityGroupBounds[] = [];
     const placedCorridors: BusCorridor[] = [];
     const placedSpokes: SpokeCorridor[] = [];
@@ -887,17 +962,14 @@ export const arrangeDensityGroups = ({
       const corridors = [...settledCorridors, ...placedCorridors];
       const spokes = [...settledSpokes, ...placedSpokes];
 
-      // Prefer assigned port-order angle; if the spoke is blocked by an
-      // already-placed group on the wire path, fan left/right on the arc.
+      // Prefer assigned anti-uplink / port-order angle; fan if blocked.
       const angleCandidates: number[] = [baseAngle];
-      const arcLo = Math.PI;
-      const arcHi = 2 * Math.PI;
       for (let k = 1; k <= 14; k += 1) {
         const delta = (k * Math.PI) / 28;
-        const left = Math.max(arcLo, baseAngle - delta);
-        const right = Math.min(arcHi, baseAngle + delta);
-        if (left !== baseAngle) angleCandidates.push(left);
-        if (right !== baseAngle) angleCandidates.push(right);
+        angleCandidates.push(
+          normalizeAngle0to2Pi(baseAngle - delta),
+          normalizeAngle0to2Pi(baseAngle + delta)
+        );
       }
 
       let chosen: {
@@ -908,7 +980,7 @@ export const arrangeDensityGroups = ({
         dx: number;
         dy: number;
         placedBounds: DensityGroupBounds;
-        placedCircle: LayoutCircle;
+        placedCircle: ObstacleCircle;
       } | null = null;
 
       for (const angle of angleCandidates) {
@@ -935,10 +1007,10 @@ export const arrangeDensityGroups = ({
             w: entry.bounds.w,
             h: entry.bounds.h
           };
-          const placedCircle = layoutCircleFromBounds(
-            placedBounds,
-            entry.memberIds.length
-          );
+          const placedCircle: ObstacleCircle = {
+            ...layoutCircleFromBounds(placedBounds, entry.memberIds.length),
+            memberIds: [...entry.memberIds]
+          };
           const hitsCircle = obstacles.some((obs) => {
             return circlesOverlap(placedCircle, obs);
           });
@@ -976,10 +1048,15 @@ export const arrangeDensityGroups = ({
             hubR,
             halfWidth: estimateSpokeHalfWidth(placedCircle.r, entry.cableCount)
           });
-          // Only circle↔spoke checks — two spokes always meet at the hub, so
-          // capsule∩capsule would falsely reject every neighbouring seat.
+          // Peer circles only — the hub's own group circle always intersects
+          // the child→hub spoke end and must not reject every seat.
+          const peerCircles = [...settledCircles, ...placedCircles].filter(
+            (circle) => {
+              return !circle.memberIds.includes(switchId);
+            }
+          );
           const corridorBlocked =
-            [...settledCircles, ...placedCircles].some((circle) => {
+            peerCircles.some((circle) => {
               return (
                 circleHitsCorridor(circle, corridor) ||
                 circleHitsSpokeCorridor(circle, spoke)
