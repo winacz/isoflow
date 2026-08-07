@@ -9,8 +9,7 @@ import {
   getPanScrollFromDelta,
   setWindowCursor,
   BLACK_CROSSHAIR_CURSOR,
-  connectorPathTileToGlobal,
-  CoordsUtils,
+  connectorPathTouchesTile,
   isPlanProjection
 } from 'src/utils';
 import { useResizeObserver } from 'src/hooks/useResizeObserver';
@@ -119,14 +118,7 @@ export const useInteractionManager = () => {
     let connectorAtTile: (typeof scene.connectors)[number] | undefined;
     for (let i = scene.connectors.length - 1; i >= 0; i -= 1) {
       const con = scene.connectors[i];
-      const hits = con.path.tiles.some((pathTile) => {
-        const globalPathTile = connectorPathTileToGlobal(
-          pathTile,
-          con.path.rectangle.from
-        );
-        return CoordsUtils.isEqual(globalPathTile, tile);
-      });
-      if (hits) {
+      if (connectorPathTouchesTile(con.path, tile)) {
         connectorAtTile = con;
         break;
       }

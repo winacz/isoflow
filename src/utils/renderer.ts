@@ -1140,8 +1140,9 @@ export const getConnectorPath = ({
 };
 
 /**
- * Drag-time path: only the consecutive anchor tiles (no A* / no L-fill).
- * Cheap O(anchors) preview — call getConnectorPath on mouseup for the real route.
+ * Drag-time path: polyline through consecutive anchor tiles (no A*).
+ * Intermediate grid tiles are filled in so hit-testing / jumps still work
+ * when anchors are sparse (e.g. Magistala `fastPath` with 45° stubs).
  */
 export const getConnectorPathPreview = ({
   anchors,
@@ -1174,16 +1175,34 @@ export const getConnectorPathPreview = ({
     to: { x: sorted.lowX, y: sorted.lowY }
   };
 
-  const tiles: Coords[] = [];
-  anchorPosition.forEach((position) => {
+  const appendLocal = (tiles: Coords[], global: Coords) => {
     const local = normalisePositionFromOrigin({
-      position,
+      position: global,
       origin: rectangle.from
     });
     const prev = tiles[tiles.length - 1];
     if (prev && CoordsUtils.isEqual(prev, local)) return;
     tiles.push(local);
-  });
+  };
+
+  const tiles: Coords[] = [];
+  for (let i = 0; i < anchorPosition.length; i += 1) {
+    const to = anchorPosition[i];
+    if (i === 0) {
+      appendLocal(tiles, to);
+      continue;
+    }
+    const from = anchorPosition[i - 1];
+    const dx = to.x - from.x;
+    const dy = to.y - from.y;
+    const steps = Math.max(Math.abs(dx), Math.abs(dy), 1);
+    for (let s = 1; s <= steps; s += 1) {
+      appendLocal(tiles, {
+        x: Math.round(from.x + (dx * s) / steps),
+        y: Math.round(from.y + (dy * s) / steps)
+      });
+    }
+  }
 
   return { tiles, rectangle };
 };
@@ -1214,6 +1233,38 @@ export const connectorPathTileToGlobal = (
     CoordsUtils.subtract(origin, CONNECTOR_SEARCH_OFFSET),
     CoordsUtils.subtract(tile, CONNECTOR_SEARCH_OFFSET)
   );
+};
+
+/**
+ * True when `tile` lies on the connector polyline — including edges between
+ * sparse fastPath corners (not only exact stored path tiles).
+ */
+export const connectorPathTouchesTile = (
+  path: { tiles: Coords[]; rectangle: { from: Coords } },
+  tile: Coords
+): boolean => {
+  const origin = path.rectangle.from;
+  const globals = path.tiles.map((pathTile) => {
+    return connectorPathTileToGlobal(pathTile, origin);
+  });
+  for (let i = 0; i < globals.length; i += 1) {
+    if (CoordsUtils.isEqual(globals[i], tile)) return true;
+  }
+  for (let i = 1; i < globals.length; i += 1) {
+    const from = globals[i - 1];
+    const to = globals[i];
+    const dx = to.x - from.x;
+    const dy = to.y - from.y;
+    const steps = Math.max(Math.abs(dx), Math.abs(dy), 1);
+    for (let s = 1; s < steps; s += 1) {
+      const mid = {
+        x: Math.round(from.x + (dx * s) / steps),
+        y: Math.round(from.y + (dy * s) / steps)
+      };
+      if (CoordsUtils.isEqual(mid, tile)) return true;
+    }
+  }
+  return false;
 };
 
 export const getTextBoxEndTile = (textBox: TextBox, size: Size) => {
@@ -1297,17 +1348,10 @@ export const getShape2dItemAtTile = ({
 
   let hitConnectorId: string | null = null;
   for (const con of scene.connectors) {
-    for (const pathTile of con.path.tiles) {
-      const globalPathTile = connectorPathTileToGlobal(
-        pathTile,
-        con.path.rectangle.from
-      );
-      if (globalPathTile.x === tile.x && globalPathTile.y === tile.y) {
-        hitConnectorId = con.id;
-        break;
-      }
+    if (connectorPathTouchesTile(con.path, tile)) {
+      hitConnectorId = con.id;
+      break;
     }
-    if (hitConnectorId) break;
   }
 
   if (hitConnectorId) {
@@ -1582,17 +1626,10 @@ export const getItemAtTile = ({
 
   let hitConnectorId: string | null = null;
   for (const con of scene.connectors) {
-    for (const pathTile of con.path.tiles) {
-      const globalPathTile = connectorPathTileToGlobal(
-        pathTile,
-        con.path.rectangle.from
-      );
-      if (globalPathTile.x === tile.x && globalPathTile.y === tile.y) {
-        hitConnectorId = con.id;
-        break;
-      }
+    if (connectorPathTouchesTile(con.path, tile)) {
+      hitConnectorId = con.id;
+      break;
     }
-    if (hitConnectorId) break;
   }
 
   if (hitConnectorId) {

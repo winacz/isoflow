@@ -10,7 +10,8 @@ import {
   bandConflictsOccupied,
   resolveOverlapsWithTargetDiagonal,
   shiftBusYWithTargetDiagonal,
-  TARGET_DIAG_STUB_TILES
+  TARGET_DIAG_STUB_TILES,
+  diagonalExitSideSign
 } from '../densityGroupBuses';
 
 describe('pickTrunkSideToward', () => {
@@ -1047,9 +1048,79 @@ describe('routeDensityGroupBuses', () => {
       const a = out.lower[i - 1];
       const b = out.lower[i];
       if (a.x === b.x && a.y !== b.y) {
-        expect(Math.abs(a.x - 10)).toBeGreaterThanOrEqual(2);
+        expect(a.x).not.toBe(10);
       }
     }
+  });
+
+  test('resolveOverlaps: later diagonal exits prefer the side already used', () => {
+    // Upper owns x=10 and x=11. Two lower ports need fans — both should go right.
+    const routes = {
+      upperA: [
+        { x: 40, y: 1 },
+        { x: 10, y: 1 },
+        { x: 10, y: 3 }
+      ],
+      upperB: [
+        { x: 40, y: 2 },
+        { x: 11, y: 2 },
+        { x: 11, y: 3 }
+      ],
+      lowerA: [
+        { x: 40, y: 0 },
+        { x: 10, y: 0 },
+        { x: 10, y: 14 }
+      ],
+      lowerB: [
+        { x: 40, y: 0 },
+        { x: 11, y: 0 },
+        { x: 11, y: 14 }
+      ]
+    };
+    const out = resolveOverlapsWithTargetDiagonal(routes);
+    const sideA = diagonalExitSideSign(out.lowerA);
+    const sideB = diagonalExitSideSign(out.lowerB);
+    expect(sideA).not.toBeNull();
+    expect(sideB).not.toBeNull();
+    expect(sideA).toBe(sideB);
+  });
+
+  test('resolveOverlaps: diagonal into the port stays ≤ TARGET_DIAG_STUB_TILES', () => {
+    // Pack nearby approach columns so the old search would walk out to a long 45°.
+    const routes: Record<string, { x: number; y: number }[]> = {
+      upper: [
+        { x: 40, y: 1 },
+        { x: 10, y: 1 },
+        { x: 10, y: 3 }
+      ],
+      lower: [
+        { x: 40, y: 0 },
+        { x: 10, y: 0 },
+        { x: 10, y: 14 }
+      ]
+    };
+    for (let x = 8; x <= 18; x += 1) {
+      if (x === 10) continue;
+      routes[`block${x}`] = [
+        { x: 40, y: 2 },
+        { x, y: 2 },
+        { x, y: 4 }
+      ];
+    }
+    const out = resolveOverlapsWithTargetDiagonal(routes);
+    const path = out.lower;
+    const port = path[path.length - 1];
+    for (let i = 1; i < path.length; i += 1) {
+      const a = path[i - 1];
+      const b = path[i];
+      const dx = Math.abs(b.x - a.x);
+      const dy = Math.abs(b.y - a.y);
+      if (dx > 0 && dy > 0) {
+        expect(dx).toBe(dy);
+        expect(dx).toBeLessThanOrEqual(TARGET_DIAG_STUB_TILES);
+      }
+    }
+    expect(port).toEqual({ x: 10, y: 14 });
   });
 
   test('oneBend exits horizontally then diagonals to the switch port', () => {

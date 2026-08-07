@@ -20,6 +20,7 @@ import {
   CoordsUtils,
   getAnchorTile,
   connectorPathTileToGlobal,
+  connectorPathTouchesTile,
   isTileInShape2dBounds,
   findWaypointSegmentAtTile,
   encodeWaypointSegmentId,
@@ -269,13 +270,7 @@ const connectorTouchesTile = (
   connector: { path: SceneConnector['path'] },
   tile: Coords
 ) => {
-  return connector.path.tiles.some((pathTile) => {
-    const globalPathTile = connectorPathTileToGlobal(
-      pathTile,
-      connector.path.rectangle.from
-    );
-    return CoordsUtils.isEqual(globalPathTile, tile);
-  });
+  return connectorPathTouchesTile(connector.path, tile);
 };
 
 /**

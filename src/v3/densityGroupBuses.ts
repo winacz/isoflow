@@ -218,6 +218,11 @@ const longestHorizontalY = (path: Coords[]): number | null => {
 
 /** 45° stub / column gap out of the target port when untangling overlaps. */
 export const TARGET_DIAG_STUB_TILES = 2;
+/**
+ * Max |Δx| when fanning off a shared approach column. The 45° stub itself is
+ * always ≤ TARGET_DIAG_STUB_TILES; larger freeX only shifts the orthogonal drop.
+ */
+export const MAX_TARGET_DIAG_OFFSET = 6;
 /** Vertical approaches this close in X count as overlapping (adjacent ports). */
 const VERTICAL_X_GAP = 2;
 
@@ -236,7 +241,8 @@ const targetPortOf = (path: Coords[]): Coords => {
 
 /**
  * Rebuild approach so the vertical run sits on `freeX`, joining the port with
- * a true 45° segment: (freeX, port.y ± |dx|) → port.
+ * a short 45° stub (≤ TARGET_DIAG_STUB_TILES). Far columns stay orthogonal:
+ * drop on freeX to stub height, optional jog to stubX, then 45° into the port.
  */
 export const rerouteWithTargetDiagonalToColumn = (
   path: Coords[],
@@ -248,9 +254,11 @@ export const rerouteWithTargetDiagonalToColumn = (
 
   const busY = longestHorizontalY(path) ?? path[path.length - 2].y;
   const towardBus = Math.sign(busY - port.y) || -1;
-  const stub = Math.abs(freeX - port.x);
+  const sign = Math.sign(freeX - port.x) || 1;
+  const stub = Math.min(Math.abs(freeX - port.x), TARGET_DIAG_STUB_TILES);
+  const stubX = port.x + sign * stub;
   const diag = {
-    x: freeX,
+    x: stubX,
     y: port.y + towardBus * stub
   };
 
@@ -268,20 +276,22 @@ export const rerouteWithTargetDiagonalToColumn = (
     body.push(p);
   }
 
+  const tip: Coords[] = [];
   if (body.length === 0) {
-    return cleanTiles([
-      { x: port.x, y: busY },
-      { x: freeX, y: busY },
-      diag,
-      port
-    ]);
+    tip.push({ x: port.x, y: busY });
+  } else {
+    const last = body[body.length - 1];
+    if (last.y !== busY) {
+      body.push({ x: last.x, y: busY });
+    }
   }
-  const last = body[body.length - 1];
-  if (last.y !== busY) {
-    body.push({ x: last.x, y: busY });
+  tip.push({ x: freeX, y: busY });
+  if (freeX !== stubX) {
+    tip.push({ x: freeX, y: diag.y });
   }
+  tip.push(diag, port);
 
-  return cleanTiles([...body, { x: freeX, y: busY }, diag, port]);
+  return cleanTiles([...body, ...tip]);
 };
 
 /**
@@ -357,20 +367,33 @@ const pathsConflictXY = (
 ): {
   axis: 'x' | 'y';
 } | null => {
-  const ha = horizontalsOf(a);
-  const hb = horizontalsOf(b);
-  for (const s of ha) {
-    for (const t of hb) {
-      if (s.y !== t.y) continue;
-      if (xRangesOverlap(s.x0, s.x1, t.x0, t.x1, 0)) {
-        return { axis: 'y' };
+  // Only the main bus run (longest horizontal) — short stubs near ports/leaves
+  // must not trigger a bus-Y nudge that blows up the lane stack.
+  const ya = longestHorizontalY(a);
+  const yb = longestHorizontalY(b);
+  if (ya !== null && ya === yb) {
+    const segAt = (path: Coords[], y: number): { x0: number; x1: number } | null => {
+      let x0 = Infinity;
+      let x1 = -Infinity;
+      for (let i = 1; i < path.length; i += 1) {
+        if (path[i].y !== y || path[i - 1].y !== y) continue;
+        x0 = Math.min(x0, path[i].x, path[i - 1].x);
+        x1 = Math.max(x1, path[i].x, path[i - 1].x);
       }
+      if (x0 === Infinity) return null;
+      return { x0, x1 };
+    };
+    const sa = segAt(a, ya);
+    const sb = segAt(b, yb);
+    if (sa && sb && xRangesOverlap(sa.x0, sa.x1, sb.x0, sb.x1, 0)) {
+      return { axis: 'y' };
     }
   }
-  // Compare main approach columns (longest vertical), not short leaf climbs.
+  // Compare main approach columns (longest vertical). Only the *same* column
+  // is a real overlap — adjacent port drops (x and x+1) must stay orthogonal.
   const sa = longestVertical(a);
   const sb = longestVertical(b);
-  if (sa && sb && Math.abs(sa.x - sb.x) < VERTICAL_X_GAP) {
+  if (sa && sb && sa.x === sb.x) {
     return { axis: 'x' };
   }
   // Stacked switches, same port index: both still drop on the port column
@@ -378,14 +401,12 @@ const pathsConflictXY = (
   const portA = targetPortOf(a);
   const portB = targetPortOf(b);
   if (
-    Math.abs(portA.x - portB.x) < VERTICAL_X_GAP &&
+    portA.x === portB.x &&
     Math.abs(portA.y - portB.y) >= VERTICAL_X_GAP
   ) {
     const dropOnPort = (path: Coords[], portX: number): boolean => {
       return verticalsOf(path).some((seg) => {
-        return (
-          Math.abs(seg.x - portX) < VERTICAL_X_GAP && seg.y1 - seg.y0 >= 2
-        );
+        return seg.x === portX && seg.y1 - seg.y0 >= 2;
       });
     };
     if (dropOnPort(a, portA.x) && dropOnPort(b, portB.x)) {
@@ -423,10 +444,9 @@ const collectOccupiedBusYs = (
 };
 
 const columnIsFree = (x: number, occupied: Set<number>): boolean => {
-  for (const ox of occupied) {
-    if (Math.abs(x - ox) < VERTICAL_X_GAP) return false;
-  }
-  return true;
+  // Parallel drops on neighbouring columns are fine — only the exact column
+  // must be free (avoids packing fans 2+ tiles apart with long stubs).
+  return !occupied.has(x);
 };
 
 const rowIsFree = (y: number, occupied: Set<number>): boolean => {
@@ -434,6 +454,53 @@ const rowIsFree = (y: number, occupied: Set<number>): boolean => {
     if (Math.abs(y - oy) < OCCUPANCY_Y_GAP) return false;
   }
   return true;
+};
+
+/**
+ * Side of an existing 45° stub into the switch port:
+ * +1 = approach sits to the right of the port, -1 = to the left.
+ */
+export const diagonalExitSideSign = (path: Coords[]): number | null => {
+  if (path.length < 2) return null;
+  const port = targetPortOf(path);
+  const prev = path[path.length - 2];
+  if (prev.x === port.x || prev.y === port.y) return null;
+  const sign = Math.sign(prev.x - port.x);
+  return sign === 0 ? null : sign;
+};
+
+/**
+ * Prefer the side that already has diagonal exits (same chassis row first),
+ * so stacked-switch fans share one direction instead of a left/right V.
+ */
+const preferredDiagonalSigns = (
+  routes: Record<string, Coords[]>,
+  excludeId: string,
+  portY: number
+): Array<1 | -1> => {
+  const tally = (sameRowOnly: boolean): { right: number; left: number } => {
+    let right = 0;
+    let left = 0;
+    Object.entries(routes).forEach(([id, path]) => {
+      if (id === excludeId) return;
+      if (sameRowOnly) {
+        const peerY = targetPortOf(path).y;
+        if (Math.abs(peerY - portY) > 2) return;
+      }
+      const side = diagonalExitSideSign(path);
+      if (side === null) return;
+      if (side > 0) right += 1;
+      else left += 1;
+    });
+    return { right, left };
+  };
+
+  let { right, left } = tally(true);
+  if (right === 0 && left === 0) {
+    ({ right, left } = tally(false));
+  }
+  if (left > right) return [-1, 1];
+  return [1, -1];
 };
 
 /**
@@ -474,10 +541,31 @@ export const resolveOverlapsWithTargetDiagonal = (
         const victim = next[victimId];
         const port = targetPortOf(victim);
 
+        const tryShiftBusY = (): boolean => {
+          const occupiedYs = collectOccupiedBusYs(next, victimId);
+          const busY = longestHorizontalY(victim);
+          if (busY === null) return false;
+          for (let d = 1; d <= 16; d += 1) {
+            for (const sign of [-1, 1] as const) {
+              const freeY = busY + sign * d;
+              if (!rowIsFree(freeY, occupiedYs)) continue;
+              const trial = shiftBusYWithTargetDiagonal(victim, sign * d);
+              if (!conflictsAny(victimId, trial)) {
+                next[victimId] = trial;
+                return true;
+              }
+            }
+          }
+          return false;
+        };
+
         if (conflict.axis === 'x') {
           const occupiedXs = collectOccupiedApproachXs(next, victimId);
-          for (let d = VERTICAL_X_GAP; d <= 16 && !moved; d += 1) {
-            for (const sign of [1, -1] as const) {
+          const signs = preferredDiagonalSigns(next, victimId, port.y);
+          // Preferred side first (keeps fans from forming a V), smallest
+          // offset next. Diagonal stub is always ≤ TARGET_DIAG_STUB_TILES.
+          for (const sign of signs) {
+            for (let d = 1; d <= MAX_TARGET_DIAG_OFFSET && !moved; d += 1) {
               const freeX = port.x + sign * d;
               if (!columnIsFree(freeX, occupiedXs)) continue;
               const trial = rerouteWithTargetDiagonalToColumn(victim, freeX);
@@ -487,23 +575,12 @@ export const resolveOverlapsWithTargetDiagonal = (
                 break;
               }
             }
+            if (moved) break;
           }
+          // Do not fall back to bus-Y shifts here — that blows up an already
+          // packed lane stack when a short fan cannot clear a false X clash.
         } else {
-          const occupiedYs = collectOccupiedBusYs(next, victimId);
-          const busY = longestHorizontalY(victim);
-          if (busY === null) continue;
-          for (let d = 1; d <= 16 && !moved; d += 1) {
-            for (const sign of [-1, 1] as const) {
-              const freeY = busY + sign * d;
-              if (!rowIsFree(freeY, occupiedYs)) continue;
-              const trial = shiftBusYWithTargetDiagonal(victim, sign * d);
-              if (!conflictsAny(victimId, trial)) {
-                next[victimId] = trial;
-                moved = true;
-                break;
-              }
-            }
-          }
+          moved = tryShiftBusY();
         }
       }
     }
