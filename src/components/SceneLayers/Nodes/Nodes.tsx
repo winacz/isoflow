@@ -9,7 +9,8 @@ import {
   getPortPeerItemIds,
   isPatchPanelItem,
   expandConnectorIdsThroughPatchPanels,
-  isPlanProjection
+  isPlanProjection,
+  resolvePortPipPeer
 } from 'src/utils';
 import { Node } from './Node/Node';
 
@@ -61,6 +62,9 @@ export const Nodes = React.memo(({ nodes }: Props) => {
   });
   const focusedPortIds = useUiStateStore((state) => {
     return state.focusedPortIds;
+  });
+  const shape2dPortHover = useUiStateStore((state) => {
+    return state.shape2dPortHover;
   });
   const projectionMode = useUiStateStore((state) => {
     return state.projectionMode;
@@ -190,6 +194,27 @@ export const Nodes = React.memo(({ nodes }: Props) => {
   ]);
 
   /**
+   * Far endpoint of the cable on the RJ45 under the cursor (patch panels are
+   * transparent). Emphasized clearly so the peer device is easy to spot.
+   */
+  const portHoverPeerId = useMemo(() => {
+    if (!isPlanProjection(projectionMode)) return null;
+    if (!shape2dPortHover?.portId) return null;
+
+    const peer = resolvePortPipPeer({
+      connectors,
+      modelItems,
+      itemId: shape2dPortHover.itemId,
+      portId: shape2dPortHover.portId
+    });
+    if (!peer?.itemId || peer.itemId === shape2dPortHover.itemId) return null;
+    if (isPatchPanelItem(modelItems.find((item) => item.id === peer.itemId))) {
+      return null;
+    }
+    return peer.itemId;
+  }, [projectionMode, shape2dPortHover, connectors, modelItems]);
+
+  /**
    * Expand multi-selected nodes from their centroid so scaled footprints
    * do not overlap. Only selected items move (not connector-peer highlights),
    * which keeps a regular grid symmetric.
@@ -298,6 +323,11 @@ export const Nodes = React.memo(({ nodes }: Props) => {
           } else {
             selectionTone = 'dimmed';
           }
+        }
+
+        // Port hover: make the far-side device stand out (scale + glow).
+        if (portHoverPeerId === node.id) {
+          selectionTone = 'highlighted';
         }
 
         const isCabinet = iconById.get(node.id) === SHAPE_2D_CABINET_ID;

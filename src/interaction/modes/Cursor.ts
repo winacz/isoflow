@@ -13,6 +13,7 @@ import {
   getItemAtTile,
   getShape2dItemAtTile,
   getShape2dPortAtTile,
+  getScaledShape2dItemIds,
   hasMovedTile,
   getAnchorAtTile,
   getItemByIdOrThrow,
@@ -34,7 +35,8 @@ import {
   isPlanProjection,
   supportsConnectorTools,
   supportsDrawingConnections,
-  connectorModeForProjection
+  connectorModeForProjection,
+  resolvePortPipPeer
 } from 'src/utils';
 import { useScene } from 'src/hooks/useScene';
 import { isShape2dIcon, getShape2dSize } from 'src/config';
@@ -337,6 +339,42 @@ const isTileOnDeviceBody = (
   });
 };
 
+/**
+ * CSS-scaled nodes (selected / port-hover peer) — port hit-tests must use the
+ * same scale as the canvas or clicks far from centre pick the neighbour jack.
+ */
+const getHighlightedItemIdsForPortHit = ({
+  uiState,
+  scene,
+  modelItems
+}: {
+  uiState: { selectedItemIds: string[]; shape2dPortHover: { itemId: string; portId: string | null } | null };
+  scene: { items: { id: string; parentId?: string }[]; currentView: { connectors?: ConnectorI[] } };
+  modelItems: ModelItem[];
+}): Set<string> | null => {
+  let peerId: string | null = null;
+  const hover = uiState.shape2dPortHover;
+  if (hover?.portId) {
+    const peer = resolvePortPipPeer({
+      connectors: scene.currentView.connectors,
+      modelItems,
+      itemId: hover.itemId,
+      portId: hover.portId
+    });
+    if (peer?.itemId && peer.itemId !== hover.itemId) {
+      peerId = peer.itemId;
+    }
+  }
+
+  const ids = getScaledShape2dItemIds({
+    selectedItemIds: uiState.selectedItemIds,
+    viewItems: scene.items,
+    modelItems,
+    extraScaledItemIds: peerId ? [peerId] : null
+  });
+  return ids.size > 0 ? ids : null;
+};
+
 const resolveWaypointAtTile = (
   tile: Coords,
   scene: ReturnType<typeof useScene>
@@ -403,7 +441,12 @@ const mousedown: ModeActionsAction = ({
       tile,
       point: tilePoint,
       scene,
-      modelItems: model.items
+      modelItems: model.items,
+      highlightedItemIds: getHighlightedItemIdsForPortHit({
+        uiState,
+        scene,
+        modelItems: model.items
+      })
     });
 
     const onDeviceBody = isTileOnDeviceBody(tile, scene, model.items);
@@ -667,7 +710,12 @@ export const Cursor: ModeActions = {
         tile: uiState.mouse.mousedown.tile,
         point: mousedownPoint,
         scene,
-        modelItems: model.items
+        modelItems: model.items,
+        highlightedItemIds: getHighlightedItemIdsForPortHit({
+          uiState,
+          scene,
+          modelItems: model.items
+        })
       });
 
       if (
@@ -1119,7 +1167,12 @@ export const Cursor: ModeActions = {
       tile,
       point: tilePoint,
       scene,
-      modelItems: model.items
+      modelItems: model.items,
+      highlightedItemIds: getHighlightedItemIdsForPortHit({
+        uiState,
+        scene,
+        modelItems: model.items
+      })
     });
     if (portHit) return;
 

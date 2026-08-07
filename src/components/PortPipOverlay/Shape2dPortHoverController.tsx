@@ -4,56 +4,25 @@ import { useModelStoreApi } from 'src/stores/modelStore';
 import { useResizeObserver } from 'src/hooks/useResizeObserver';
 import {
   getShape2dPortAtPoint,
+  getScaledShape2dItemIds,
   screenToTile2dContinuous,
   isPlanProjection,
   isTileInShape2dBounds,
-  applyScenePortHoverDom
+  applyScenePortHoverDom,
+  resolvePortPipPeer
 } from 'src/utils';
 import {
   getModelItemSize,
   getShape2dSize,
   SHAPE_2D_CABINET_ID
 } from 'src/config';
+import type { PortHoverTarget } from 'src/utils/portHoverDom';
+import type { Connector } from 'src/types';
 
 /** Keep hover briefly when cursor slips between adjacent ports. */
 const PORT_HOVER_CLEAR_DELAY_MS = 140;
 /** Must match Nodes.tsx / getShape2dPortAtPoint highlight scale. */
 const NODE_HIGHLIGHT_SCALE = 1.15;
-
-/**
- * Item ids that currently render with CSS scale(1.15) — selected nodes
- * (and gear mounted in a selected cabinet). Cable peers are glow-only and
- * must NOT be included or hit-testing drifts on large switches.
- */
-const getScaledItemIds = (
-  selectedItemIds: string[],
-  viewItems: { id: string; parentId?: string }[],
-  modelItems: { id: string; icon?: string }[]
-): Set<string> => {
-  const ids = new Set<string>();
-  if (selectedItemIds.length === 0) return ids;
-
-  const iconById = new Map(
-    modelItems.map((item) => {
-      return [item.id, item.icon];
-    })
-  );
-  const selected = new Set(selectedItemIds);
-
-  selectedItemIds.forEach((id) => {
-    if (iconById.get(id) !== SHAPE_2D_CABINET_ID) {
-      ids.add(id);
-    }
-  });
-
-  viewItems.forEach((item) => {
-    if (item.parentId && selected.has(item.parentId)) {
-      ids.add(item.id);
-    }
-  });
-
-  return ids;
-};
 
 /**
  * Tracks RJ45/SFP under the cursor on Plan 2D and stores `shape2dPortHover`
@@ -69,7 +38,7 @@ export const Shape2dPortHoverController = () => {
   const rendererWidth = rendererSize.width;
   const rendererHeight = rendererSize.height;
   const clearTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const hoveredJackRef = useRef<HTMLElement | null>(null);
+  const hoveredJacksRef = useRef<HTMLElement[]>([]);
 
   useEffect(() => {
     let hitTestFrame: number | null = null;
@@ -82,17 +51,46 @@ export const Shape2dPortHoverController = () => {
     };
 
     const clearHoverVisual = () => {
-      applyScenePortHoverDom(null, null, hoveredJackRef);
+      applyScenePortHoverDom(null, null, hoveredJacksRef);
+    };
+
+    const peerTargetsFor = (
+      itemId: string,
+      portId: string,
+      connectors: Connector[],
+      modelItems: { id: string; icon?: string }[]
+    ): PortHoverTarget[] => {
+      const peer = resolvePortPipPeer({
+        connectors,
+        modelItems,
+        itemId,
+        portId
+      });
+      if (!peer?.portId) return [];
+      return [{ itemId: peer.itemId, portId: peer.portId }];
     };
 
     const syncHoverVisual = (
-      hover: { itemId: string; portId: string | null } | null
+      hover: { itemId: string; portId: string | null } | null,
+      connectors: Connector[],
+      modelItems: { id: string; icon?: string }[]
     ) => {
       if (!hover?.portId) {
         clearHoverVisual();
         return;
       }
-      applyScenePortHoverDom(hover.itemId, hover.portId, hoveredJackRef);
+      const peers = peerTargetsFor(
+        hover.itemId,
+        hover.portId,
+        connectors,
+        modelItems
+      );
+      applyScenePortHoverDom(
+        hover.itemId,
+        hover.portId,
+        hoveredJacksRef,
+        peers
+      );
     };
 
     const runHitTest = () => {
@@ -141,6 +139,7 @@ export const Shape2dPortHoverController = () => {
         return v.id === uiState.view;
       });
       const viewItems = currentView?.items ?? [];
+      const viewConnectors = currentView?.connectors ?? [];
 
       // getShape2dPortAtPoint only reads scene.items — skip connector/textBox
       // mapping to avoid unnecessary work during pointer tracking.
@@ -148,11 +147,25 @@ export const Shape2dPortHoverController = () => {
         items: viewItems
       } as any;
 
-      const scaledItemIds = getScaledItemIds(
-        uiState.selectedItemIds,
+      let peerId: string | null = null;
+      if (shape2dPortHover?.portId) {
+        const peer = resolvePortPipPeer({
+          connectors: viewConnectors,
+          modelItems: model.items,
+          itemId: shape2dPortHover.itemId,
+          portId: shape2dPortHover.portId
+        });
+        if (peer?.itemId && peer.itemId !== shape2dPortHover.itemId) {
+          peerId = peer.itemId;
+        }
+      }
+
+      const scaledItemIds = getScaledShape2dItemIds({
+        selectedItemIds: uiState.selectedItemIds,
         viewItems,
-        model.items
-      );
+        modelItems: model.items,
+        extraScaledItemIds: peerId ? [peerId] : null
+      });
 
       const portHit = getShape2dPortAtPoint({
         point,
@@ -224,7 +237,7 @@ export const Shape2dPortHoverController = () => {
         portId: portHit.portId
       };
       setShape2dPortHover(nextHover);
-      syncHoverVisual(nextHover);
+      syncHoverVisual(nextHover, viewConnectors, model.items);
     };
 
     const scheduleHitTest = () => {

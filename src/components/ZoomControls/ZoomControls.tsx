@@ -30,6 +30,9 @@ export const ZoomControls = () => {
   const showLoupe = useUiStateStore((state) => {
     return state.showLoupe;
   });
+  const animateConnectors = useUiStateStore((state) => {
+    return state.animateConnectors;
+  });
   const projectionMode = useUiStateStore((state) => {
     return state.projectionMode;
   });
@@ -89,6 +92,14 @@ export const ZoomControls = () => {
           Icon={showLoupe ? <LoupeOnIcon /> : <LoupeOffIcon />}
           onClick={uiStateStoreActions.toggleShowLoupe}
           isActive={showLoupe}
+        />
+      </UiElement>
+      <UiElement>
+        <IconButton
+          name={animateConnectors ? 'Wyłącz animację' : 'Włącz animację'}
+          Icon={<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"></polyline></svg>}
+          onClick={uiStateStoreActions.toggleAnimateConnectors}
+          isActive={animateConnectors}
         />
       </UiElement>
     </Stack>

@@ -7,12 +7,8 @@ import { useModelStore } from 'src/stores/modelStore';
 import { useUiStateStore } from 'src/stores/uiStateStore';
 import { useResizeObserver } from 'src/hooks/useResizeObserver';
 import { getShape2dPortIfaceName } from 'src/config';
-import {
-  getConnectorRelationSummary,
-  focusShape2dPortOnCanvas,
-  TRUNK_RAINBOW_CSS,
-  TRUNK_MISMATCH_COLOR
-} from 'src/utils';
+import { getConnectorRelationSummary, focusShape2dPortOnCanvas, TRUNK_RAINBOW_CSS, TRUNK_MISMATCH_COLOR } from 'src/utils';
+import { DeviceTypeIcon } from 'src/components/Icons/DeviceTypeIcon';
 
 interface Props {
   connectorId: string;
@@ -136,16 +132,9 @@ export const ConnectorRelationPanel = ({
           return (
             <Box key={`${endpoint.itemId}-${endpoint.portId}-${index}`}>
               {index > 0 && (
-                <Typography
-                  sx={{
-                    fontSize: 12,
-                    color: 'text.disabled',
-                    textAlign: 'center',
-                    my: 0.35
-                  }}
-                >
-                  ↕
-                </Typography>
+                <Box sx={{ display: 'flex', justifyContent: 'center', my: 0.75 }}>
+                  <Box sx={{ width: 2, height: 16, bgcolor: 'divider', borderRadius: 1 }} />
+                </Box>
               )}
               <Box
                 component={canJump ? 'button' : 'div'}
@@ -163,23 +152,27 @@ export const ConnectorRelationPanel = ({
                     : undefined
                 }
                 sx={{
-                  display: 'block',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: 0.75,
                   width: '100%',
                   textAlign: 'left',
-                  border: 'none',
+                  border: '1px solid',
+                  borderColor: 'divider',
                   background: 'transparent',
-                  p: 0.75,
+                  p: 1.25,
                   m: 0,
-                  mx: -0.75,
-                  borderRadius: 1,
+                  borderRadius: 2,
                   cursor: canJump ? 'pointer' : 'default',
                   font: 'inherit',
                   color: 'inherit',
-                  transition: 'background-color 0.12s ease',
+                  transition: 'all 0.15s ease',
                   ...(canJump
                     ? {
                         '&:hover': {
-                          bgcolor: 'action.hover'
+                          bgcolor: 'action.hover',
+                          borderColor: 'primary.main',
+                          boxShadow: '0 2px 8px rgba(0,0,0,0.05)'
                         },
                         '&:focus-visible': {
                           outline: '2px solid',
@@ -192,43 +185,89 @@ export const ConnectorRelationPanel = ({
               >
                 <Typography
                   sx={{
-                    fontSize: 15,
+                    fontSize: 14,
                     fontWeight: 700,
                     lineHeight: 1.3,
-                    color: canJump ? 'primary.main' : 'text.primary'
+                    color: canJump ? 'primary.main' : 'text.primary',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 1
                   }}
                 >
+                  <DeviceTypeIcon iconId={endpoint.icon} sx={{ fontSize: 16 }} />
                   {endpoint.itemName}
                 </Typography>
-                <Typography
-                  sx={{
-                    fontSize: 13,
-                    color: 'text.secondary',
-                    fontFamily:
-                      'ui-monospace, SFMono-Regular, Menlo, monospace'
-                  }}
-                >
-                  {endpoint.portLabel}
-                  {endpoint.type === 'trunk'
-                    ? ' · trunk'
-                    : endpoint.isNonVlanAware
-                      ? ' · host'
-                      : ''}
-                </Typography>
-                {endpoint.ip && (
-                  <Typography
-                    sx={{
-                      mt: 0.2,
-                      fontSize: 12,
-                      fontWeight: 600,
-                      color: 'text.primary',
-                      fontFamily:
-                        'ui-monospace, SFMono-Regular, Menlo, monospace'
-                    }}
-                  >
-                    IP {endpoint.ip}
-                  </Typography>
-                )}
+                
+                <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.5, mt: 0.25 }}>
+                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                    <Typography sx={{ fontSize: 11, color: 'text.secondary', fontWeight: 600, width: 34, letterSpacing: 0.5 }}>
+                      PORT
+                    </Typography>
+                    <Typography
+                      sx={{
+                        fontSize: 12,
+                        fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
+                        bgcolor: 'action.selected',
+                        px: 0.75,
+                        py: 0.25,
+                        borderRadius: 1,
+                        color: 'text.primary',
+                        fontWeight: 500
+                      }}
+                    >
+                      {endpoint.portLabel}
+                    </Typography>
+                    {endpoint.type === 'trunk' && (
+                      <Typography sx={{ fontSize: 10, fontWeight: 700, bgcolor: 'info.main', color: 'white', px: 0.5, py: 0.25, borderRadius: 0.5, lineHeight: 1 }}>
+                        TRUNK
+                      </Typography>
+                    )}
+                    {endpoint.isNonVlanAware && (
+                      <Typography sx={{ fontSize: 10, color: 'text.secondary', fontWeight: 700, bgcolor: 'action.disabledBackground', px: 0.5, py: 0.25, borderRadius: 0.5, lineHeight: 1 }}>
+                        HOST
+                      </Typography>
+                    )}
+                  </Box>
+                  
+                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                    <Typography sx={{ fontSize: 11, color: 'text.secondary', fontWeight: 600, width: 34, letterSpacing: 0.5 }}>
+                      VLAN
+                    </Typography>
+                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.75 }}>
+                      {endpoint.vlanColor && !endpoint.isNonVlanAware && (
+                        <Box sx={{ width: 8, height: 8, borderRadius: '50%', bgcolor: endpoint.vlanColor }} />
+                      )}
+                      <Typography
+                        sx={{
+                          fontSize: 12,
+                          fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
+                          color: 'text.primary',
+                          fontWeight: 500
+                        }}
+                      >
+                        {endpoint.vlan}
+                      </Typography>
+                    </Box>
+                  </Box>
+                  
+                  {endpoint.ip && (
+                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                      <Typography sx={{ fontSize: 11, color: 'text.secondary', fontWeight: 600, width: 34, letterSpacing: 0.5 }}>
+                        IP
+                      </Typography>
+                      <Typography
+                        sx={{
+                          fontSize: 12,
+                          fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
+                          color: 'text.primary',
+                          fontWeight: 500
+                        }}
+                      >
+                        {endpoint.ip}
+                      </Typography>
+                    </Box>
+                  )}
+                </Box>
               </Box>
             </Box>
           );

@@ -1,4 +1,5 @@
 import React, { useMemo } from 'react';
+import { GlobalStyles } from '@mui/material';
 import type { useScene } from 'src/hooks/useScene';
 import { useUiStateStore } from 'src/stores/uiStateStore';
 import { useModelStore } from 'src/stores/modelStore';
@@ -74,6 +75,9 @@ export const Connectors = ({ connectors }: Props) => {
   const highlightedConnectorId = useStackFanStore((state) => {
     return state.highlightedConnectorId;
   });
+  const shape2dPortHover = useUiStateStore((state) => {
+    return state.shape2dPortHover;
+  });
 
   const selectedConnectorId = useMemo(() => {
     if (mode.type === 'CONNECTOR') {
@@ -134,6 +138,32 @@ export const Connectors = ({ connectors }: Props) => {
     connectors,
     modelItems
   ]);
+
+  /** Cable attached to the RJ45 currently under the cursor (+ patch-panel bridge). */
+  const portHoverConnectorIds = useMemo(() => {
+    if (!isPlan2dCanvas(projectionMode)) return null;
+    if (!shape2dPortHover?.portId) return null;
+
+    const direct = new Set<string>();
+    connectors.forEach((connector) => {
+      if (
+        connectorUsesPort(
+          connector,
+          shape2dPortHover.itemId,
+          shape2dPortHover.portId as string
+        )
+      ) {
+        direct.add(connector.id);
+      }
+    });
+    if (direct.size === 0) return null;
+
+    return expandConnectorIdsThroughPatchPanels({
+      connectorIds: direct,
+      connectors,
+      modelItems
+    });
+  }, [projectionMode, shape2dPortHover, connectors, modelItems]);
 
   const pathInputs = useMemo(() => {
     if (!isPlan2dCanvas(projectionMode)) return [];
@@ -210,8 +240,22 @@ export const Connectors = ({ connectors }: Props) => {
     );
   }, [activeStackKey, pathInputs, projectionMode]);
 
+  const animateConnectors = useUiStateStore((state) => {
+    return state.animateConnectors;
+  });
+
   return (
     <>
+      {animateConnectors && (
+        <GlobalStyles
+          styles={{
+            '@keyframes connectorFlow': {
+              from: { strokeDashoffset: 40 },
+              to: { strokeDashoffset: 0 }
+            }
+          }}
+        />
+      )}
       {[...connectors].reverse().map((connector) => {
         const isSelected = selectedConnectorId === connector.id;
         const isHovered = hoveredConnectorId === connector.id;
@@ -220,12 +264,16 @@ export const Connectors = ({ connectors }: Props) => {
         );
         const offset = fanOffsets[connector.id];
         const isHandleTarget = highlightedConnectorId === connector.id;
+        const isPortHoverCable = Boolean(
+          portHoverConnectorIds?.has(connector.id)
+        );
         const isFocused =
           isSelected ||
           isHovered ||
           isRelatedToItem ||
           Boolean(offset) ||
-          isHandleTarget;
+          isHandleTarget ||
+          isPortHoverCable;
         const isDimmed =
           (hasSelectionFocus && !isFocused) ||
           (highlightedConnectorId !== null && !isHandleTarget);
@@ -238,7 +286,11 @@ export const Connectors = ({ connectors }: Props) => {
               jumps={jumpsByConnectorId[connector.id] ?? []}
               isSelected={isSelected}
               isFocused={isFocused}
-              isHighlighted={isHandleTarget || (isHovered && !isSelected)}
+              isHighlighted={
+                isHandleTarget ||
+                (isHovered && !isSelected) ||
+                isPortHoverCable
+              }
               isDimmed={isDimmed}
               softDim={softDim}
               visualOffset={offset}

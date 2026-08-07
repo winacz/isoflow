@@ -61,6 +61,7 @@ const initialState = () => {
       sviHover: null,
       showGrid: INITIAL_UI_STATE.showGrid,
       showLoupe: INITIAL_UI_STATE.showLoupe,
+      animateConnectors: INITIAL_UI_STATE.animateConnectors,
       gridStyle: INITIAL_UI_STATE.gridStyle,
       canvasByMode: INITIAL_UI_STATE.canvasByMode,
       viewTransformByMode: INITIAL_UI_STATE.viewTransformByMode,
@@ -355,6 +356,9 @@ const initialState = () => {
         },
         toggleShowLoupe: () => {
           set({ showLoupe: !get().showLoupe });
+        },
+        toggleAnimateConnectors: () => {
+          set({ animateConnectors: !get().animateConnectors });
         },
         setGridStyle: (gridStyle) => {
           set({ gridStyle, showGrid: true });

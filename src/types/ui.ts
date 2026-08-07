@@ -296,6 +296,7 @@ export interface UiState {
   /** Whether the background grid is drawn (logical snap grid is always active). */
   showGrid: boolean;
   showLoupe: boolean;
+  animateConnectors: boolean;
   /**
    * Visual density of the 2D background grid (snap is 1 tile unless `rack`).
    * - fine: every tile
@@ -388,6 +389,7 @@ export interface UiStateActions {
   setShowLoupe: (showLoupe: boolean) => void;
   toggleShowGrid: () => void;
   toggleShowLoupe: () => void;
+  toggleAnimateConnectors: () => void;
   setGridStyle: (gridStyle: GridStyle) => void;
   /** Temporary: override grid line color for the active projection mode. */
   setGridColor: (color: string | null) => void;

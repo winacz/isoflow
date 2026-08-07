@@ -401,6 +401,7 @@ export const getSinglePortNodeVlanBorderColor = ({
 export type ConnectorEndpointSummary = {
   itemId: string;
   itemName: string;
+  icon?: string;
   portId: string;
   portLabel: string;
   vlan: string;
@@ -557,6 +558,7 @@ export const getConnectorRelationSummary = ({
     endpoints.push({
       itemId: modelItem.id ?? itemId,
       itemName: (modelItem as { name?: string }).name?.trim() || 'Urządzenie',
+      icon: modelItem.icon,
       portId,
       portLabel: portId
         ? resolvePortLabel?.(itemId, portId) ||

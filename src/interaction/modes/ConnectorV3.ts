@@ -2,6 +2,7 @@ import { ModeActions, Connector as ConnectorI } from 'src/types';
 import {
   generateId,
   getShape2dPortAtTile,
+  getScaledShape2dItemIds,
   isShape2dPortUnavailable,
   setWindowCursor,
   BLACK_CROSSHAIR_CURSOR,
@@ -33,7 +34,8 @@ const portUnderCursor = ({
   screen,
   zoom,
   scroll,
-  rendererSize
+  rendererSize,
+  selectedItemIds
 }: {
   scene: Parameters<NonNullable<ModeActions['mousedown']>>[0]['scene'];
   model: Parameters<NonNullable<ModeActions['mousedown']>>[0]['model'];
@@ -42,6 +44,7 @@ const portUnderCursor = ({
   zoom: number;
   scroll: Parameters<NonNullable<ModeActions['mousedown']>>[0]['uiState']['scroll'];
   rendererSize: { width: number; height: number };
+  selectedItemIds: string[];
 }) => {
   const point = screenToTile2dContinuous({
     mouse: screen,
@@ -50,11 +53,18 @@ const portUnderCursor = ({
     rendererSize
   });
 
+  const scaled = getScaledShape2dItemIds({
+    selectedItemIds,
+    viewItems: scene.items,
+    modelItems: model.items
+  });
+
   return getShape2dPortAtTile({
     tile,
     point,
     scene,
-    modelItems: model.items
+    modelItems: model.items,
+    highlightedItemIds: scaled.size > 0 ? scaled : null
   });
 };
 
@@ -77,7 +87,8 @@ export const ConnectorV3: ModeActions = {
       screen: uiState.mouse.position.screen,
       zoom: uiState.zoom,
       scroll: uiState.scroll,
-      rendererSize
+      rendererSize,
+      selectedItemIds: uiState.selectedItemIds
     });
 
     // Nothing to start from — stay armed rather than creating a stray cable.
@@ -159,7 +170,8 @@ export const ConnectorV3: ModeActions = {
       screen: uiState.mouse.position.screen,
       zoom: uiState.zoom,
       scroll: uiState.scroll,
-      rendererSize
+      rendererSize,
+      selectedItemIds: uiState.selectedItemIds
     });
 
     const sameJack =

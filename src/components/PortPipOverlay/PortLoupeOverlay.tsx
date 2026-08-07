@@ -408,9 +408,9 @@ export const PortLoupeOverlay = () => {
 
     // Oblicz rozmiar lupy na ekranie.
     // Od 30% w górę: ukryta. Poniżej 30% zaczyna od 248px.
-    // Osiąga maksymalny rozmiar przy 20% (ok. 400px).
+    // Osiąga maksymalny rozmiar przy 20% (ok. 320px).
     let targetPx = 248;
-    const MAX_LOUPE_PX = 400;
+    const MAX_LOUPE_PX = 320;
     if (zoom <= 0.2) {
       targetPx = MAX_LOUPE_PX;
     } else if (zoom < 0.3) {

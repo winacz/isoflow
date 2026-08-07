@@ -543,6 +543,7 @@ export const INITIAL_UI_STATE = {
   isRightSidebarOpen: true,
   showGrid: true,
   showLoupe: true,
+  animateConnectors: false,
   gridStyle: 'rack' as const,
   canvasByMode: {
     ISOMETRIC: {

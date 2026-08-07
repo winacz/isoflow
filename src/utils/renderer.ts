@@ -498,7 +498,19 @@ export const splitConnectorPathByNodeBodies = ({
     const ownItems = items.filter((item) => {
       return ownIds.has(item.id);
     });
-    ownBodyRects.push(...getShape2dRects(ownItems, undefined, modelItemMap));
+    ownBodyRects.push(
+      ...getShape2dRects(ownItems, undefined, modelItemMap).map((rect) => {
+        // Soft stub must slightly overlap the free-space cable so butt-cap
+        // style-run seams do not leave a hairline gap at the chassis edge.
+        const pad = 0.5;
+        return {
+          minX: rect.minX - pad,
+          minY: rect.minY - pad,
+          maxX: rect.maxX + pad,
+          maxY: rect.maxY + pad
+        };
+      })
+    );
 
     const terminating = new Set(
       (endpointPorts ?? []).map((ep) => {
@@ -679,7 +691,48 @@ export const splitConnectorPathByNodeBodies = ({
     });
   }
 
-  return runs;
+  // Overlap neighbouring style runs so separate SVG strokes with butt caps
+  // do not show a hairline gap (especially soft stub → solid cable).
+  return overlapConnectorStyleRuns(runs, 0.14);
+};
+
+/** Extend each run slightly into its neighbours along the path direction. */
+const overlapConnectorStyleRuns = (
+  runs: ConnectorPathStyleRun[],
+  overlapTiles: number
+): ConnectorPathStyleRun[] => {
+  if (runs.length < 2 || overlapTiles <= 0) return runs;
+
+  return runs.map((run, index) => {
+    const points = run.points.map((point) => {
+      return { ...point };
+    });
+    if (points.length < 2) return run;
+
+    if (index > 0) {
+      const a = points[0];
+      const b = points[1];
+      const len = Math.hypot(b.x - a.x, b.y - a.y) || 1;
+      const t = Math.min(overlapTiles / len, 0.4);
+      points[0] = {
+        x: a.x - (b.x - a.x) * t,
+        y: a.y - (b.y - a.y) * t
+      };
+    }
+
+    if (index < runs.length - 1) {
+      const a = points[points.length - 2];
+      const b = points[points.length - 1];
+      const len = Math.hypot(b.x - a.x, b.y - a.y) || 1;
+      const t = Math.min(overlapTiles / len, 0.4);
+      points[points.length - 1] = {
+        x: b.x + (b.x - a.x) * t,
+        y: b.y + (b.y - a.y) * t
+      };
+    }
+
+    return { ...run, points };
+  });
 };
 
 /** Axis-aligned footprint overlap (touching edges is OK when gap=0). */
@@ -1520,6 +1573,51 @@ export const isShape2dPortInUse = ({
 };
 
 /**
+ * Item ids that currently render with CSS scale(1.15) — selected nodes and
+ * gear mounted in a selected cabinet. Optional extras: e.g. port-hover peer.
+ * Must stay in sync with Nodes.tsx selectionTone === 'highlighted' scale.
+ */
+export const getScaledShape2dItemIds = ({
+  selectedItemIds,
+  viewItems,
+  modelItems,
+  extraScaledItemIds
+}: {
+  selectedItemIds: string[];
+  viewItems: { id: string; parentId?: string }[];
+  modelItems: { id: string; icon?: string }[];
+  extraScaledItemIds?: Iterable<string | null | undefined> | null;
+}): Set<string> => {
+  const ids = new Set<string>();
+  const iconById = new Map(
+    modelItems.map((item) => {
+      return [item.id, item.icon];
+    })
+  );
+  const selected = new Set(selectedItemIds);
+
+  selectedItemIds.forEach((id) => {
+    if (iconById.get(id) !== SHAPE_2D_CABINET_ID) {
+      ids.add(id);
+    }
+  });
+
+  viewItems.forEach((item) => {
+    if (item.parentId && selected.has(item.parentId)) {
+      ids.add(item.id);
+    }
+  });
+
+  extraScaledItemIds?.forEach((id) => {
+    if (!id) return;
+    if (iconById.get(id) === SHAPE_2D_CABINET_ID) return;
+    ids.add(id);
+  });
+
+  return ids;
+};
+
+/**
  * Port under a continuous tile-space point (visual jack box, not just cell).
  * When several ports overlap, the nearest jack center wins.
  * `stickyHover` keeps the magnified jack hittable (hysteresis).
@@ -1626,19 +1724,22 @@ export const getShape2dPortAtTile = ({
   modelItems,
   isPortAvailable,
   point,
-  stickyHover = null
+  stickyHover = null,
+  highlightedItemIds
 }: GetShape2dItemAtTile & {
   isPortAvailable?: (hit: Shape2dPortHit) => boolean;
   /** Continuous tile coords — preferred for accurate visual hits. */
   point?: Coords;
   stickyHover?: Shape2dPortHover | null;
+  highlightedItemIds?: Set<string> | null;
 }): Shape2dPortHit | null => {
   return getShape2dPortAtPoint({
     point: point ?? { x: tile.x + 0.5, y: tile.y + 0.5 },
     scene,
     modelItems,
     isPortAvailable,
-    stickyHover
+    stickyHover,
+    highlightedItemIds
   });
 };
 

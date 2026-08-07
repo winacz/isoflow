@@ -74,6 +74,9 @@ export const Connector2d = memo(({
   const cableWidthScale = useUiStateStore((state) => {
     return state.cableWidthScale;
   });
+  const animateConnectors = useUiStateStore((state) => {
+    return state.animateConnectors;
+  });
 
   const linkSummary = useMemo(() => {
     return getConnectorRelationSummary({
@@ -284,9 +287,9 @@ export const Connector2d = memo(({
         return `0, ${connectorWidthPx * 1.8}`;
       case 'SOLID':
       default:
-        return 'none';
+        return animateConnectors ? `${connectorWidthPx * 2.5}, ${connectorWidthPx * 2.5}` : 'none';
     }
-  }, [connector.style, connectorWidthPx]);
+  }, [connector.style, connectorWidthPx, animateConnectors]);
 
   // Through-node: lighter + a bit sparser than solid, but still readable.
   const throughNodeDashArray = `${Math.max(3, connectorWidthPx * 1.0)}, ${Math.max(6, connectorWidthPx * 2.15)}`;
@@ -454,6 +457,11 @@ export const Connector2d = memo(({
                 strokeOpacity={runLineOpacity}
                 strokeDasharray={dash}
                 fill="none"
+                style={
+                  animateConnectors && dash !== 'none'
+                    ? { animation: 'connectorFlow 1s linear infinite' }
+                    : undefined
+                }
               />
             </g>
           );
