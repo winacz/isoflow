@@ -102,6 +102,9 @@ export const UiOverlay = () => {
   const focusedPortIds = useUiStateStore((state) => {
     return state.focusedPortIds;
   });
+  const shape2dPortHover = useUiStateStore((state) => {
+    return state.shape2dPortHover;
+  });
   const projectionMode = useUiStateStore((state) => {
     return state.projectionMode;
   });
@@ -126,7 +129,10 @@ export const UiOverlay = () => {
   // In the 2D plan the dock always has content: with nothing selected it shows
   // a short hint (layout tools are on the RMB context menu).
   const hasItemControlsContent = Boolean(itemControls) || isTwoD;
-  /** Cable relation HUD: selected cable, or cable attached to a focused port. */
+  /**
+   * Cable relation tile: selected cable, drawing mode, focused port, or
+   * simply hovering a connected port on the plan.
+   */
   const selectedConnectorId = useMemo(() => {
     if (itemControls?.type === 'CONNECTOR') {
       return itemControls.id;
@@ -148,12 +154,23 @@ export const UiOverlay = () => {
         if (connectorId) return connectorId;
       }
     }
+    if (
+      isPlan2dCanvas(projectionMode) &&
+      shape2dPortHover?.portId
+    ) {
+      return findConnectorIdForPort(
+        connectors,
+        shape2dPortHover.itemId,
+        shape2dPortHover.portId
+      );
+    }
     return null;
   }, [
     itemControls,
     mode,
     projectionMode,
     focusedPortIds,
+    shape2dPortHover,
     connectors
   ]);
 
@@ -346,8 +363,8 @@ export const UiOverlay = () => {
                           lineHeight: 1.45
                         }}
                       >
-                        Wybierz kabel lub port z połączeniem, aby zobaczyć
-                        relację.
+                        Najedź na podłączony port albo wybierz kabel, aby
+                        zobaczyć relację.
                       </Typography>
                     </Box>
                   )}

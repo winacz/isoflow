@@ -12,6 +12,7 @@ import { useIsoProjection } from 'src/hooks/useIsoProjection';
 import { useConnector } from 'src/hooks/useConnector';
 import { useScene } from 'src/hooks/useScene';
 import { useColor } from 'src/hooks/useColor';
+import { useUiStateStore } from 'src/stores/uiStateStore';
 
 interface Props {
   connector: ReturnType<typeof useScene>['connectors'][0];
@@ -23,6 +24,9 @@ export const Connector = ({ connector: _connector, isSelected }: Props) => {
   const color = useColor(_connector.color);
   const { currentView } = useScene();
   const connector = useConnector(_connector.id);
+  const cableWidthScale = useUiStateStore((state) => {
+    return state.cableWidthScale;
+  });
   const { css, pxSize } = useIsoProjection({
     ...connector.path.rectangle
   });
@@ -73,8 +77,8 @@ export const Connector = ({ connector: _connector, isSelected }: Props) => {
   }, [connector.path.tiles]);
 
   const connectorWidthPx = useMemo(() => {
-    return (UNPROJECTED_TILE_SIZE / 100) * connector.width;
-  }, [connector.width]);
+    return (UNPROJECTED_TILE_SIZE / 100) * connector.width * cableWidthScale;
+  }, [connector.width, cableWidthScale]);
 
   const strokeDashArray = useMemo(() => {
     switch (connector.style) {

@@ -318,6 +318,11 @@ export interface UiState {
    */
   vlan1CableColor: string | null;
   /**
+   * Session-only global multiplier for 2D cable stroke width.
+   * `1` = default; does not write into connector model widths.
+   */
+  cableWidthScale: number;
+  /**
    * 2D: disable fancy pathfinding — cables are plain endpoint↔endpoint L/U.
    * Through-node dash coloring still applies.
    */
@@ -392,6 +397,8 @@ export interface UiStateActions {
   setDiagramBackgroundColor: (color: string | null) => void;
   /** Temporary: override VLAN 1 / untagged cable color, or null to reset. */
   setVlan1CableColor: (color: string | null) => void;
+  /** Temporary: global 2D cable width multiplier (1 = default). */
+  setCableWidthScale: (scale: number) => void;
   setSimplePaths: (enabled: boolean) => void;
   toggleSimplePaths: () => void;
   setRoutingStyle: (style: UiState['routingStyle']) => void;

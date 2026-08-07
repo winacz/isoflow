@@ -36,7 +36,9 @@ export const getScrollForZoomChange = (
 
 /**
  * Apply one wheel event to a zoom value.
- * Mouse notches (±100/120) are softened; trackpad micro-deltas stay fine-grained.
+ * Mouse notches (±100/120) stay as small consistent steps; Mac trackpad
+ * pinch (ctrl+wheel, tiny pixel deltas) uses a higher gain so you do not
+ * need a long gesture to zoom a useful amount.
  */
 export const zoomFromWheelDelta = (
   zoom: number,
@@ -47,12 +49,18 @@ export const zoomFromWheelDelta = (
   let pixels =
     deltaMode === 1 ? deltaY * 16 : deltaMode === 2 ? deltaY * 800 : deltaY;
 
-  // Typical mouse wheel notch — treat as a small, consistent step (~6%)
-  if (Math.abs(pixels) >= 40) {
+  const abs = Math.abs(pixels);
+
+  // Typical mouse wheel notch — treat as a small, consistent step (~8%).
+  if (abs >= 40) {
     pixels = Math.sign(pixels) * 40;
+    const factor = Math.exp(-pixels * 0.002);
+    return clamp(zoom * factor, minZoom, MAX_ZOOM);
   }
 
-  const factor = Math.exp(-pixels * 0.0015);
+  // Trackpad pinch / fine pixel deltas (often |Δ| ≈ 1–20 per event on macOS).
+  // Previous gain (0.0015) felt sluggish — ~3× makes pinch usable.
+  const factor = Math.exp(-pixels * 0.0045);
   return clamp(zoom * factor, minZoom, MAX_ZOOM);
 };
 
@@ -92,7 +100,8 @@ export const createSmoothZoomController = () => {
     }
 
     const oldZoom = current;
-    current += diff * 0.28;
+    // Slightly snappier follow so trackpad pinch does not feel delayed.
+    current += diff * 0.38;
     
     if (setScroll && currentFocal) {
       const fc = currentFocal; // copy for closure

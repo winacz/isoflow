@@ -368,6 +368,11 @@ export type ConnectorPathStyleRun = {
    * Takes visual priority over throughNode when both apply.
    */
   throughCabinet?: boolean;
+  /**
+   * Soft solid while crossing the own endpoint chassis / jack stub.
+   * Slightly more transparent than free-space cable.
+   */
+  throughOwnBody?: boolean;
 };
 
 /** Entry/exit points where segment a→b tunnels through foreign rects (t ∈ (0,1)). */
@@ -446,9 +451,13 @@ const segmentTunnelEdges = (
 };
 
 /**
- * Split a connector path into solid / through-node (dashed) / through-cabinet runs.
+ * Split a connector path into solid / through-node / through-own-body /
+ * through-cabinet runs.
  * Transition sits exactly on the device outer edge (not tile centers before/after).
- * Endpoint devices stay solid — dash only when crossing a foreign node body.
+ * Foreign node bodies → dashed throughNode.
+ * Own chassis (not over other ports) → soft throughOwnBody (slightly faded solid),
+ * including the short stub at the terminating jack.
+ * Crossing *other* ports of the same switch → throughCabinet under-device fade.
  * Sparse A↔B previews still dash mid-segment when the chord tunnels a body.
  * Optional `fadeCabinetRect`: patch→external cables fade inside the cabinet.
  */
@@ -456,148 +465,219 @@ export const splitConnectorPathByNodeBodies = ({
   tiles,
   items,
   modelItems,
+  endpointItemIds,
+  endpointPorts,
   fadeCabinetRect
 }: {
   tiles: Coords[];
   items: { id: string; tile: Coords }[];
   modelItems: { id: string; icon?: string }[];
+  /** Connector's own nodes — soft body fade; see endpointPorts. */
+  endpointItemIds?: Iterable<string>;
+  /** Terminating ports — soft stub over these jacks (same as own body). */
+  endpointPorts?: { itemId: string; portId: string }[];
   /** Cabinet AABB — segments inside get throughCabinet styling. */
   fadeCabinetRect?: Shape2dRect | null;
 }): ConnectorPathStyleRun[] => {
   if (tiles.length === 0) return [];
 
-  const modelItemMap = new Map(modelItems.map(i => [i.id, i]));
-  const rects = getShape2dRects(items, undefined, modelItemMap);
+  const modelItemMap = new Map(modelItems.map((i) => [i.id, i]));
+  const ownIds = endpointItemIds ? new Set(endpointItemIds) : null;
+  const foreignItems = ownIds
+    ? items.filter((item) => {
+        return !ownIds.has(item.id);
+      })
+    : items;
+  const foreignRects = getShape2dRects(foreignItems, undefined, modelItemMap);
 
-  type RunKind = 'solid' | 'node' | 'cabinet';
-  const kindOf = (tile: Coords): RunKind => {
-    const center = tileCenter(tile);
-    if (fadeCabinetRect && isPointInRect(center, fadeCabinetRect)) {
+  const ownBodyRects: Shape2dRect[] = [];
+  const endpointJackRects: Shape2dRect[] = [];
+  // Other jacks on the same switch the cable runs across — under-device fade only.
+  const siblingPortRects: Shape2dRect[] = [];
+  if (ownIds) {
+    const ownItems = items.filter((item) => {
+      return ownIds.has(item.id);
+    });
+    ownBodyRects.push(...getShape2dRects(ownItems, undefined, modelItemMap));
+
+    const terminating = new Set(
+      (endpointPorts ?? []).map((ep) => {
+        return `${ep.itemId}:${ep.portId}`;
+      })
+    );
+    const portHalf = SHAPE_2D_PORT_VISUAL_SIZE_TILES / 2;
+    const jackKeep = portHalf * 1.15;
+
+    ownItems.forEach((viewItem) => {
+      const modelItem = modelItemMap.get(viewItem.id);
+      if (!modelItem?.icon) return;
+      getShape2dPorts(modelItem.icon).forEach((port) => {
+        const worldTile = getShape2dPortWorldTile(viewItem.tile, port.tile);
+        const cx = worldTile.x + 0.5;
+        const cy = worldTile.y + 0.5;
+        if (terminating.has(`${viewItem.id}:${port.id}`)) {
+          endpointJackRects.push({
+            minX: cx - jackKeep,
+            minY: cy - jackKeep,
+            maxX: cx + jackKeep,
+            maxY: cy + jackKeep
+          });
+          return;
+        }
+        siblingPortRects.push({
+          minX: cx - portHalf,
+          minY: cy - portHalf,
+          maxX: cx + portHalf,
+          maxY: cy + portHalf
+        });
+      });
+    });
+  }
+
+  const allRects = [
+    ...foreignRects,
+    ...ownBodyRects,
+    ...siblingPortRects,
+    ...endpointJackRects,
+    ...(fadeCabinetRect ? [fadeCabinetRect] : [])
+  ];
+
+  const getIntersections = (
+    a: Coords,
+    b: Coords,
+    rects: Shape2dRect[]
+  ): { t: number; p: Coords }[] => {
+    const hits: { t: number; p: Coords }[] = [];
+    const eps = 1e-6;
+    const dx = b.x - a.x;
+    const dy = b.y - a.y;
+
+    rects.forEach((rect) => {
+      const consider = (t: number, x: number, y: number, onFace: boolean) => {
+        if (!onFace || t < eps || t > 1 - eps) return;
+        hits.push({ t, p: { x, y } });
+      };
+      if (Math.abs(dx) > eps) {
+        const tLeft = (rect.minX - a.x) / dx;
+        const yLeft = a.y + tLeft * dy;
+        consider(
+          tLeft,
+          rect.minX,
+          yLeft,
+          yLeft >= rect.minY - eps && yLeft <= rect.maxY + eps
+        );
+        const tRight = (rect.maxX - a.x) / dx;
+        const yRight = a.y + tRight * dy;
+        consider(
+          tRight,
+          rect.maxX,
+          yRight,
+          yRight >= rect.minY - eps && yRight <= rect.maxY + eps
+        );
+      }
+      if (Math.abs(dy) > eps) {
+        const tTop = (rect.minY - a.y) / dy;
+        const xTop = a.x + tTop * dx;
+        consider(
+          tTop,
+          xTop,
+          rect.minY,
+          xTop >= rect.minX - eps && xTop <= rect.maxX + eps
+        );
+        const tBottom = (rect.maxY - a.y) / dy;
+        const xBottom = a.x + tBottom * dx;
+        consider(
+          tBottom,
+          xBottom,
+          rect.maxY,
+          xBottom >= rect.minX - eps && xBottom <= rect.maxX + eps
+        );
+      }
+    });
+
+    hits.sort((left, right) => {
+      return left.t - right.t;
+    });
+    const unique: { t: number; p: Coords }[] = [];
+    hits.forEach((hit) => {
+      const prev = unique[unique.length - 1];
+      if (prev && Math.abs(prev.t - hit.t) < eps) return;
+      unique.push(hit);
+    });
+    return unique;
+  };
+
+  type RunKind = 'solid' | 'node' | 'ownBody' | 'cabinet';
+  const kindOf = (p: Coords): RunKind => {
+    if (fadeCabinetRect && isPointInRect(p, fadeCabinetRect)) {
       return 'cabinet';
     }
+    // Across other ports of the same switch → under-device fade.
+    if (siblingPortRects.some((r) => isPointInRect(p, r))) {
+      return 'cabinet';
+    }
+    // Own chassis + terminating jack stub → soft solid (slightly faded).
     if (
-      isTileOnAnyShape2dBody({
-        tile,
-        items,
-        modelItemMap
-      })
+      ownBodyRects.some((r) => isPointInRect(p, r)) ||
+      endpointJackRects.some((r) => isPointInRect(p, r))
     ) {
+      return 'ownBody';
+    }
+    if (foreignRects.some((r) => isPointInRect(p, r))) {
       return 'node';
     }
     return 'solid';
   };
 
-  const toFlags = (kind: RunKind) => ({
-    throughNode: kind === 'node',
-    throughCabinet: kind === 'cabinet'
-  });
-
-  const flags = tiles.map((tile) => kindOf(tile));
+  const toFlags = (kind: RunKind): Omit<ConnectorPathStyleRun, 'points'> => {
+    return {
+      throughNode: kind === 'node',
+      throughCabinet: kind === 'cabinet',
+      throughOwnBody: kind === 'ownBody'
+    };
+  };
 
   const runs: ConnectorPathStyleRun[] = [];
   let currentPoints: Coords[] = [tileCenter(tiles[0])];
-  let currentKind: RunKind = flags[0];
-
-  const flush = () => {
-    if (currentPoints.length >= 2) {
-      runs.push({
-        points: currentPoints,
-        ...toFlags(currentKind)
-      });
-    }
-  };
-
-  const boundaryRectFor = (
-    insideTile: Coords,
-    outsideTile: Coords,
-    kind: RunKind
-  ): Shape2dRect | null => {
-    if (kind === 'cabinet' && fadeCabinetRect) return fadeCabinetRect;
-    return (
-      findRectContainingTile(insideTile, rects) ??
-      findRectContainingTile(outsideTile, rects)
-    );
-  };
+  let currentKind: RunKind | null = null;
 
   for (let i = 1; i < tiles.length; i += 1) {
-    const prevKind = flags[i - 1];
-    const nextKind = flags[i];
-    const prevCenter = tileCenter(tiles[i - 1]);
-    const nextCenter = tileCenter(tiles[i]);
+    const a = tileCenter(tiles[i - 1]);
+    const b = tileCenter(tiles[i]);
+    const intersections = getIntersections(a, b, allRects);
 
-    // Both outside nodes/cabinet — chord may still tunnel a body.
-    if (prevKind === 'solid' && nextKind === 'solid' && rects.length > 0) {
-      const edges = segmentTunnelEdges(prevCenter, nextCenter, rects);
-      if (edges.length >= 2) {
-        for (let e = 0; e + 1 < edges.length; e += 2) {
-          currentPoints.push(edges[e]);
-          flush();
-          currentKind = 'node';
-          currentPoints = [edges[e], edges[e + 1]];
-          flush();
-          currentKind = 'solid';
-          currentPoints = [edges[e + 1]];
+    const pts = [a, ...intersections.map((hit) => hit.p), b];
+    for (let j = 0; j < pts.length - 1; j += 1) {
+      const p1 = pts[j];
+      const p2 = pts[j + 1];
+      const mid = { x: (p1.x + p2.x) / 2, y: (p1.y + p2.y) / 2 };
+      const kind = kindOf(mid);
+
+      if (currentKind === null) {
+        currentKind = kind;
+      }
+
+      if (kind === currentKind) {
+        currentPoints.push(p2);
+      } else {
+        if (currentPoints.length >= 2) {
+          runs.push({
+            points: [...currentPoints],
+            ...toFlags(currentKind)
+          });
         }
-        currentPoints.push(nextCenter);
-        continue;
+        currentPoints = [p1, p2];
+        currentKind = kind;
       }
     }
-
-    // Chord may enter/leave the fade cabinet between sparse tiles.
-    if (
-      fadeCabinetRect &&
-      prevKind === 'solid' &&
-      nextKind === 'solid' &&
-      !isPointInRect(prevCenter, fadeCabinetRect) &&
-      !isPointInRect(nextCenter, fadeCabinetRect)
-    ) {
-      const edges = segmentTunnelEdges(prevCenter, nextCenter, [
-        fadeCabinetRect
-      ]);
-      if (edges.length >= 2) {
-        for (let e = 0; e + 1 < edges.length; e += 2) {
-          currentPoints.push(edges[e]);
-          flush();
-          currentKind = 'cabinet';
-          currentPoints = [edges[e], edges[e + 1]];
-          flush();
-          currentKind = 'solid';
-          currentPoints = [edges[e + 1]];
-        }
-        currentPoints.push(nextCenter);
-        continue;
-      }
-    }
-
-    if (prevKind === nextKind) {
-      currentPoints.push(nextCenter);
-      continue;
-    }
-
-    const insideTile = prevKind !== 'solid' ? tiles[i - 1] : tiles[i];
-    const outsideTile = prevKind !== 'solid' ? tiles[i] : tiles[i - 1];
-    const crossingKind = prevKind !== 'solid' ? prevKind : nextKind;
-    const rect = boundaryRectFor(insideTile, outsideTile, crossingKind);
-
-    const edge = rect
-      ? exitPointOnRectEdge(
-          tileCenter(insideTile),
-          tileCenter(outsideTile),
-          rect
-        )
-      : {
-          x: (prevCenter.x + nextCenter.x) / 2,
-          y: (prevCenter.y + nextCenter.y) / 2
-        };
-
-    currentPoints.push(edge);
-    flush();
-
-    currentKind = nextKind;
-    currentPoints = [edge, nextCenter];
   }
 
-  flush();
+  if (currentPoints.length >= 2 && currentKind !== null) {
+    runs.push({
+      points: currentPoints,
+      ...toFlags(currentKind)
+    });
+  }
 
   return runs;
 };

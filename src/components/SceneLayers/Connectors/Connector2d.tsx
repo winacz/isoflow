@@ -71,6 +71,9 @@ export const Connector2d = memo(({
   const vlan1CableColor = useUiStateStore((state) => {
     return state.vlan1CableColor;
   });
+  const cableWidthScale = useUiStateStore((state) => {
+    return state.cableWidthScale;
+  });
 
   const linkSummary = useMemo(() => {
     return getConnectorRelationSummary({
@@ -208,6 +211,8 @@ export const Connector2d = memo(({
       tiles: globalTiles,
       items,
       modelItems,
+      endpointItemIds,
+      endpointPorts,
       fadeCabinetRect
     });
   }, [globalTiles, items, modelItems, endpointItemIds, endpointPorts, softDim]);
@@ -265,10 +270,11 @@ export const Connector2d = memo(({
   }, [isSelected, connector, mouseTile, bounds]);
 
   const connectorWidthPx = useMemo(() => {
-    const base = (TILE_SIZE_2D / 100) * connector.width * 1.25;
+    const base =
+      (TILE_SIZE_2D / 100) * connector.width * 1.25 * cableWidthScale;
     // Untagged links read clearer when slightly heavier
     return isUntaggedLink ? base * 1.45 : base;
-  }, [connector.width, isUntaggedLink]);
+  }, [connector.width, isUntaggedLink, cableWidthScale]);
 
   const solidDashArray = useMemo(() => {
     switch (connector.style) {
@@ -327,7 +333,10 @@ export const Connector2d = memo(({
   /** Fade for segments under foreign node bodies — still visible, not solid. */
   const throughNodeLineOpacity = lineOpacity * 0.45;
   const throughNodeOutlineOpacity = outlineOpacity * 0.36;
-  /** Stronger fade for patch-panel horizontal runs inside the cabinet. */
+  /** Soft solid while crossing own endpoint chassis (not over sibling ports). */
+  const throughOwnBodyLineOpacity = lineOpacity * 0.58;
+  const throughOwnBodyOutlineOpacity = outlineOpacity * 0.42;
+  /** Stronger fade for patch-panel / under-switch runs. */
   const throughCabinetLineOpacity = lineOpacity * 0.22;
   const throughCabinetOutlineOpacity = outlineOpacity * 0.16;
 
@@ -391,6 +400,7 @@ export const Connector2d = memo(({
             tileSize: TILE_SIZE_2D
           });
           const isCabinetRun = Boolean(run.throughCabinet);
+          const isOwnBodyRun = Boolean(run.throughOwnBody);
           const dash = isCabinetRun
             ? throughCabinetDashArray
             : run.throughNode
@@ -401,17 +411,26 @@ export const Connector2d = memo(({
             ? throughCabinetLineOpacity
             : run.throughNode
               ? throughNodeLineOpacity
-              : lineOpacity;
+              : isOwnBodyRun
+                ? throughOwnBodyLineOpacity
+                : lineOpacity;
           const runOutlineOpacity = isCabinetRun
             ? throughCabinetOutlineOpacity
             : run.throughNode
               ? throughNodeOutlineOpacity
-              : outlineOpacity;
+              : isOwnBodyRun
+                ? throughOwnBodyOutlineOpacity
+                : outlineOpacity;
+          const runKey = isCabinetRun
+            ? 'cab'
+            : run.throughNode
+              ? 'in'
+              : isOwnBodyRun
+                ? 'own'
+                : 'out';
 
           return (
-            <g
-              key={`${isCabinetRun ? 'cab' : run.throughNode ? 'in' : 'out'}-${index}`}
-            >
+            <g key={`${runKey}-${index}`}>
               <path
                 d={pathD}
                 stroke={theme.palette.common.white}

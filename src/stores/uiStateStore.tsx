@@ -65,6 +65,7 @@ const initialState = () => {
       canvasByMode: INITIAL_UI_STATE.canvasByMode,
       viewTransformByMode: INITIAL_UI_STATE.viewTransformByMode,
       vlan1CableColor: INITIAL_UI_STATE.vlan1CableColor,
+      cableWidthScale: INITIAL_UI_STATE.cableWidthScale,
       simplePaths: INITIAL_UI_STATE.simplePaths,
       routingStyle: INITIAL_UI_STATE.routingStyle,
       isWorkshopOpen: INITIAL_UI_STATE.isWorkshopOpen,
@@ -397,6 +398,9 @@ const initialState = () => {
 },
         setVlan1CableColor: (vlan1CableColor) => {
           set({ vlan1CableColor });
+        },
+        setCableWidthScale: (cableWidthScale) => {
+          set({ cableWidthScale: Math.min(2.5, Math.max(0.4, cableWidthScale)) });
         },
         setSimplePaths: (simplePaths) => {
           set({ simplePaths });

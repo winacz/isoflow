@@ -597,6 +597,8 @@ export const INITIAL_UI_STATE = {
     }
   },
   vlan1CableColor: null as string | null,
+  /** Session-only global multiplier for 2D cable stroke width (1 = default). */
+  cableWidthScale: 1,
   simplePaths: false,
   routingStyle: 'ORTHOGONAL' as const
 };

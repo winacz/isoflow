@@ -7,7 +7,8 @@ import {
   Collapse,
   Divider,
   ToggleButton,
-  ToggleButtonGroup
+  ToggleButtonGroup,
+  Slider
 } from '@mui/material';
 import {
   Close as CloseIcon,
@@ -65,6 +66,12 @@ export const BackgroundColorLab = ({ open, onClose }: Props) => {
   });
   const setVlan1Color = useUiStateStore((state) => {
     return state.actions.setVlan1CableColor;
+  });
+  const cableWidthScale = useUiStateStore((state) => {
+    return state.cableWidthScale;
+  });
+  const setCableWidthScale = useUiStateStore((state) => {
+    return state.actions.setCableWidthScale;
   });
   const gridColor = useUiStateStore((state) => {
     return state.canvasByMode[modeKey]?.gridColor;
@@ -181,6 +188,41 @@ export const BackgroundColorLab = ({ open, onClose }: Props) => {
               }}
             />
 
+            <Divider />
+
+            <Stack spacing={0.5}>
+              <Stack
+                direction="row"
+                alignItems="center"
+                justifyContent="space-between"
+              >
+                <Typography variant="caption" sx={{ fontWeight: 600 }}>
+                  Grubość kabli
+                </Typography>
+                <Typography
+                  variant="caption"
+                  color="text.secondary"
+                  sx={{ fontVariantNumeric: 'tabular-nums' }}
+                >
+                  {cableWidthScale.toFixed(1)}×
+                </Typography>
+              </Stack>
+              <Slider
+                size="small"
+                min={0.4}
+                max={2.5}
+                step={0.1}
+                value={cableWidthScale}
+                onChange={(_, value) => {
+                  setCableWidthScale(value as number);
+                }}
+                valueLabelDisplay="auto"
+                valueLabelFormat={(v) => {
+                  return `${Number(v).toFixed(1)}×`;
+                }}
+              />
+            </Stack>
+
             {isTwoD && (
               <>
                 <Divider />
@@ -290,6 +332,7 @@ export const BackgroundColorLab = ({ open, onClose }: Props) => {
                   setBgColor(null);
                   setVlan1Color(null);
                   setGridColor(null);
+                  setCableWidthScale(1);
                 }}
               >
                 Reset kolorów
@@ -304,6 +347,7 @@ export const BackgroundColorLab = ({ open, onClose }: Props) => {
                     background: activeBg,
                     vlan1Cable: activeVlan1,
                     gridColor: activeGrid,
+                    cableWidthScale,
                     gridStyle,
                     showGrid
                   });
