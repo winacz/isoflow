@@ -968,22 +968,27 @@ type LeafPortLink = {
 };
 
 /**
- * Swap same-footprint leaves so wires need fewer crossings: place the
- * shortest cable first (closest port), then each next leaf in a slot above
- * the ones already placed ("nadbudowa"), breaking ties toward the exit.
+ * Swap same-footprint leaves so wires need fewer crossings.
+ *
+ * - `magistrala`: shortest cable first, then stack each next leaf above
+ *   ("nadbudowa"), breaking ties toward the exit.
+ * - `diagonal`: zip port order → slot reading order (top→bottom, left→right)
+ *   so Diagonalny horizontals/diagonals do not weave across the group.
  */
 export const untangleGroupTowardExit = ({
   groupItems,
   allItems,
   modelItems,
   connectors,
-  trunkSide
+  trunkSide,
+  placement = 'magistrala'
 }: {
   groupItems: ViewItem[];
   allItems: ViewItem[];
   modelItems: ModelItem[];
   connectors: LayoutConnector[];
   trunkSide: TrunkSide;
+  placement?: 'magistrala' | 'diagonal';
 }): Record<string, Coords> => {
   if (groupItems.length < 2) return {};
 
@@ -1075,6 +1080,24 @@ export const untangleGroupTowardExit = ({
     const freeSlots = group.map((link) => {
       return { ...tiles.get(link.leafId)! };
     });
+
+    if (placement === 'diagonal') {
+      // Port order along the switch face ↔ reading order of slots.
+      // Avoids the magistrala "shortest / nadbudowa" weave that tangles
+      // Diagonalny fans.
+      const slots = [...freeSlots].sort((a, b) => {
+        if (a.y !== b.y) return a.y - b.y;
+        return a.x - b.x;
+      });
+      const orderedLeaves = [...group].sort((a, b) => {
+        if (a.portKey !== b.portKey) return a.portKey - b.portKey;
+        return a.leafId.localeCompare(b.leafId);
+      });
+      orderedLeaves.forEach((link, index) => {
+        tiles.set(link.leafId, { ...slots[index] });
+      });
+      return;
+    }
 
     // Shortest potential cable first (best slot → port over all free slots).
     const remaining = [...group].sort((a, b) => {
@@ -1321,6 +1344,8 @@ const routeBundleToSwitch = ({
     const nearestIsLeftmost = trunkRight;
     const switchBelow = towardY >= 0;
     const laneCount = ordered.length;
+    const lanePitch = exitStyle === 'oneBend' ? ONE_BEND_LANE_PITCH : 1;
+    const laneSpan = Math.max(laneCount - 1, 0) * lanePitch;
 
     let busY: number;
     if (switchBelow) {
@@ -1329,15 +1354,16 @@ const routeBundleToSwitch = ({
         busY = Math.max(busY, Math.min(...bottomRunways));
       }
     } else {
-      busY = minLeafExitY - laneCount;
+      // Band [busY .. busY+laneSpan] stays above the top leaf stubs.
+      busY = minLeafExitY - 1 - laneSpan;
       if (bottomRunways.length > 0) {
         busY = Math.min(busY, Math.min(...bottomRunways));
       }
       if (topRunways.length > 0) {
         busY = Math.min(busY, Math.min(...topRunways));
       }
-      if (busY + laneCount - 1 >= minLeafExitY) {
-        busY = minLeafExitY - laneCount;
+      if (busY + laneSpan >= minLeafExitY) {
+        busY = minLeafExitY - 1 - laneSpan;
       }
     }
 
@@ -1349,7 +1375,7 @@ const routeBundleToSwitch = ({
         ? laneCount - 1 - fromNearest
         : fromNearest;
       return clampBusYToRunways({
-        runY: busY + stackIndex,
+        runY: busY + stackIndex * lanePitch,
         switchExit,
         switchSide: cable.switchPortSide,
         stackIndex
@@ -1367,7 +1393,7 @@ const routeBundleToSwitch = ({
       const built: Record<string, Coords[]> = {};
       const usedClimbXs = new Set<number>();
 
-      ordered.forEach(({ cable, leafExit, switchExit }, laneIndex) => {
+      const laneRunYs = ordered.map(({ cable, leafExit, switchExit }, laneIndex) => {
         const fromNearest = nearestIsLeftmost
           ? laneIndex
           : laneCount - 1 - laneIndex;
@@ -1376,24 +1402,36 @@ const routeBundleToSwitch = ({
           : fromNearest;
         const runY =
           clampBusYToRunways({
-            runY: busY + stackIndex,
+            runY: busY + stackIndex * lanePitch,
             switchExit,
             switchSide: cable.switchPortSide,
             stackIndex
           }) + offset;
+        return { cable, leafExit, switchExit, runY, fromNearest };
+      });
 
-        if (exitStyle === 'oneBend') {
-          const oneBend = buildOneBendTiles({
-            leafExit,
-            switchExit,
-            runY,
-            groupBbox: bbox,
-            trunkRight
-          });
-          built[cable.connectorId] = cleanTiles(oneBend);
-          return;
-        }
+      if (exitStyle === 'oneBend') {
+        const sharedSlope = pickSharedOneBendSlope(
+          laneRunYs,
+          bbox,
+          trunkRight
+        );
+        laneRunYs.forEach(({ cable, leafExit, switchExit, runY }) => {
+          built[cable.connectorId] = cleanTiles(
+            buildOneBendTiles({
+              leafExit,
+              switchExit,
+              runY,
+              groupBbox: bbox,
+              trunkRight,
+              sharedSlope
+            })
+          );
+        });
+        return built;
+      }
 
+      laneRunYs.forEach(({ cable, leafExit, switchExit, runY, fromNearest }) => {
         const tiles: Coords[] = [leafExit];
 
         if (leafExit.y !== runY) {
@@ -1494,6 +1532,8 @@ const routeBundleToSwitch = ({
   const trunkBelow = trunkSide === 'bottom';
   const towardX = Math.sign(targetCenter.x - groupCenter.x);
   const laneCount = cables.length;
+  const lanePitch = exitStyle === 'oneBend' ? ONE_BEND_LANE_PITCH : 1;
+  const laneSpan = Math.max(laneCount - 1, 0) * lanePitch;
 
   const leafExits = cables.map((cable) => {
     return portRunwayEnd(cable.leafPortWorld, cable.leafPortSide);
@@ -1503,7 +1543,7 @@ const routeBundleToSwitch = ({
 
   const trunkBaseY = trunkBelow
     ? Math.max(bbox.y + bbox.h + 1, maxLeafExitY + 1)
-    : Math.min(bbox.y - 2, minLeafExitY - laneCount);
+    : Math.min(bbox.y - 2, minLeafExitY - 1 - laneSpan);
 
   const ordered = [...cables].sort((a, b) => {
     const xa = itemById.get(a.leafId)?.tile.x ?? 0;
@@ -1519,7 +1559,9 @@ const routeBundleToSwitch = ({
   });
 
   const naturalLaneYs = ordered.map((_, laneIndex) => {
-    return trunkBelow ? trunkBaseY + laneIndex : trunkBaseY - laneIndex;
+    return trunkBelow
+      ? trunkBaseY + laneIndex * lanePitch
+      : trunkBaseY - laneIndex * lanePitch;
   });
 
   const switchExits = ordered.map((cable) => {
@@ -1545,14 +1587,15 @@ const routeBundleToSwitch = ({
   const buildTopBottomRoutes = (offset: number): Record<string, Coords[]> => {
     const built: Record<string, Coords[]> = {};
     const usedColumns = new Set<number>();
+    const trunkRight = towardX >= 0;
 
-    ordered.forEach((cable, laneIndex) => {
+    const laneInfos = ordered.map((cable, laneIndex) => {
       const leafExit = portRunwayEnd(cable.leafPortWorld, cable.leafPortSide);
       const switchExit = switchExits[laneIndex];
-
       const laneY =
-        (trunkBelow ? trunkBaseY + laneIndex : trunkBaseY - laneIndex) +
-        offset;
+        (trunkBelow
+          ? trunkBaseY + laneIndex * lanePitch
+          : trunkBaseY - laneIndex * lanePitch) + offset;
 
       const needsSideDetour =
         trunkBelow &&
@@ -1570,18 +1613,33 @@ const routeBundleToSwitch = ({
       }
       usedColumns.add(columnX);
 
-      if (exitStyle === 'oneBend') {
-        const oneBend = buildOneBendTiles({
-          leafExit,
-          switchExit,
-          runY: laneY,
-          groupBbox: bbox,
-          trunkRight: towardX >= 0
-        });
-        built[cable.connectorId] = cleanTiles(oneBend);
-        return;
-      }
+      return { cable, leafExit, switchExit, laneY, columnX, laneIndex };
+    });
 
+    if (exitStyle === 'oneBend') {
+      const sharedSlope = pickSharedOneBendSlope(
+        laneInfos.map(({ leafExit, switchExit, laneY }) => {
+          return { leafExit, switchExit, runY: laneY };
+        }),
+        bbox,
+        trunkRight
+      );
+      laneInfos.forEach(({ cable, leafExit, switchExit, laneY }) => {
+        built[cable.connectorId] = cleanTiles(
+          buildOneBendTiles({
+            leafExit,
+            switchExit,
+            runY: laneY,
+            groupBbox: bbox,
+            trunkRight,
+            sharedSlope
+          })
+        );
+      });
+      return built;
+    }
+
+    laneInfos.forEach(({ cable, leafExit, switchExit, laneY, columnX, laneIndex }) => {
       const tiles: Coords[] = [leafExit];
       if (columnX !== leafExit.x) {
         const jogY = leafExit.y + 1 + laneIndex;
@@ -1667,23 +1725,161 @@ const routeBundleToSwitch = ({
 
 /** Horizontal stub past the group before the oneBend diagonal to the switch. */
 export const ONE_BEND_BUS_OFFSET_TILES = 3;
+/**
+ * Y pitch between Diagonalny bus lanes. Magistala keeps 1; Diagonalny needs
+ * more so long parallel diagonals do not visually merge into one bundle.
+ */
+export const ONE_BEND_LANE_PITCH = 3;
+
+/** Group→switch travel on X (+1 = right). Always from trunk side — never per-leaf. */
+export const oneBendTravelSign = (trunkRight: boolean): 1 | -1 => {
+  return trunkRight ? 1 : -1;
+};
+
+/**
+ * X corridor for the oneBend knee: between the group exit edge and the switch
+ * port, on the trunk side only. Empty when the switch sits inside / past the
+ * group on X (no room for a stub) — caller should drop vertically onto the port.
+ */
+export const oneBendBendCorridor = ({
+  switchExit,
+  groupBbox,
+  trunkRight
+}: {
+  switchExit: Coords;
+  groupBbox: { x: number; y: number; w: number; h: number };
+  trunkRight: boolean;
+}): { lo: number; hi: number } | null => {
+  const toward = oneBendTravelSign(trunkRight);
+  const groupEdgeX =
+    toward > 0 ? groupBbox.x + groupBbox.w : groupBbox.x - 1;
+  if (toward > 0) {
+    // Group → right → switch: knee in [groupEdge, switchX].
+    if (switchExit.x <= groupEdgeX) return null;
+    return { lo: groupEdgeX, hi: switchExit.x };
+  }
+  // Group → left → switch: knee in [switchX, groupEdge].
+  if (switchExit.x >= groupEdgeX) return null;
+  return { lo: switchExit.x, hi: groupEdgeX };
+};
+
+const clampBendXToCorridor = (
+  bendX: number,
+  corridor: { lo: number; hi: number } | null,
+  switchExitX: number
+): number => {
+  if (!corridor) return switchExitX;
+  return Math.min(Math.max(bendX, corridor.lo), corridor.hi);
+};
+
+/** Default horizontal offset X past the group edge (before the diagonal). */
+export const oneBendOffsetX = ({
+  leafExit,
+  switchExit,
+  groupBbox,
+  trunkRight
+}: {
+  leafExit: Coords;
+  switchExit: Coords;
+  groupBbox: { x: number; y: number; w: number; h: number };
+  trunkRight: boolean;
+}): number => {
+  const toward = oneBendTravelSign(trunkRight);
+  const corridor = oneBendBendCorridor({ switchExit, groupBbox, trunkRight });
+  if (!corridor) {
+    // No gap on the trunk side — sit on the port column (L-drop).
+    return switchExit.x;
+  }
+  const groupEdgeX = toward > 0 ? corridor.lo : corridor.hi;
+  let offsetX = groupEdgeX + toward * ONE_BEND_BUS_OFFSET_TILES;
+  offsetX = clampBendXToCorridor(offsetX, corridor, switchExit.x);
+  // Prefer staying past the leaf along the bus when there is room.
+  if (toward > 0) {
+    offsetX = Math.max(offsetX, Math.min(leafExit.x + 1, corridor.hi));
+  } else {
+    offsetX = Math.min(offsetX, Math.max(leafExit.x - 1, corridor.lo));
+  }
+  return clampBendXToCorridor(offsetX, corridor, switchExit.x);
+};
+
+/** Slope dy/dx of the diagonal from bus bend into the switch port. */
+export const oneBendSlope = (
+  bendX: number,
+  runY: number,
+  switchExit: Coords
+): number | null => {
+  const dx = switchExit.x - bendX;
+  const dy = switchExit.y - runY;
+  if (dx === 0) return null;
+  return dy / dx;
+};
+
+const medianNumber = (values: number[]): number => {
+  const sorted = [...values].sort((a, b) => a - b);
+  const mid = Math.floor(sorted.length / 2);
+  if (sorted.length % 2 === 0) {
+    return (sorted[mid - 1] + sorted[mid]) / 2;
+  }
+  return sorted[mid];
+};
+
+/**
+ * Shared diagonal slope for a Diagonalny group — median of each cable's
+ * natural bend→port slope so every port exits at the same angle.
+ * Skips cables with no trunk-side gap (would poison the median with ∞ slopes).
+ */
+export const pickSharedOneBendSlope = (
+  lanes: Array<{
+    leafExit: Coords;
+    switchExit: Coords;
+    runY: number;
+  }>,
+  groupBbox: { x: number; y: number; w: number; h: number },
+  trunkRight: boolean
+): number | null => {
+  const toward = oneBendTravelSign(trunkRight);
+  const slopes: number[] = [];
+  lanes.forEach(({ leafExit, switchExit, runY }) => {
+    if (!oneBendBendCorridor({ switchExit, groupBbox, trunkRight })) return;
+    const bendX = oneBendOffsetX({
+      leafExit,
+      switchExit,
+      groupBbox,
+      trunkRight
+    });
+    const slope = oneBendSlope(bendX, runY, switchExit);
+    if (slope === null || !Number.isFinite(slope)) return;
+    // Only slopes that travel toward the switch on the trunk axis.
+    const dx = switchExit.x - bendX;
+    if (Math.sign(dx) !== toward) return;
+    slopes.push(slope);
+  });
+  if (slopes.length === 0) return null;
+  return medianNumber(slopes);
+};
 
 /**
  * Diagonalny: ortho onto the bus, short horizontal offset past the group,
  * then a single (possibly non-45°) diagonal into the switch port.
+ * When `sharedSlope` is set, every cable in the group uses that dy/dx so
+ * ports share the same exit angle (parallel diagonals).
+ * Bend X is always clamped to the trunk-side gap — never shoots past the
+ * switch or flips to the far side of the group when the target is close.
  */
-const buildOneBendTiles = ({
+export const buildOneBendTiles = ({
   leafExit,
   switchExit,
   runY,
   groupBbox,
-  trunkRight
+  trunkRight,
+  sharedSlope = null
 }: {
   leafExit: Coords;
   switchExit: Coords;
   runY: number;
   groupBbox: { x: number; y: number; w: number; h: number };
   trunkRight: boolean;
+  sharedSlope?: number | null;
 }): Coords[] => {
   const tiles: Coords[] = [leafExit];
   const onBus = { x: leafExit.x, y: runY };
@@ -1691,20 +1887,27 @@ const buildOneBendTiles = ({
     tiles.push(onBus);
   }
 
-  const toward =
-    Math.sign(switchExit.x - leafExit.x) || (trunkRight ? 1 : -1);
-  const groupEdgeX =
-    toward > 0 ? groupBbox.x + groupBbox.w : groupBbox.x - 1;
-  let offsetX = groupEdgeX + toward * ONE_BEND_BUS_OFFSET_TILES;
-  if (toward > 0) {
-    offsetX = Math.min(offsetX, switchExit.x);
-    offsetX = Math.max(offsetX, leafExit.x + 1);
+  const corridor = oneBendBendCorridor({ switchExit, groupBbox, trunkRight });
+
+  let bendX: number;
+  if (sharedSlope !== null && Number.isFinite(sharedSlope) && corridor) {
+    const dy = switchExit.y - runY;
+    if (Math.abs(sharedSlope) < 1e-9) {
+      bendX = switchExit.x;
+    } else {
+      bendX = Math.round(switchExit.x - dy / sharedSlope);
+    }
+    bendX = clampBendXToCorridor(bendX, corridor, switchExit.x);
   } else {
-    offsetX = Math.max(offsetX, switchExit.x);
-    offsetX = Math.min(offsetX, leafExit.x - 1);
+    bendX = oneBendOffsetX({
+      leafExit,
+      switchExit,
+      groupBbox,
+      trunkRight
+    });
   }
 
-  const offsetPt = { x: offsetX, y: runY };
+  const offsetPt = { x: bendX, y: runY };
   const last = tiles[tiles.length - 1];
   if (last.x !== offsetPt.x || last.y !== offsetPt.y) {
     tiles.push(offsetPt);
@@ -1744,7 +1947,7 @@ export const routeDensityGroupBuses = ({
     })
   );
 
-  // --- Phase 1: shortest-first leaf placement (stack each next above).
+  // --- Phase 1: leaf placement (magistrala = shortest+stack; diagonal = port order).
   groups.forEach((group) => {
     if (group.memberIds.length < 2) return;
     const memberSet = new Set(group.memberIds);
@@ -1771,7 +1974,8 @@ export const routeDensityGroupBuses = ({
       allItems: items,
       modelItems,
       connectors,
-      trunkSide: dominant.trunkSide
+      trunkSide: dominant.trunkSide,
+      placement: exitStyle === 'oneBend' ? 'diagonal' : 'magistrala'
     });
     Object.assign(targets, swaps);
   });

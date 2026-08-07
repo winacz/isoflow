@@ -11,7 +11,8 @@ import {
   resolveOverlapsWithTargetDiagonal,
   shiftBusYWithTargetDiagonal,
   TARGET_DIAG_STUB_TILES,
-  diagonalExitSideSign
+  diagonalExitSideSign,
+  ONE_BEND_LANE_PITCH
 } from '../densityGroupBuses';
 
 describe('pickTrunkSideToward', () => {
@@ -1168,5 +1169,212 @@ describe('routeDensityGroupBuses', () => {
     // Final approach is a single diagonal segment (possibly non-45°).
     expect(dx).toBeGreaterThan(0);
     expect(dy).toBeGreaterThan(0);
+  });
+
+  test('oneBend spaces bus lanes so the diagonal bundle does not merge', () => {
+    const items = [
+      { id: 'pc1', tile: { x: 50, y: 10 } },
+      { id: 'pc2', tile: { x: 50 + w, y: 10 } },
+      { id: 'pc3', tile: { x: 50, y: 10 + h } },
+      { id: 'pc4', tile: { x: 50 + w, y: 10 + h } },
+      { id: 'sw', tile: { x: 0, y: 14 } }
+    ];
+    const modelItems = [
+      { id: 'pc1', icon: SHAPE_2D_PC_ID, name: 'pc1' },
+      { id: 'pc2', icon: SHAPE_2D_PC_ID, name: 'pc2' },
+      { id: 'pc3', icon: SHAPE_2D_PC_ID, name: 'pc3' },
+      { id: 'pc4', icon: SHAPE_2D_PC_ID, name: 'pc4' },
+      { id: 'sw', icon: SHAPE_2D_SWITCH_ID, name: 'sw' }
+    ];
+    const connectors = [1, 2, 3, 4].map((n) => {
+      return {
+        id: `c${n}`,
+        anchors: [
+          { id: `a${n}`, ref: { item: `pc${n}`, port: 'port-1' } },
+          { id: `b${n}`, ref: { item: 'sw', port: `port-bottom-${n}` } }
+        ]
+      };
+    });
+
+    const result = routeDensityGroupBuses({
+      items,
+      modelItems: modelItems as never,
+      connectors,
+      exitStyle: 'oneBend'
+    });
+
+    const horizY = (path: { x: number; y: number }[]) => {
+      let bestY = path[0].y;
+      let bestLen = 0;
+      for (let i = 1; i < path.length; i += 1) {
+        if (path[i].y === path[i - 1].y) {
+          const len = Math.abs(path[i].x - path[i - 1].x);
+          if (len > bestLen) {
+            bestLen = len;
+            bestY = path[i].y;
+          }
+        }
+      }
+      return bestY;
+    };
+
+    const ys = ['c1', 'c2', 'c3', 'c4']
+      .map((id) => horizY(result.routes[id]))
+      .sort((a, b) => a - b);
+
+    for (let i = 1; i < ys.length; i += 1) {
+      expect(ys[i] - ys[i - 1]).toBeGreaterThanOrEqual(ONE_BEND_LANE_PITCH);
+    }
+  });
+
+  test('oneBend places leaves in port order to reduce crossings', () => {
+    // Deliberately crossed: early ports sit on the far/bottom slots.
+    const items = [
+      { id: 'pc1', tile: { x: 40 + w, y: 10 + h } }, // bottom-right, port-1
+      { id: 'pc2', tile: { x: 40, y: 10 + h } }, // bottom-left, port-2
+      { id: 'pc3', tile: { x: 40 + w, y: 10 } }, // top-right, port-3
+      { id: 'pc4', tile: { x: 40, y: 10 } }, // top-left, port-4
+      { id: 'sw', tile: { x: 0, y: 12 } }
+    ];
+    const modelItems = [
+      { id: 'pc1', icon: SHAPE_2D_PC_ID, name: 'pc1' },
+      { id: 'pc2', icon: SHAPE_2D_PC_ID, name: 'pc2' },
+      { id: 'pc3', icon: SHAPE_2D_PC_ID, name: 'pc3' },
+      { id: 'pc4', icon: SHAPE_2D_PC_ID, name: 'pc4' },
+      { id: 'sw', icon: SHAPE_2D_SWITCH_ID, name: 'sw' }
+    ];
+    const connectors = [1, 2, 3, 4].map((n) => {
+      return {
+        id: `c${n}`,
+        anchors: [
+          { id: `a${n}`, ref: { item: `pc${n}`, port: 'port-1' } },
+          { id: `b${n}`, ref: { item: 'sw', port: `port-bottom-${n}` } }
+        ]
+      };
+    });
+
+    const result = routeDensityGroupBuses({
+      items,
+      modelItems: modelItems as never,
+      connectors,
+      exitStyle: 'oneBend'
+    });
+
+    const pos = (id: string) => {
+      return result.targets[id] ?? items.find((item) => item.id === id)!.tile;
+    };
+
+    // Reading order of slots: top-left, top-right, bottom-left, bottom-right.
+    // Port order 1..4 maps onto that — uncrosses the deliberate weave.
+    expect(pos('pc1')).toEqual({ x: 40, y: 10 });
+    expect(pos('pc2')).toEqual({ x: 40 + w, y: 10 });
+    expect(pos('pc3')).toEqual({ x: 40, y: 10 + h });
+    expect(pos('pc4')).toEqual({ x: 40 + w, y: 10 + h });
+  });
+
+  test('oneBend uses the same exit angle for every cable in a group', () => {
+    const items = [
+      { id: 'pc1', tile: { x: 40, y: 10 } },
+      { id: 'pc2', tile: { x: 40 + w, y: 10 } },
+      { id: 'pc3', tile: { x: 40, y: 10 + h } },
+      { id: 'pc4', tile: { x: 40 + w, y: 10 + h } },
+      { id: 'sw', tile: { x: 0, y: 12 } }
+    ];
+    const modelItems = [
+      { id: 'pc1', icon: SHAPE_2D_PC_ID, name: 'pc1' },
+      { id: 'pc2', icon: SHAPE_2D_PC_ID, name: 'pc2' },
+      { id: 'pc3', icon: SHAPE_2D_PC_ID, name: 'pc3' },
+      { id: 'pc4', icon: SHAPE_2D_PC_ID, name: 'pc4' },
+      { id: 'sw', icon: SHAPE_2D_SWITCH_ID, name: 'sw' }
+    ];
+    const connectors = [1, 2, 3, 4].map((n) => {
+      return {
+        id: `c${n}`,
+        anchors: [
+          { id: `a${n}`, ref: { item: `pc${n}`, port: 'port-1' } },
+          { id: `b${n}`, ref: { item: 'sw', port: `port-bottom-${n}` } }
+        ]
+      };
+    });
+
+    const result = routeDensityGroupBuses({
+      items,
+      modelItems: modelItems as never,
+      connectors,
+      exitStyle: 'oneBend'
+    });
+
+    const anglesDeg = ['c1', 'c2', 'c3', 'c4'].map((id) => {
+      const path = result.routes[id];
+      expect(path?.length).toBeGreaterThanOrEqual(2);
+      const port = path[path.length - 1];
+      const bend = path[path.length - 2];
+      const dx = port.x - bend.x;
+      const dy = port.y - bend.y;
+      expect(dx).not.toBe(0);
+      return (Math.atan2(dy, dx) * 180) / Math.PI;
+    });
+
+    const ref = anglesDeg[0];
+    anglesDeg.forEach((angle) => {
+      // Rounding + trunk-side bend clamp can nudge a few degrees on outer lanes.
+      expect(Math.abs(angle - ref)).toBeLessThan(10);
+    });
+  });
+
+  test('oneBend near overlapping target keeps all knees on the trunk side', () => {
+    // 2×3 group whose X span overlaps the switch face — old per-leaf toward
+    // flipped mid-group and sharedSlope shot bends to the far side.
+    const sw = getModelItemSize({ icon: SHAPE_2D_SWITCH_ID });
+    if (!sw) throw new Error('switch size');
+    const groupX = Math.max(2, sw.width - 4);
+    const items = [
+      { id: 'a1', tile: { x: groupX, y: 0 } },
+      { id: 'a2', tile: { x: groupX + w, y: 0 } },
+      { id: 'a3', tile: { x: groupX + 2 * w, y: 0 } },
+      { id: 'b1', tile: { x: groupX, y: h } },
+      { id: 'b2', tile: { x: groupX + w, y: h } },
+      { id: 'b3', tile: { x: groupX + 2 * w, y: h } },
+      { id: 'sw', tile: { x: 0, y: 2 } }
+    ];
+    const modelItems = [
+      ...['a1', 'a2', 'a3', 'b1', 'b2', 'b3'].map((id) => {
+        return { id, icon: SHAPE_2D_PC_ID, name: id };
+      }),
+      { id: 'sw', icon: SHAPE_2D_SWITCH_ID, name: 'sw' }
+    ];
+    const connectors = ['a1', 'a2', 'a3', 'b1', 'b2', 'b3'].map((id, i) => {
+      return {
+        id: `c${i}`,
+        anchors: [
+          { id: `l${i}`, ref: { item: id, port: 'port-1' } },
+          { id: `s${i}`, ref: { item: 'sw', port: `port-bottom-${i + 1}` } }
+        ]
+      };
+    });
+
+    const result = routeDensityGroupBuses({
+      items,
+      modelItems: modelItems as never,
+      connectors,
+      exitStyle: 'oneBend'
+    });
+
+    const ids = connectors.map((c) => c.id);
+    ids.forEach((id) => {
+      expect(result.routes[id]?.length).toBeGreaterThanOrEqual(2);
+    });
+
+    // Trunk is left (group to the right of switch origin): every knee must
+    // sit at or to the right of its port — never shoot past the chassis left.
+    ids.forEach((id) => {
+      const path = result.routes[id];
+      const port = path[path.length - 1];
+      const bend = path[path.length - 2];
+      expect(bend.x).toBeGreaterThanOrEqual(port.x);
+      // And never far past the group to the right as a wild sharedSlope spike.
+      const groupRight = groupX + 3 * w + 8;
+      expect(bend.x).toBeLessThanOrEqual(groupRight);
+    });
   });
 });
