@@ -6,14 +6,23 @@ import { useScene } from 'src/hooks/useScene';
 import { SceneLayer } from 'src/components/SceneLayer/SceneLayer';
 import { DeviceShape2d } from 'src/components/Shapes2d/DeviceShape2d';
 import { useResizeObserver } from 'src/hooks/useResizeObserver';
-import { TILE_SIZE_2D, getModelItemSize, getShape2dSize } from 'src/config';
+import {
+  TILE_SIZE_2D,
+  getModelItemSize,
+  getShape2dSize,
+  getShape2dPortIfaceName,
+  SHAPE_2D_CABINET_ID
+} from 'src/config';
 import {
   getShape2dCenterPosition,
   screenToTile2dContinuous,
   isPlanProjection,
   connectorPathTileToGlobal,
   buildConnectorSvgPathD,
-  applyPortHoverInRoot
+  applyPortHoverInRoot,
+  getConnectorRelationSummary,
+  TRUNK_RAINBOW_COLORS,
+  TRUNK_MISMATCH_COLOR
 } from 'src/utils';
 import { ModelItem } from 'src/types';
 
@@ -30,6 +39,12 @@ const LOUPE_PORT_SHOW_DELAY_MS = 700;
 
 /** Light cursor follow smoothing (ms). Low = stuck to the pointer. */
 const LOUPE_CURSOR_TAU_MS = 45;
+
+/**
+ * Must match Nodes.tsx / getShape2dPortAtPoint — selected nodes CSS-scale from
+ * centre; loupe content must use the same scale or port hover drifts.
+ */
+const NODE_HIGHLIGHT_SCALE = 1.15;
 
 /**
  * When true, loupe highlights the hovered RJ45 / cable via imperative DOM
@@ -53,16 +68,59 @@ type LoupeContent = {
   diameter: number;
 };
 
+/** Resolve loupe stroke the same way Connector2d does (VLAN / trunk / mismatch). */
+const getLoupeCableStroke = ({
+  connector,
+  modelItems,
+  connectors,
+  vlan1CableColor
+}: {
+  connector: SceneConnector;
+  modelItems: ModelItem[];
+  connectors: SceneConnector[];
+  vlan1CableColor: string | null;
+}): { color: string; isTrunk: boolean } => {
+  const summary = getConnectorRelationSummary({
+    anchors: connector.anchors,
+    modelItems,
+    connectors,
+    connectorId: connector.id,
+    resolvePortLabel: (itemId, portId) => {
+      const modelItem = modelItems.find((item) => {
+        return item.id === itemId;
+      });
+      return getShape2dPortIfaceName(modelItem?.icon ?? '', portId);
+    }
+  });
+
+  if (summary.linkMode === 'mismatch') {
+    return { color: TRUNK_MISMATCH_COLOR, isTrunk: false };
+  }
+  if (summary.linkMode === 'trunk') {
+    return { color: TRUNK_RAINBOW_COLORS[0], isTrunk: true };
+  }
+  if (summary.vlanColor) {
+    return { color: summary.vlanColor, isTrunk: false };
+  }
+  return { color: vlan1CableColor ?? '#0a0a0a', isTrunk: false };
+};
+
 /** Lightweight cable strokes for the loupe (Connector2d is too heavy / often hidden under chassis). */
 const LoupeCableLayer = React.memo(
   ({
     connectors,
+    allConnectors,
     itemId,
-    deviceCenter
+    deviceCenter,
+    modelItems,
+    vlan1CableColor
   }: {
     connectors: SceneConnector[];
+    allConnectors: SceneConnector[];
     itemId: string;
     deviceCenter: { x: number; y: number };
+    modelItems: ModelItem[];
+    vlan1CableColor: string | null;
   }) => {
     return (
       <Box
@@ -118,15 +176,25 @@ const LoupeCableLayer = React.memo(
               return anchor.ref.port as string;
             })
             .join(' ');
+          const { color, isTrunk } = getLoupeCableStroke({
+            connector,
+            modelItems,
+            connectors: allConnectors,
+            vlan1CableColor
+          });
+          const rainbowGradId = `loupe-trunk-${connector.id}`;
+          const stroke = isTrunk ? `url(#${rainbowGradId})` : color;
           const core = 4;
           const outline = core + 2.5;
+          const svgW = widthTiles * TILE_SIZE_2D;
+          const svgH = heightTiles * TILE_SIZE_2D;
 
           return (
             <Box
               key={connector.id}
               component="svg"
-              width={widthTiles * TILE_SIZE_2D}
-              height={heightTiles * TILE_SIZE_2D}
+              width={svgW}
+              height={svgH}
               sx={{
                 position: 'absolute',
                 left: minX * TILE_SIZE_2D,
@@ -135,6 +203,28 @@ const LoupeCableLayer = React.memo(
                 display: 'block'
               }}
             >
+              {isTrunk && (
+                <defs>
+                  <linearGradient
+                    id={rainbowGradId}
+                    gradientUnits="userSpaceOnUse"
+                    x1={0}
+                    y1={0}
+                    x2={Math.max(svgW, TILE_SIZE_2D)}
+                    y2={Math.max(svgH, TILE_SIZE_2D)}
+                  >
+                    {TRUNK_RAINBOW_COLORS.map((stopColor, index) => {
+                      return (
+                        <stop
+                          key={stopColor}
+                          offset={`${(index / (TRUNK_RAINBOW_COLORS.length - 1)) * 100}%`}
+                          stopColor={stopColor}
+                        />
+                      );
+                    })}
+                  </linearGradient>
+                </defs>
+              )}
               <path
                 data-loupe-cable-outline
                 d={pathD}
@@ -148,9 +238,10 @@ const LoupeCableLayer = React.memo(
               <path
                 data-loupe-cable-core
                 data-loupe-cable-ports={localPortIds}
+                data-loupe-cable-color={stroke}
                 d={pathD}
                 fill="none"
-                stroke="#0a0a0a"
+                stroke={stroke}
                 strokeWidth={core}
                 strokeLinecap="round"
                 strokeLinejoin="round"
@@ -179,7 +270,9 @@ function applyLoupePortHoverDom(
   if (root) {
     root.querySelectorAll('[data-loupe-cable-core]').forEach((node) => {
       const core = node as SVGPathElement;
-      core.setAttribute('stroke', '#0a0a0a');
+      const base =
+        core.getAttribute('data-loupe-cable-color') || '#0a0a0a';
+      core.setAttribute('stroke', base);
       core.setAttribute('stroke-width', '4');
       const outline = core.previousElementSibling as SVGPathElement | null;
       if (outline?.hasAttribute('data-loupe-cable-outline')) {
@@ -196,7 +289,7 @@ function applyLoupePortHoverDom(
       /\s+/
     );
     if (!ports.includes(portId)) return;
-    core.setAttribute('stroke', '#2563eb');
+    // Keep VLAN / trunk color — only thicken for hover emphasis.
     core.setAttribute('stroke-width', '5.5');
     const outline = core.previousElementSibling as SVGPathElement | null;
     if (outline?.hasAttribute('data-loupe-cable-outline')) {
@@ -268,6 +361,12 @@ export const PortLoupeOverlay = () => {
   });
   const showLoupe = useUiStateStore((state) => {
     return state.showLoupe;
+  });
+  const vlan1CableColor = useUiStateStore((state) => {
+    return state.vlan1CableColor;
+  });
+  const selectedItemIds = useUiStateStore((state) => {
+    return state.selectedItemIds;
   });
   const rendererEl = useUiStateStore((state) => {
     return state.rendererEl;
@@ -642,6 +741,18 @@ export const PortLoupeOverlay = () => {
   const fadeMs = visible ? LOUPE_FADE_IN_MS : LOUPE_FADE_OUT_MS;
   // The glass cancels SceneLayer zoom, so this is already screen-constant.
   const contentScale = LOUPE_MAG;
+  // Selected nodes (and gear in a selected cabinet) render with CSS scale on
+  // the canvas — match that here so loupe geometry lines up with port hit-tests.
+  const viewItem = items.find((item) => {
+    return item.id === content.itemId;
+  });
+  const isHighlightScaled =
+    modelItem.icon !== SHAPE_2D_CABINET_ID &&
+    (selectedItemIds.includes(content.itemId) ||
+      Boolean(
+        viewItem?.parentId && selectedItemIds.includes(viewItem.parentId)
+      ));
+  const highlightScale = isHighlightScaled ? NODE_HIGHLIGHT_SCALE : 1;
   const loupeConnectors = relatedConnectors.filter((connector) => {
     return connector.anchors.some((anchor) => {
       return anchor.ref.item === content.itemId;
@@ -745,29 +856,47 @@ export const PortLoupeOverlay = () => {
                   willChange: 'transform'
                 }}
               >
-                <Box sx={{ position: 'relative', zIndex: 1 }}>
-                  <DeviceShape2d
-                    itemId={modelItem.id}
-                    shapeId={modelItem.icon!}
-                    name={modelItem.name}
-                    ports={modelItem.ports}
-                    svis={modelItem.svis}
-                    ip={modelItem.dhcp ? 'DHCP' : modelItem.ip}
-                    nodeIcon={modelItem.nodeIcon}
-                    description={modelItem.description}
-                    color={modelItem.color}
-                    poweredByPoe={Boolean(modelItem.poweredByPoe)}
-                    showShadow={false}
-                    centered
-                    hoveredPortId={null}
+                <Box
+                  sx={{
+                    position: 'absolute',
+                    left: 0,
+                    top: 0,
+                    // Origin is device centre (DeviceShape2d centered + cables
+                    // offset by -deviceCenter) — same pivot as canvas Node scale.
+                    transform:
+                      highlightScale !== 1
+                        ? `scale(${highlightScale})`
+                        : undefined,
+                    transformOrigin: '0 0'
+                  }}
+                >
+                  <Box sx={{ position: 'relative', zIndex: 1 }}>
+                    <DeviceShape2d
+                      itemId={modelItem.id}
+                      shapeId={modelItem.icon!}
+                      name={modelItem.name}
+                      ports={modelItem.ports}
+                      svis={modelItem.svis}
+                      ip={modelItem.dhcp ? 'DHCP' : modelItem.ip}
+                      nodeIcon={modelItem.nodeIcon}
+                      description={modelItem.description}
+                      color={modelItem.color}
+                      poweredByPoe={Boolean(modelItem.poweredByPoe)}
+                      showShadow={false}
+                      centered
+                      hoveredPortId={null}
+                    />
+                  </Box>
+                  {/* Cables above the chassis so stubs stay visible in the glass */}
+                  <LoupeCableLayer
+                    connectors={loupeConnectors}
+                    allConnectors={connectors}
+                    itemId={content.itemId}
+                    deviceCenter={deviceCenter}
+                    modelItems={modelItems}
+                    vlan1CableColor={vlan1CableColor}
                   />
                 </Box>
-                {/* Cables above the chassis so stubs stay visible in the glass */}
-                <LoupeCableLayer
-                  connectors={loupeConnectors}
-                  itemId={content.itemId}
-                  deviceCenter={deviceCenter}
-                />
               </Box>
             </Box>
           </Box>
