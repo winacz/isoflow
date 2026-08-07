@@ -1,4 +1,4 @@
-import React, { useCallback, useMemo } from 'react';
+import React, { useCallback, useMemo, useRef, useEffect } from 'react';
 import { Box, Link, Typography, Stack } from '@mui/material';
 import {
   PROJECTED_TILE_SIZE,
@@ -75,6 +75,13 @@ export const Node = React.memo(({
     return state.rendererEl;
   });
   const { size: rendererSize } = useResizeObserver(rendererEl);
+  
+  // Keep rendererSize in a ref so the subscription doesn't need to rebind or call getBoundingClientRect
+  const rendererSizeRef = useRef(rendererSize);
+  useEffect(() => {
+    rendererSizeRef.current = rendererSize;
+  }, [rendererSize]);
+
   const { changeView } = useView();
 
   // 2Dv2 has no cables of its own — port link state comes from Plan connectors.
@@ -142,33 +149,44 @@ export const Node = React.memo(({
     });
   }, [modelItem, connectors, modelItems]);
 
-  const portAttention = useUiStateStore((state) => {
-    return state.portAttention;
-  });
-  const attentionPortId =
-    portAttention?.itemId === node.id ? portAttention.portId : null;
-  const attentionToken =
-    portAttention?.itemId === node.id ? portAttention.token : null;
-  const shape2dPortHover = useUiStateStore((state) => {
-    return state.shape2dPortHover;
-  });
+  const attentionPortId = useUiStateStore(
+    useCallback(
+      (state) => (state.portAttention?.itemId === node.id ? state.portAttention.portId : null),
+      [node.id]
+    )
+  );
+  
+  const attentionToken = useUiStateStore(
+    useCallback(
+      (state) => (state.portAttention?.itemId === node.id ? state.portAttention.token : null),
+      [node.id]
+    )
+  );
 
-  const hoveredPortId = useMemo(() => {
-    if (!shape2dPortHover) return null;
-    if (shape2dPortHover.itemId === node.id) return shape2dPortHover.portId;
+  const hoveredPortId = useUiStateStore(
+    useCallback(
+      (state) => {
+        const hover = state.shape2dPortHover;
+        if (!hover) return null;
+        if (hover.itemId === node.id) return hover.portId;
 
-    const peerPorts = getPeerHighlightedPortIdsForItem({
-      itemId: node.id,
-      selectedItemIds: [shape2dPortHover.itemId],
-      focusedPortIds: [shape2dPortHover.portId],
-      connectors
-    });
+        if (hover.portId) {
+          const peerPorts = getPeerHighlightedPortIdsForItem({
+            itemId: node.id,
+            selectedItemIds: [hover.itemId],
+            focusedPortIds: [hover.portId],
+            connectors
+          });
 
-    if (peerPorts.size > 0) {
-      return Array.from(peerPorts)[0];
-    }
-    return null;
-  }, [shape2dPortHover, node.id, connectors]);
+          if (peerPorts.size > 0) {
+            return Array.from(peerPorts)[0];
+          }
+        }
+        return null;
+      },
+      [node.id, connectors]
+    )
+  );
 
   const { iconComponent } = useIcon(
     modelItem.icon,
@@ -246,7 +264,7 @@ export const Node = React.memo(({
       const jump = planPortalJump({
         portal,
         model,
-        rendererSize
+        rendererSize: rendererSizeRef.current
       });
       if (!jump) return;
 

@@ -1407,7 +1407,7 @@ export const SHAPE_2D_PORT_HOVER_SCALE = 1.55;
 
 export type Shape2dPortHover = {
   itemId: string;
-  portId: string;
+  portId: string | null;
 };
 
 /** Whether any connector anchor already uses this item+port pair. */

@@ -183,24 +183,26 @@ export const Nodes = React.memo(({ nodes }: Props) => {
 
     if (shape2dPortHover) {
       ids.add(shape2dPortHover.itemId);
-      const hoverConnectorIds: string[] = [];
-      connectors.forEach((connector) => {
-        if (connectorUsesPort(connector, shape2dPortHover.itemId, shape2dPortHover.portId)) {
-          hoverConnectorIds.push(connector.id);
-        }
-      });
-      expandConnectorIdsThroughPatchPanels({
-        connectorIds: hoverConnectorIds,
-        connectors,
-        modelItems
-      }).forEach((connectorId) => {
-        const connector = connectors.find((con) => con.id === connectorId);
-        getEndpointItemIds(connector).forEach((id) => {
-          if (!isPatchPanelItem(modelItems.find((m) => m.id === id))) {
-            ids.add(id);
+      if (shape2dPortHover.portId) {
+        const hoverConnectorIds: string[] = [];
+        connectors.forEach((connector) => {
+          if (connectorUsesPort(connector, shape2dPortHover.itemId, shape2dPortHover.portId!)) {
+            hoverConnectorIds.push(connector.id);
           }
         });
-      });
+        expandConnectorIdsThroughPatchPanels({
+          connectorIds: hoverConnectorIds,
+          connectors,
+          modelItems
+        }).forEach((connectorId) => {
+          const connector = connectors.find((con) => con.id === connectorId);
+          getEndpointItemIds(connector).forEach((id) => {
+            if (!isPatchPanelItem(modelItems.find((m) => m.id === id))) {
+              ids.add(id);
+            }
+          });
+        });
+      }
     }
 
     return ids.size > 0 ? ids : null;

@@ -278,7 +278,7 @@ export interface UiState {
    */
   shape2dPortHover: {
     itemId: string;
-    portId: string;
+    portId: string | null;
   } | null;
   sviHover: {
     vlan: number;

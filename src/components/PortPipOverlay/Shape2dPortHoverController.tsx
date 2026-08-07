@@ -6,8 +6,10 @@ import { useResizeObserver } from 'src/hooks/useResizeObserver';
 import {
   getShape2dPortAtPoint,
   screenToTile2dContinuous,
-  isPlanProjection
+  isPlanProjection,
+  isTileInShape2dBounds
 } from 'src/utils';
+import { getModelItemSize, getShape2dSize } from 'src/config';
 
 /** Keep hover briefly when cursor slips between adjacent ports. */
 const PORT_HOVER_CLEAR_DELAY_MS = 140;
@@ -107,7 +109,28 @@ export const Shape2dPortHoverController = () => {
     });
 
     if (!portHit) {
-      if (!shape2dPortHover || clearTimerRef.current) return;
+      if (!shape2dPortHover) return;
+
+      // Check if we are still on the body of the currently hovered device
+      let isOnBody = false;
+      const viewItem = currentView?.items.find(i => i.id === shape2dPortHover.itemId);
+      const modelItem = model.items.find(i => i.id === shape2dPortHover.itemId);
+      if (viewItem && modelItem?.icon) {
+        const size = getModelItemSize(modelItem) ?? getShape2dSize(modelItem.icon);
+        if (size) {
+          isOnBody = isTileInShape2dBounds(point, viewItem.tile, size);
+        }
+      }
+
+      if (isOnBody) {
+        clearPending();
+        if (shape2dPortHover.portId !== null) {
+          setShape2dPortHover({ itemId: shape2dPortHover.itemId, portId: null });
+        }
+        return;
+      }
+
+      if (clearTimerRef.current) return;
       clearTimerRef.current = setTimeout(() => {
         setShape2dPortHover(null);
         clearTimerRef.current = null;

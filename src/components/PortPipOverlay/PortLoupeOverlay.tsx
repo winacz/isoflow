@@ -32,8 +32,7 @@ const LOUPE_FADE_OUT_MS = 320;
 const LOUPE_FADE_IN_MS = 180;
 /** Dwell before the loupe appears on port hover (ms). */
 const LOUPE_PORT_SHOW_DELAY_MS = 700;
-/** Dwell before the loupe appears on body hover (ms). */
-const LOUPE_BODY_SHOW_DELAY_MS = 500;
+
 /** Light cursor follow smoothing (ms). Low = stuck to the pointer. */
 const LOUPE_CURSOR_TAU_MS = 45;
 
@@ -221,6 +220,10 @@ export const PortLoupeOverlay = () => {
   });
   const uiStoreApi = useUiStateStoreApi();
   const { size: rendererSize } = useResizeObserver(rendererEl);
+  const rendererSizeRef = useRef(rendererSize);
+  useEffect(() => {
+    rendererSizeRef.current = rendererSize;
+  }, [rendererSize]);
   const { items, connectors } = useScene();
   const modelItems = useModelStore((state) => {
     return state.items;
@@ -247,10 +250,8 @@ export const PortLoupeOverlay = () => {
     if (!viewItem || !modelItem?.icon) return null;
 
     const ports = getModelItemPorts(modelItem);
-    const port = ports.find((p) => {
-      return p.id === hover.portId;
-    });
-    if (!port) return null;
+    const port = hover.portId ? ports.find((p) => p.id === hover.portId) : null;
+    if (hover.portId && !port) return null;
 
     const size =
       getModelItemSize(modelItem) ??
@@ -275,159 +276,15 @@ export const PortLoupeOverlay = () => {
     const diameter = loupeScreenPx / Math.max(0.01, zoom);
 
     return {
-      itemId: hover.itemId,
-      portId: port.id,
+      itemId: viewItem.id,
+      portId: port?.id ?? null,
       modelItem,
       deviceCenter,
       diameter
     };
   }, [hover, items, modelItems, projectionMode, zoom, showLoupe]);
 
-  /**
-   * Body hover: detect if cursor is on a device body (not port).
-   * We check on every mouse move via a zustand subscription (below).
-   * This state just stores the result.
-   */
-  const [bodyHoverDevice, setBodyHoverDevice] = useState<LoupeDevice | null>(null);
-  const bodyHoverTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  const clearBodyHoverTimer = useCallback(() => {
-    if (bodyHoverTimerRef.current) {
-      clearTimeout(bodyHoverTimerRef.current);
-      bodyHoverTimerRef.current = null;
-    }
-  }, []);
-
-  // Build a model-item map for quick lookup.
-  const modelItemMap = useMemo(() => {
-    return new Map(modelItems.map((i) => [i.id, i]));
-  }, [modelItems]);
-
-  // Track body hover via store subscription (no React re-render on mousemove).
-  useEffect(() => {
-    if (!showLoupe || !isPlanProjection(projectionMode) || projectionMode === 'TWO_D_V2') {
-      clearBodyHoverTimer();
-      setBodyHoverDevice(null);
-      return;
-    }
-
-    let lastBodyItemId: string | null = null;
-
-    const unsubscribe = uiStoreApi.subscribe((state) => {
-      // If there's a port hover, body hover is not needed.
-      if (state.shape2dPortHover) {
-        if (lastBodyItemId) {
-          lastBodyItemId = null;
-          clearBodyHoverTimer();
-          setBodyHoverDevice(null);
-        }
-        return;
-      }
-
-      const currentZoom = state.zoom;
-      if (currentZoom >= 0.3) {
-        if (lastBodyItemId) {
-          lastBodyItemId = null;
-          clearBodyHoverTimer();
-          setBodyHoverDevice(null);
-        }
-        return;
-      }
-
-      const { mouse, scroll, rendererEl: rEl } = state;
-      if (!rEl) return;
-
-      const rect = rEl.getBoundingClientRect();
-      const rSize = { width: rect.width, height: rect.height };
-      if (!rSize.width || !rSize.height) return;
-
-      const tile = screenToTile2dContinuous({
-        mouse: mouse.position.screen,
-        zoom: currentZoom,
-        scroll,
-        rendererSize: rSize
-      });
-
-      // Check if cursor is on any device body.
-      let foundItemId: string | null = null;
-      for (const viewItem of items) {
-        const mi = modelItemMap.get(viewItem.id);
-        if (!mi?.icon) continue;
-        const size = getModelItemSize(mi) ?? getShape2dSize(mi.icon);
-        if (!size) continue;
-        if (isTileInShape2dBounds(tile, viewItem.tile, size)) {
-          foundItemId = viewItem.id;
-          break;
-        }
-      }
-
-      if (foundItemId !== lastBodyItemId) {
-        lastBodyItemId = foundItemId;
-        clearBodyHoverTimer();
-
-        if (!foundItemId) {
-          setBodyHoverDevice(null);
-          return;
-        }
-
-        // Start 500ms delay for body hover.
-        const targetId = foundItemId;
-        bodyHoverTimerRef.current = setTimeout(() => {
-          bodyHoverTimerRef.current = null;
-
-          const latestState = uiStoreApi.getState();
-          // Don't show if port hover appeared in the meantime.
-          if (latestState.shape2dPortHover) return;
-          const latestZoom = latestState.zoom;
-          if (latestZoom >= 0.3) return;
-
-          const viewItem = items.find((i) => i.id === targetId);
-          const mi = modelItemMap.get(targetId);
-          if (!viewItem || !mi?.icon) return;
-
-          const size =
-            getModelItemSize(mi) ??
-            getShape2dSize(mi.icon) ?? { width: 1, height: 1 };
-          const deviceCenter = getShape2dCenterPosition(viewItem.tile, size);
-
-          let targetPx = 248;
-          const MAX_LOUPE_PX = 400;
-          if (latestZoom <= 0.2) {
-            targetPx = MAX_LOUPE_PX;
-          } else if (latestZoom < 0.3) {
-            const linearRatio = (0.3 - latestZoom) / (0.3 - 0.2);
-            const ratio = Math.pow(linearRatio, 4);
-            targetPx = 248 + ratio * (MAX_LOUPE_PX - 248);
-          }
-          const diameter = targetPx / Math.max(0.01, latestZoom);
-
-          setBodyHoverDevice({
-            itemId: targetId,
-            portId: null,
-            modelItem: mi as ModelItem,
-            deviceCenter,
-            diameter
-          });
-        }, LOUPE_BODY_SHOW_DELAY_MS);
-      }
-    });
-
-    return () => {
-      unsubscribe();
-      clearBodyHoverTimer();
-    };
-  }, [showLoupe, projectionMode, items, modelItemMap, uiStoreApi, clearBodyHoverTimer]);
-
-  // Port hover takes priority over body hover.
-  const device = deviceFromPortHover ?? bodyHoverDevice;
-
-  // Clear body hover when port hover appears.
-  useEffect(() => {
-    if (deviceFromPortHover && bodyHoverDevice) {
-      clearBodyHoverTimer();
-      setBodyHoverDevice(null);
-    }
-  }, [deviceFromPortHover, bodyHoverDevice, clearBodyHoverTimer]);
+  const device = deviceFromPortHover;
 
   const relatedConnectors = useMemo(() => {
     if (!device) return [];
@@ -444,11 +301,8 @@ export const PortLoupeOverlay = () => {
   useEffect(() => {
     const unsubscribe = uiStoreApi.subscribe((state) => {
       const { mouse, zoom: z, scroll: s } = state;
-      const rEl = state.rendererEl;
-      if (!rEl) return;
-      const rect = rEl.getBoundingClientRect();
-      const rSize = { width: rect.width, height: rect.height };
-      if (!rSize.width || !rSize.height) return;
+      const rSize = rendererSizeRef.current;
+      if (!rSize || !rSize.width || !rSize.height) return;
 
       const tile = screenToTile2dContinuous({
         mouse: mouse.position.screen,
@@ -670,10 +524,7 @@ export const PortLoupeOverlay = () => {
       return;
     }
 
-    // Delay depends on whether it's port hover or body hover.
-    const delayMs = device.portId != null
-      ? LOUPE_PORT_SHOW_DELAY_MS
-      : LOUPE_BODY_SHOW_DELAY_MS;
+    const delayMs = LOUPE_PORT_SHOW_DELAY_MS;
 
     if (!showDelayTimerRef.current) {
       showDelayTimerRef.current = setTimeout(() => {
@@ -702,7 +553,7 @@ export const PortLoupeOverlay = () => {
     return () => {
       stopRaf();
       clearShowDelay();
-      clearBodyHoverTimer();
+
       if (fadeTimerRef.current) clearTimeout(fadeTimerRef.current);
       if (showFrameRef.current) cancelAnimationFrame(showFrameRef.current);
     };
