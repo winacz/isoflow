@@ -77,6 +77,18 @@ export type BusCorridor = {
   y1: number;
 };
 
+/**
+ * Capsule along group→hub: straight cables (Prosty) and the bus approach
+ * travel here — other group circles must stay clear.
+ */
+export type SpokeCorridor = {
+  ax: number;
+  ay: number;
+  bx: number;
+  by: number;
+  halfWidth: number;
+};
+
 /** Extra tiles between non-overlapping layout circles. */
 export const GROUP_CIRCLE_GAP = 2;
 /** Hub clearance beyond the switch circumradius. */
@@ -87,6 +99,8 @@ const MAX_RADIUS_PUSH = 200;
 export const MAGISTRALA_LANE_PITCH = 1;
 /** Extra tiles around the estimated bus band. */
 export const MAGISTRALA_BAND_PAD = 1;
+/** Fraction of group radius used as spoke half-width (cable fan). */
+export const SPOKE_HALF_WIDTH_RADIUS_FACTOR = 0.55;
 
 type MovableGroup = {
   group: DensityGroup;
@@ -295,6 +309,115 @@ export const corridorsOverlap = (
   );
 };
 
+/** Distance from point P to segment AB. */
+export const pointSegmentDistance = (
+  p: Coords,
+  a: Coords,
+  b: Coords
+): number => {
+  const dx = b.x - a.x;
+  const dy = b.y - a.y;
+  const len2 = dx * dx + dy * dy;
+  if (len2 < 1e-12) {
+    return Math.hypot(p.x - a.x, p.y - a.y);
+  }
+  let t = ((p.x - a.x) * dx + (p.y - a.y) * dy) / len2;
+  t = Math.max(0, Math.min(1, t));
+  return Math.hypot(p.x - (a.x + t * dx), p.y - (a.y + t * dy));
+};
+
+/** Closest distance between segments AB and CD. */
+export const segmentSegmentDistance = (
+  a: Coords,
+  b: Coords,
+  c: Coords,
+  d: Coords
+): number => {
+  // Sample endpoints + clamp projections — enough for layout clearance.
+  const candidates = [
+    pointSegmentDistance(a, c, d),
+    pointSegmentDistance(b, c, d),
+    pointSegmentDistance(c, a, b),
+    pointSegmentDistance(d, a, b)
+  ];
+  return Math.min(...candidates);
+};
+
+/**
+ * Half-width of the cable fan corridor toward the hub.
+ * Wide enough that another group circle cannot sit on Prosty wires.
+ */
+export const estimateSpokeHalfWidth = (
+  groupR: number,
+  cableCount: number
+): number => {
+  const busHalf = estimateMagistralaThickness(cableCount) / 2;
+  return (
+    Math.max(groupR * SPOKE_HALF_WIDTH_RADIUS_FACTOR, busHalf) +
+    MAGISTRALA_BAND_PAD
+  );
+};
+
+/**
+ * Capsule from the group rim (toward hub) to the hub rim — wire path.
+ */
+export const buildSpokeCorridor = ({
+  groupCenter,
+  groupR,
+  hub,
+  hubR,
+  halfWidth
+}: {
+  groupCenter: Coords;
+  groupR: number;
+  hub: Coords;
+  hubR: number;
+  halfWidth: number;
+}): SpokeCorridor => {
+  const dx = hub.x - groupCenter.x;
+  const dy = hub.y - groupCenter.y;
+  const len = Math.hypot(dx, dy) || 1;
+  const ux = dx / len;
+  const uy = dy / len;
+  // Start at inner rim of the group; end at outer rim of the hub.
+  const start = Math.min(groupR, Math.max(0, len - hubR - 0.5));
+  const endBack = Math.min(hubR, Math.max(0, len - start - 0.5));
+  return {
+    ax: groupCenter.x + ux * start,
+    ay: groupCenter.y + uy * start,
+    bx: hub.x - ux * endBack,
+    by: hub.y - uy * endBack,
+    halfWidth
+  };
+};
+
+export const circleHitsSpokeCorridor = (
+  circle: LayoutCircle,
+  spoke: SpokeCorridor,
+  gap = GROUP_CIRCLE_GAP
+): boolean => {
+  const d = pointSegmentDistance(
+    { x: circle.cx, y: circle.cy },
+    { x: spoke.ax, y: spoke.ay },
+    { x: spoke.bx, y: spoke.by }
+  );
+  return d < circle.r + spoke.halfWidth + gap;
+};
+
+export const spokesOverlap = (
+  a: SpokeCorridor,
+  b: SpokeCorridor,
+  gap = GROUP_CIRCLE_GAP
+): boolean => {
+  const d = segmentSegmentDistance(
+    { x: a.ax, y: a.ay },
+    { x: a.bx, y: a.by },
+    { x: b.ax, y: b.ay },
+    { x: b.bx, y: b.by }
+  );
+  return d < a.halfWidth + b.halfWidth + gap;
+};
+
 /**
  * Preferred hub-and-spoke arc: left → top → right (unwrapped π … 2π).
  * Bottom (π/2) is never in this range.
@@ -495,7 +618,7 @@ const dominantSwitchId = (links: GroupTargetLink[]): string | null => {
 
 /**
  * Push `dist` outward along the spoke until `candidate` clears circle
- * obstacles and reserved magistrala corridors.
+ * obstacles, reserved magistrala bands, and spoke wire capsules.
  */
 export const findClearSpokeDistance = ({
   hub,
@@ -504,6 +627,7 @@ export const findClearSpokeDistance = ({
   hubR,
   obstacles,
   corridors = [],
+  spokeCorridors = [],
   gap = GROUP_CIRCLE_GAP,
   maxPush = MAX_RADIUS_PUSH
 }: {
@@ -513,6 +637,7 @@ export const findClearSpokeDistance = ({
   hubR: number;
   obstacles: LayoutCircle[];
   corridors?: BusCorridor[];
+  spokeCorridors?: SpokeCorridor[];
   gap?: number;
   maxPush?: number;
 }): number | null => {
@@ -526,7 +651,10 @@ export const findClearSpokeDistance = ({
     const hitsCorridor = corridors.some((band) => {
       return circleHitsCorridor(candidate, band, gap);
     });
-    if (!hitsCircle && !hitsCorridor) return dist;
+    const hitsSpoke = spokeCorridors.some((spoke) => {
+      return circleHitsSpokeCorridor(candidate, spoke, gap);
+    });
+    if (!hitsCircle && !hitsCorridor && !hitsSpoke) return dist;
     dist += 1;
   }
   return null;
@@ -536,7 +664,8 @@ export const findClearSpokeDistance = ({
  * Place density groups in a hub-and-spoke ring around each dominant switch.
  *
  * - Sort by median switch-port key → angular order left→top→right (no bottom).
- * - Estimate magistrala thickness from cable count; reserve corridors to the hub.
+ * - Reserve spoke wire capsules (group→hub) so later groups are not parked on
+ *   Prosty / bus cable paths; also keep thin magistrala AABB bands.
  * - Centres sit on spokes; distance grows until circles clear peers and corridors.
  * - Members translate rigidly with the group centre.
  */
@@ -705,6 +834,7 @@ export const arrangeDensityGroups = ({
   const settledCircles: LayoutCircle[] = [];
   const settledBoundsList: DensityGroupBounds[] = [];
   const settledCorridors: BusCorridor[] = [];
+  const settledSpokes: SpokeCorridor[] = [];
 
   orderedHubIds.forEach((switchId) => {
     const cluster = bySwitch.get(switchId);
@@ -740,13 +870,14 @@ export const arrangeDensityGroups = ({
     const placedCircles: LayoutCircle[] = [];
     const placedBoundsList: DensityGroupBounds[] = [];
     const placedCorridors: BusCorridor[] = [];
+    const placedSpokes: SpokeCorridor[] = [];
 
     const clusterStatic = staticObstacles.filter((obs) => {
       return !(obs.memberIds.length === 1 && obs.memberIds[0] === switchId);
     });
 
     placeOrder.forEach((entry) => {
-      const angle = angleById.get(entry.group.id)!;
+      const baseAngle = angleById.get(entry.group.id)!;
       const obstacles: LayoutCircle[] = [
         { cx: hub.x, cy: hub.y, r: hubR },
         ...clusterStatic,
@@ -754,91 +885,127 @@ export const arrangeDensityGroups = ({
         ...placedCircles
       ];
       const corridors = [...settledCorridors, ...placedCorridors];
+      const spokes = [...settledSpokes, ...placedSpokes];
+
+      // Prefer assigned port-order angle; if the spoke is blocked by an
+      // already-placed group on the wire path, fan left/right on the arc.
+      const angleCandidates: number[] = [baseAngle];
+      const arcLo = Math.PI;
+      const arcHi = 2 * Math.PI;
+      for (let k = 1; k <= 14; k += 1) {
+        const delta = (k * Math.PI) / 28;
+        const left = Math.max(arcLo, baseAngle - delta);
+        const right = Math.min(arcHi, baseAngle + delta);
+        if (left !== baseAngle) angleCandidates.push(left);
+        if (right !== baseAngle) angleCandidates.push(right);
+      }
 
       let chosen: {
         dist: number;
         centre: Coords;
         corridor: BusCorridor;
+        spoke: SpokeCorridor;
         dx: number;
         dy: number;
         placedBounds: DensityGroupBounds;
         placedCircle: LayoutCircle;
       } | null = null;
-      let dist = hubR + entry.circle.r + GROUP_CIRCLE_GAP;
-      let lastSnapKey = '';
-      for (let guard = 0; guard <= MAX_RADIUS_PUSH; guard += 1) {
-        const rawCentre = pointOnSpoke(hub, angle, dist);
-        const { dx, dy } = snapGroupTranslation({
-          bounds: entry.bounds,
-          rawDx: rawCentre.x - entry.circle.cx,
-          rawDy: rawCentre.y - entry.circle.cy,
-          gridStep
-        });
-        const snapKey = `${dx},${dy}`;
-        if (snapKey === lastSnapKey) {
-          dist += 1;
-          continue;
-        }
-        lastSnapKey = snapKey;
 
-        const placedBounds: DensityGroupBounds = {
-          x: entry.bounds.x + dx,
-          y: entry.bounds.y + dy,
-          w: entry.bounds.w,
-          h: entry.bounds.h
-        };
-        const placedCircle = layoutCircleFromBounds(
-          placedBounds,
-          entry.memberIds.length
-        );
-        const hitsCircle = obstacles.some((obs) => {
-          return circlesOverlap(placedCircle, obs);
-        });
-        const hitsCorridor = corridors.some((band) => {
-          return circleHitsCorridor(placedCircle, band);
-        });
-        const hitsBounds = [...settledBoundsList, ...placedBoundsList].some(
-          (other) => {
-            return aabbChebyshevGap(placedBounds, other) < 2;
+      for (const angle of angleCandidates) {
+        let dist = hubR + entry.circle.r + GROUP_CIRCLE_GAP;
+        let lastSnapKey = '';
+        for (let guard = 0; guard <= MAX_RADIUS_PUSH; guard += 1) {
+          const rawCentre = pointOnSpoke(hub, angle, dist);
+          const { dx, dy } = snapGroupTranslation({
+            bounds: entry.bounds,
+            rawDx: rawCentre.x - entry.circle.cx,
+            rawDy: rawCentre.y - entry.circle.cy,
+            gridStep
+          });
+          const snapKey = `${dx},${dy}`;
+          if (snapKey === lastSnapKey) {
+            dist += 1;
+            continue;
           }
-        );
-        if (hitsCircle || hitsCorridor || hitsBounds) {
-          dist += 1;
-          continue;
-        }
+          lastSnapKey = snapKey;
 
-        const corridor = buildBusCorridor({
-          groupBounds: placedBounds,
-          groupCenter: {
+          const placedBounds: DensityGroupBounds = {
+            x: entry.bounds.x + dx,
+            y: entry.bounds.y + dy,
+            w: entry.bounds.w,
+            h: entry.bounds.h
+          };
+          const placedCircle = layoutCircleFromBounds(
+            placedBounds,
+            entry.memberIds.length
+          );
+          const hitsCircle = obstacles.some((obs) => {
+            return circlesOverlap(placedCircle, obs);
+          });
+          const hitsCorridor = corridors.some((band) => {
+            return circleHitsCorridor(placedCircle, band);
+          });
+          const hitsSpoke = spokes.some((spoke) => {
+            return circleHitsSpokeCorridor(placedCircle, spoke);
+          });
+          const hitsBounds = [...settledBoundsList, ...placedBoundsList].some(
+            (other) => {
+              return aabbChebyshevGap(placedBounds, other) < 2;
+            }
+          );
+          if (hitsCircle || hitsCorridor || hitsSpoke || hitsBounds) {
+            dist += 1;
+            continue;
+          }
+
+          const groupCenter = {
             x: placedCircle.cx,
             y: placedCircle.cy
-          },
-          hub,
-          hubR,
-          thickness: entry.busThickness
-        });
-        const corridorBlocked =
-          [...settledCircles, ...placedCircles].some((circle) => {
-            return circleHitsCorridor(circle, corridor);
-          }) ||
-          corridors.some((band) => {
-            return corridorsOverlap(corridor, band);
+          };
+          const corridor = buildBusCorridor({
+            groupBounds: placedBounds,
+            groupCenter,
+            hub,
+            hubR,
+            thickness: entry.busThickness
           });
-        if (corridorBlocked) {
-          dist += 1;
-          continue;
-        }
+          const spoke = buildSpokeCorridor({
+            groupCenter,
+            groupR: placedCircle.r,
+            hub,
+            hubR,
+            halfWidth: estimateSpokeHalfWidth(placedCircle.r, entry.cableCount)
+          });
+          // Only circle↔spoke checks — two spokes always meet at the hub, so
+          // capsule∩capsule would falsely reject every neighbouring seat.
+          const corridorBlocked =
+            [...settledCircles, ...placedCircles].some((circle) => {
+              return (
+                circleHitsCorridor(circle, corridor) ||
+                circleHitsSpokeCorridor(circle, spoke)
+              );
+            }) ||
+            corridors.some((band) => {
+              return corridorsOverlap(corridor, band);
+            });
+          if (corridorBlocked) {
+            dist += 1;
+            continue;
+          }
 
-        chosen = {
-          dist,
-          centre: { x: placedCircle.cx, y: placedCircle.cy },
-          corridor,
-          dx,
-          dy,
-          placedBounds,
-          placedCircle
-        };
-        break;
+          chosen = {
+            dist,
+            centre: groupCenter,
+            corridor,
+            spoke,
+            dx,
+            dy,
+            placedBounds,
+            placedCircle
+          };
+          break;
+        }
+        if (chosen) break;
       }
       if (!chosen) return;
 
@@ -865,11 +1032,13 @@ export const arrangeDensityGroups = ({
       placedCircles.push(chosen.placedCircle);
       placedBoundsList.push(chosen.placedBounds);
       placedCorridors.push(chosen.corridor);
+      placedSpokes.push(chosen.spoke);
     });
 
     settledCircles.push(...placedCircles);
     settledBoundsList.push(...placedBoundsList);
     settledCorridors.push(...placedCorridors);
+    settledSpokes.push(...placedSpokes);
   });
 
   // Final pass on movable member-sets (not recomputed density groups — those
