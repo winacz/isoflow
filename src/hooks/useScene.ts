@@ -1,7 +1,8 @@
-import { useCallback, useMemo } from 'react';
+import { useCallback, useMemo, useRef } from 'react';
 import { unstable_batchedUpdates } from 'react-dom';
 import { produce } from 'immer';
 import {
+  Model,
   ModelItem,
   ViewItem,
   Connector,
@@ -80,12 +81,13 @@ export const useScene = () => {
   const uiActions = useUiStateStore((state) => {
     return state.actions;
   });
-  const historyPush = useHistoryStore((state) => {
-    return state.push;
+  const historyPushTransition = useHistoryStore((state) => {
+    return state.pushTransition;
   });
-  const historyPop = useHistoryStore((state) => {
-    return state.pop;
+  const historyUndo = useHistoryStore((state) => {
+    return state.undo;
   });
+  const historyTransactionBeforeRef = useRef<Model | null>(null);
 
   const currentView = useMemo(() => {
     return getItemByIdOrThrow(modelViews, currentViewId).value;
@@ -133,14 +135,20 @@ export const useScene = () => {
     };
   }, [modelActions, sceneActions]);
 
-  const recordHistory = useCallback(() => {
-    historyPush(structuredClone(modelFromModelStore(modelActions.get())));
-  }, [historyPush, modelActions]);
+  const recordHistoryBefore = useCallback(
+    (after: Model) => {
+      const before =
+        historyTransactionBeforeRef.current ??
+        modelFromModelStore(modelActions.get());
+      historyPushTransition(before, after);
+    },
+    [historyPushTransition, modelActions]
+  );
 
   const setState = useCallback(
     (newState: State, options?: { skipHistory?: boolean }) => {
       if (!options?.skipHistory && !isHistoryTransactionOpen()) {
-        recordHistory();
+        recordHistoryBefore(newState.model);
       }
 
       unstable_batchedUpdates(() => {
@@ -148,30 +156,42 @@ export const useScene = () => {
         sceneActions.set(newState.scene);
       });
     },
-    [modelActions, sceneActions, recordHistory]
+    [modelActions, sceneActions, recordHistoryBefore]
   );
 
   const beginHistoryTransaction = useCallback(() => {
     if (!isHistoryTransactionOpen()) {
-      recordHistory();
+      historyTransactionBeforeRef.current = modelFromModelStore(
+        modelActions.get()
+      );
     }
     enterHistoryTransaction();
-  }, [recordHistory]);
+  }, [modelActions]);
 
   const endHistoryTransaction = useCallback(() => {
     leaveHistoryTransaction();
-  }, []);
+    if (
+      !isHistoryTransactionOpen() &&
+      historyTransactionBeforeRef.current
+    ) {
+      const after = modelFromModelStore(modelActions.get());
+      historyPushTransition(historyTransactionBeforeRef.current, after);
+      historyTransactionBeforeRef.current = null;
+    }
+  }, [historyPushTransition, modelActions]);
 
   const undo = useCallback(() => {
-    const previous = historyPop();
+    const current = modelFromModelStore(modelActions.get());
+    const previous = historyUndo(current);
     if (!previous) return false;
 
     resetHistoryTransaction();
+    historyTransactionBeforeRef.current = null;
 
-    const current = modelActions.get();
+    const store = modelActions.get();
     modelActions.set({
       ...previous,
-      actions: current.actions
+      actions: store.actions
     });
 
     const synced = reducers.view({
@@ -188,7 +208,7 @@ export const useScene = () => {
 
     sceneActions.set(synced.scene);
     return true;
-  }, [historyPop, modelActions, sceneActions, currentViewId]);
+  }, [historyUndo, modelActions, sceneActions, currentViewId]);
 
   const createModelItem = useCallback(
     (newModelItem: ModelItem) => {

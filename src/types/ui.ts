@@ -317,6 +317,8 @@ export interface UiState {
   showGrid: boolean;
   showLoupe: boolean;
   animateConnectors: boolean;
+  /** Plan device chassis look (ZoomControls popover). */
+  nodeVisualStyle: import('src/styles/nodeVisualStyles').NodeVisualStyleId;
   /**
    * Visual density of the 2D background grid (snap is 1 tile unless `rack`).
    * - fine: every tile
@@ -415,6 +417,9 @@ export interface UiStateActions {
   toggleShowGrid: () => void;
   toggleShowLoupe: () => void;
   toggleAnimateConnectors: () => void;
+  setNodeVisualStyle: (
+    style: import('src/styles/nodeVisualStyles').NodeVisualStyleId
+  ) => void;
   setGridStyle: (gridStyle: GridStyle) => void;
   /** Temporary: override grid line color for the active projection mode. */
   setGridColor: (color: string | null) => void;

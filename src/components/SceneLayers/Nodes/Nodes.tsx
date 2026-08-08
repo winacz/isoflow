@@ -1,59 +1,23 @@
 import React, { useMemo } from 'react';
-import { Box } from '@mui/material';
 import { ViewItem } from 'src/types';
 import { useUiStateStore } from 'src/stores/uiStateStore';
 import { useModelStore } from 'src/stores/modelStore';
 import { useScene } from 'src/hooks/useScene';
-import { SHAPE_2D_CABINET_ID, TILE_SIZE_2D, getModelItemSize, SWITCH_2D_SIZE } from 'src/config';
+import { SHAPE_2D_CABINET_ID, TILE_SIZE_2D, getModelItemSize } from 'src/config';
 import {
   getPortPeerItemIds,
   isPatchPanelItem,
   expandConnectorIdsThroughPatchPanels,
   isPlanProjection,
-  resolvePortPipPeer
+  resolvePortPipPeer,
+  computeHighlightScale,
+  computePortPeerHoverScale,
+  HIGHLIGHT_SCALE_BASE
 } from 'src/utils';
 import { Node } from './Node/Node';
 
-/** Fallback scale when node size is unknown (cabinets skip scale anyway). */
-const HIGHLIGHT_SCALE_BASE = 1;
 /** Extra gap (tiles) left between scaled AABBs after centroid expand. */
 const HIGHLIGHT_REPEL_GAP_TILES = 0.35;
-
-/**
- * Reference area (tiles²) for size boost: switch-sized → no extra,
- * smaller nodes get a bit more enlarge at low zoom.
- */
-const SCALE_REF_AREA = SWITCH_2D_SIZE.width * SWITCH_2D_SIZE.height; // ~171
-
-/**
- * Hover/selection enlarge scale:
- *  - at ~10% zoom: clearly larger (≈1.7–2.0×, tiny nodes a bit more)
- *  - at ~40% zoom and above: nearly invisible (≈1.02)
- *  - smaller nodes get a modest extra boost
- *
- * @param areaTiles  node footprint in grid tiles (width × height)
- * @param zoom       current viewport zoom (1 = 100 %, 0.1 = 10 %)
- */
-const computeHighlightScale = (areaTiles: number, zoom: number): number => {
-  const sizeRatio = Math.min(1, SCALE_REF_AREA / Math.max(areaTiles, 1));
-  // Extra for tiny nodes vs switch-sized: 0 → ~0.25
-  const sizeBoost = 0.25 * sizeRatio;
-
-  // Full boost at 10%, none at 40%+. Quadratic falloff so 40% feels almost flat.
-  const ZOOM_FULL = 0.1;
-  const ZOOM_NONE = 0.4;
-  const t = Math.max(
-    0,
-    Math.min(1, (ZOOM_NONE - zoom) / (ZOOM_NONE - ZOOM_FULL))
-  );
-  const zoomT = t * t;
-  const extra = zoomT * (0.7 + sizeBoost); // 0.70–0.95 at 10%
-
-  if (extra < 0.02) {
-    return 1 + 0.02 * sizeRatio; // 1.00–1.02 above ~40%
-  }
-  return Math.min(2.2, 1 + extra);
-};
 
 interface Props {
   nodes: ViewItem[];
@@ -90,7 +54,9 @@ const CABINET_Z_BASE = -100000;
 const DEVICE_Z_BASE = 1000;
 
 export const Nodes = React.memo(({ nodes }: Props) => {
-  const zoom = useUiStateStore((state) => state.zoom);
+  // Bucket zoom so throttled store commits during smooth zoom do not
+  // recompute highlight scales / remount work every few frames.
+  const zoom = useUiStateStore((state) => Math.round(state.zoom * 10) / 10);
   const shape2dEnlargedItemId = useUiStateStore(
     (state) => state.shape2dEnlargedItemId
   );
@@ -109,17 +75,9 @@ export const Nodes = React.memo(({ nodes }: Props) => {
   const shape2dPortHover = useUiStateStore((state) => {
     return state.shape2dPortHover;
   });
-  const showLoupe = useUiStateStore((state) => {
-    return state.showLoupe;
-  });
   const projectionMode = useUiStateStore((state) => {
     return state.projectionMode;
   });
-  /** Node currently under the loupe — must not CSS-scale or the glass drifts. */
-  const loupeItemId =
-    showLoupe && isPlanProjection(projectionMode)
-      ? shape2dPortHover?.itemId ?? null
-      : null;
   const mode = useUiStateStore((state) => {
     return state.mode;
   });
@@ -262,7 +220,7 @@ export const Nodes = React.memo(({ nodes }: Props) => {
 
   /**
    * Far endpoint of the cable on the RJ45 under the cursor (patch panels are
-   * transparent). Emphasized clearly so the peer device is easy to spot.
+   * transparent). Gets glow + light enlarge so the peer is easy to spot.
    */
   const portHoverPeerId = useMemo(() => {
     if (!isPlanProjection(projectionMode)) return null;
@@ -369,9 +327,12 @@ export const Nodes = React.memo(({ nodes }: Props) => {
     return offsets;
   }, [selectedItemIds, nodes, modelItems, iconById, zoom]);
 
+  // Viewport culling temporarily disabled — could drop visible devices/ports.
+  const visibleNodes = nodes;
+
   return (
     <>
-      {[...nodes].reverse().map((node) => {
+      {[...visibleNodes].reverse().map((node) => {
         let selectionTone: 'normal' | 'highlighted' | 'related' | 'dimmed' =
           'normal';
 
@@ -390,25 +351,18 @@ export const Nodes = React.memo(({ nodes }: Props) => {
             // Gear mounted in a selected / hovered cabinet — keep glow.
             selectionTone = 'highlighted';
           } else if (highlightedNodeIds.has(node.id)) {
-            // Hovered device + cable peers: glow only, never scale.
+            // Hovered device + cable peers: glow (port peer may also enlarge).
             selectionTone = 'related';
           } else {
             selectionTone = 'dimmed';
           }
         }
 
-        // Port hover peer: emphasize with glow only (scale caused flicker while
-        // sliding across ports on the source device).
-        if (portHoverPeerId === node.id && selectionTone === 'normal') {
+        // Port hover peer: glow + light enlarge (far-end device of the jack).
+        const isPortHoverPeer = portHoverPeerId === node.id;
+        if (isPortHoverPeer && selectionTone === 'normal') {
           selectionTone = 'related';
-        } else if (portHoverPeerId === node.id && selectionTone === 'dimmed') {
-          selectionTone = 'related';
-        }
-
-        // Loupe on this node: keep glow if selected, but never enlarge —
-        // scale shifts the chassis under the glass ("rozjeżdża się").
-        const loupeBlocksEnlarge = loupeItemId === node.id;
-        if (loupeBlocksEnlarge && selectionTone === 'highlighted') {
+        } else if (isPortHoverPeer && selectionTone === 'dimmed') {
           selectionTone = 'related';
         }
 
@@ -427,15 +381,18 @@ export const Nodes = React.memo(({ nodes }: Props) => {
         const size = isCabinet
           ? null
           : (getModelItemSize(item ?? {}) ?? null);
+        const areaTiles = size ? size.width * size.height : 0;
+        const isHeaderEnlarged = shape2dEnlargedItemId === node.id;
         const highlightScale = size
-          ? computeHighlightScale(size.width * size.height, zoom)
+          ? isPortHoverPeer && !isHeaderEnlarged
+            ? computePortPeerHoverScale(areaTiles, zoom)
+            : computeHighlightScale(areaTiles, zoom)
           : HIGHLIGHT_SCALE_BASE;
 
-        // Enlarge ONLY after an explicit header click — never on hover / port peer.
+        // Enlarge only via header click / loupe-reveal / port-hover peer.
+        // Loupe sets shape2dEnlargedItemId when the glass appears (not on port hover).
         const shouldEnlarge =
-          !loupeBlocksEnlarge &&
-          !isCabinet &&
-          shape2dEnlargedItemId === node.id;
+          !isCabinet && (isHeaderEnlarged || isPortHoverPeer);
 
         const showHoverRing =
           !isCabinet &&

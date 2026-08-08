@@ -89,11 +89,11 @@ export const RACK_1U_HEIGHT_TILES = 9;
 const UNIT_1U_TILES = RACK_1U_HEIGHT_TILES;
 
 /**
- * Built-in 16-port switch — same 1U height as RACK; width follows ports.
- * Layout: header band + two RJ45 rows (same Y as device templates).
+ * Built-in 16-port switch — same 1U height as RACK; width is a whole rack-grid
+ * module count (3×9) so free-plan packing on the rack grid cannot overlap.
  */
 export const SWITCH_2D_SIZE: Size = {
-  width: 19,
+  width: RACK_1U_HEIGHT_TILES * 3,
   height: UNIT_1U_TILES
 };
 
@@ -214,24 +214,30 @@ export const getPatchPanelPorts = (portCount = PATCH_PANEL_DEFAULT_PORTS): Shape
 /** Soft cap for custom switch templates (typical commercial max). */
 export const MAX_SWITCH_TEMPLATE_PORTS = 52;
 
-const SWITCH_2D_PORTS: Shape2dPort[] = [
-  ...Array.from({ length: 8 }, (_, index) => {
-    return {
-      id: `port-top-${index + 1}`,
-      tile: { x: 2 + index * 2, y: 4 },
-      side: 'TOP' as const,
-      label: String(index + 1)
-    };
-  }),
-  ...Array.from({ length: 8 }, (_, index) => {
-    return {
-      id: `port-bottom-${index + 1}`,
-      tile: { x: 2 + index * 2, y: 7 },
-      side: 'BOTTOM' as const,
-      label: String(index + 9)
-    };
-  })
-];
+const SWITCH_2D_PORTS: Shape2dPort[] = (() => {
+  const cols = 8;
+  const pitch = 2;
+  const span = (cols - 1) * pitch;
+  const startX = Math.floor((SWITCH_2D_SIZE.width - span) / 2);
+  return [
+    ...Array.from({ length: cols }, (_, index) => {
+      return {
+        id: `port-top-${index + 1}`,
+        tile: { x: startX + index * pitch, y: 4 },
+        side: 'TOP' as const,
+        label: String(index + 1)
+      };
+    }),
+    ...Array.from({ length: cols }, (_, index) => {
+      return {
+        id: `port-bottom-${index + 1}`,
+        tile: { x: startX + index * pitch, y: 7 },
+        side: 'BOTTOM' as const,
+        label: String(index + 9)
+      };
+    })
+  ];
+})();
 
 const PC_2D_PORTS: Shape2dPort[] = [
   {
@@ -256,7 +262,7 @@ const CAMERA_2D_PORTS: Shape2dPort[] = [
 const SHAPE_2D_SIZES: Record<string, Size> = {
   [SHAPE_2D_SWITCH_ID]: SWITCH_2D_SIZE,
   [SHAPE_2D_PC_ID]: PC_2D_SIZE,
-  [SHAPE_2D_CAMERA_ID]: { width: 6, height: 6 },
+  [SHAPE_2D_CAMERA_ID]: { width: UNIT_1U_TILES, height: UNIT_1U_TILES },
   [SHAPE_2D_CAMERA_V2_ID]: PC_2D_SIZE,
   [SHAPE_2D_PRINTER_ID]: PC_2D_SIZE,
   [SHAPE_2D_VOIP_ID]: PC_2D_SIZE,
@@ -325,25 +331,58 @@ export const SHAPES_2D: Icon[] = [
   }
 ];
 
+/**
+ * Plan footprint module = one rack-grid cell (square of 1U height).
+ * Free-standing devices (switches, PCs, …) must be whole multiples of this
+ * so packing / snap on the default rack grid never tucks a neighbour under
+ * a fractional overhang (e.g. old 19-wide switch ≈ 2.11 cells → PC at 18).
+ */
+export const PLAN_SIZE_MODULE_TILES = RACK_1U_HEIGHT_TILES;
+
+/**
+ * Round width/height up to whole `moduleTiles` (default = rack cell).
+ * Pass `moduleTiles: 1` for cabinet / blanking / patch bay sizes that must
+ * stay exact (cabinet slot is 60, not a multiple of 9).
+ */
+export const ceilSizeToTiles = (
+  size: Size,
+  moduleTiles: number = PLAN_SIZE_MODULE_TILES
+): Size => {
+  const step = Math.max(1, Math.round(moduleTiles));
+  return {
+    width: Math.max(step, Math.ceil(size.width / step) * step),
+    height: Math.max(step, Math.ceil(size.height / step) * step)
+  };
+};
+
 export const getShape2dSize = (shapeId: string | undefined | null): Size | null => {
   if (!shapeId) return null;
+  let size: Size | null = null;
+  /** Cabinet fixtures keep exact bay maths — only integer-ceil, not ×9. */
+  let module = PLAN_SIZE_MODULE_TILES;
   if (shapeId === SHAPE_2D_CABINET_ID) {
-    return getCabinetSize(CABINET_DEFAULT_UNITS);
+    size = getCabinetSize(CABINET_DEFAULT_UNITS);
+    module = 1;
+  } else if (shapeId === SHAPE_2D_BLANKING_ID) {
+    size = getBlankingSize(BLANKING_DEFAULT_UNITS);
+    module = 1;
+  } else if (shapeId === SHAPE_2D_PATCH_PANEL_ID) {
+    size = getPatchPanelSize();
+    module = 1;
+  } else if (SHAPE_2D_SIZES[shapeId]) {
+    size = SHAPE_2D_SIZES[shapeId];
+  } else {
+    // Lazy require avoids circular import (registry → layout → config).
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const { getDeviceTemplateSize } = require('src/utils/deviceTemplateRegistry') as {
+      getDeviceTemplateSize: (id: string) => Size | null;
+    };
+    size = getDeviceTemplateSize(shapeId);
+    // layoutDeviceTemplate already module-aligns free devices; RACK bay
+    // stays exact (60) so do not re-ceil to ×9 here.
+    module = 1;
   }
-  if (shapeId === SHAPE_2D_BLANKING_ID) {
-    return getBlankingSize(BLANKING_DEFAULT_UNITS);
-  }
-  if (shapeId === SHAPE_2D_PATCH_PANEL_ID) {
-    return getPatchPanelSize();
-  }
-  if (SHAPE_2D_SIZES[shapeId]) return SHAPE_2D_SIZES[shapeId];
-
-  // Lazy require avoids circular import (registry → layout → config).
-  // eslint-disable-next-line @typescript-eslint/no-var-requires
-  const { getDeviceTemplateSize } = require('src/utils/deviceTemplateRegistry') as {
-    getDeviceTemplateSize: (id: string) => Size | null;
-  };
-  return getDeviceTemplateSize(shapeId);
+  return size ? ceilSizeToTiles(size, module) : null;
 };
 
 /** Footprint for a placed model item (cabinet / blanking use rackUnits). */
@@ -352,16 +391,22 @@ export const getModelItemSize = (item: {
   rackUnits?: number;
 }): Size | null => {
   if (!item.icon) return null;
+  let size: Size | null = null;
+  let module = PLAN_SIZE_MODULE_TILES;
   if (item.icon === SHAPE_2D_CABINET_ID) {
-    return getCabinetSize(item.rackUnits ?? CABINET_DEFAULT_UNITS);
+    size = getCabinetSize(item.rackUnits ?? CABINET_DEFAULT_UNITS);
+    module = 1;
+  } else if (item.icon === SHAPE_2D_BLANKING_ID) {
+    size = getBlankingSize(item.rackUnits ?? BLANKING_DEFAULT_UNITS);
+    module = 1;
+  } else if (item.icon === SHAPE_2D_PATCH_PANEL_ID) {
+    size = getPatchPanelSize();
+    module = 1;
+  } else {
+    // getShape2dSize already module-ceils free devices.
+    return getShape2dSize(item.icon);
   }
-  if (item.icon === SHAPE_2D_BLANKING_ID) {
-    return getBlankingSize(item.rackUnits ?? BLANKING_DEFAULT_UNITS);
-  }
-  if (item.icon === SHAPE_2D_PATCH_PANEL_ID) {
-    return getPatchPanelSize();
-  }
-  return getShape2dSize(item.icon);
+  return size ? ceilSizeToTiles(size, module) : null;
 };
 
 export const getShape2dPorts = (
@@ -544,6 +589,7 @@ export const INITIAL_UI_STATE = {
   showGrid: true,
   showLoupe: true,
   animateConnectors: false,
+  nodeVisualStyle: 'default' as const,
   gridStyle: 'rack' as const,
   canvasByMode: {
     ISOMETRIC: {

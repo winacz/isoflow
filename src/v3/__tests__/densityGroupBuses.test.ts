@@ -39,7 +39,7 @@ describe('switchPortApproach', () => {
   test('returns the port tile (no chassis runway offset)', () => {
     const approach = switchPortApproach({
       switchTile: { x: 10, y: 20 },
-      switchSize: { width: 19, height: 9 },
+      switchSize: { width: 27, height: 9 },
       portWorld: { x: 14.2, y: 24.7 },
       portSide: 'TOP',
       laneIndex: 0

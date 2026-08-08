@@ -45,7 +45,8 @@ export const useIcon = (
   vlanBorderColor?: string | null,
   poweredByPoe?: boolean,
   poePowerWarning?: boolean,
-  hoveredPortId?: string | null
+  hoveredPortId?: string | null,
+  lodSimplified?: boolean
 ) => {
   const [hasLoaded, setHasLoaded] = React.useState(false);
   const icons = useModelStore((state) => {
@@ -250,6 +251,7 @@ export const useIcon = (
           poweredByPoe={poweredByPoe}
           poePowerWarning={poePowerWarning}
           hoveredPortId={hoveredPortId}
+          lodSimplified={lodSimplified}
         />
       );
     }
@@ -290,6 +292,7 @@ export const useIcon = (
     poweredByPoe,
     poePowerWarning,
     hoveredPortId,
+    lodSimplified,
     connectors,
     deviceTemplates
   ]);

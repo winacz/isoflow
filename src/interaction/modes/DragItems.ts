@@ -536,7 +536,7 @@ const dragItems = (
       scene.updateConnector(
         connectorId,
         { anchors: dedupeTileWaypoints(nextAnchors) },
-        { overlapResolve: 'off' }
+        { overlapResolve: 'off', fastPath: true }
       );
     });
 
@@ -709,7 +709,7 @@ const dragItems = (
         {
           anchors: nextAnchors
         },
-        { overlapResolve: 'off' }
+        { overlapResolve: 'off', fastPath: true }
       );
     } else if (item.type === 'CONNECTOR_ANCHOR') {
       const connectors = options?.connectors ?? scene.connectors;
@@ -741,7 +741,7 @@ const dragItems = (
           {
             anchors: bent
           },
-          { overlapResolve: 'off' }
+          { overlapResolve: 'off', fastPath: true }
         );
         return;
       }
@@ -886,14 +886,15 @@ const dragItems = (
                 options.modelItems
               )
             },
-            { overlapResolve: 'off' }
+            { overlapResolve: 'off', fastPath: true }
           );
           return;
         }
       }
 
       scene.updateConnector(connector.id, newConnector, {
-        overlapResolve: 'off'
+        overlapResolve: 'off',
+        fastPath: true
       });
     }
   });

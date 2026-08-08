@@ -5,6 +5,7 @@ import {
   getOrthogonalHint,
   isOrthogonalPathRequested
 } from './pathOptions';
+import { recordPathfinderCall } from './pathfinderCalls';
 
 interface Args {
   gridSize: Size;
@@ -20,6 +21,7 @@ export const findPath = ({
   to,
   orthogonal = false
 }: Args): Coords[] => {
+  recordPathfinderCall();
   const useOrthogonal = orthogonal || isOrthogonalPathRequested();
 
   const fromTile = {

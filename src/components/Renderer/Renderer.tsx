@@ -17,6 +17,7 @@ import { WaypointGuides } from 'src/components/SceneLayers/Connectors/WaypointGu
 import { ConnectorLabels } from 'src/components/SceneLayers/ConnectorLabels/ConnectorLabels';
 import { TextBoxes } from 'src/components/SceneLayers/TextBoxes/TextBoxes';
 import { SceneLayer } from 'src/components/SceneLayer/SceneLayer';
+import { SceneViewport } from 'src/components/SceneLayer/SceneViewport';
 import { TransformControlsManager } from 'src/components/TransformControlsManager/TransformControlsManager';
 import { useScene } from 'src/hooks/useScene';
 import { RendererProps } from 'src/types/rendererProps';
@@ -182,14 +183,67 @@ export const Renderer = ({ showGrid, backgroundColor }: RendererProps) => {
       }}
     >
       {!isTwoD && (
-        <SceneLayer>
-          <Rectangles rectangles={rectangles} />
-        </SceneLayer>
+        <SceneViewport>
+          <SceneLayer>
+            <Rectangles rectangles={rectangles} />
+          </SceneLayer>
+          <SceneLayer>
+            <Connectors connectors={visibleConnectors} />
+          </SceneLayer>
+          <SceneLayer>
+            <ConnectorLabels connectors={visibleConnectors} />
+          </SceneLayer>
+          <SceneLayer>
+            <TextBoxes textBoxes={textBoxes} />
+          </SceneLayer>
+          <SceneLayer order={11} sx={{ pointerEvents: 'none' }}>
+            <Nodes nodes={visibleNodes} />
+          </SceneLayer>
+          <SceneLayer order={12} sx={{ pointerEvents: 'none' }}>
+            <TransformControlsManager />
+          </SceneLayer>
+        </SceneViewport>
       )}
       {isTwoD && (
-        <SceneLayer order={0} sx={{ pointerEvents: 'none' }}>
-          <Rectangles rectangles={rectangles} />
-        </SceneLayer>
+        <SceneViewport>
+          <SceneLayer order={0} sx={{ pointerEvents: 'none' }}>
+            <Rectangles rectangles={rectangles} />
+          </SceneLayer>
+          <SceneLayer order={2}>
+            <TextBoxes textBoxes={textBoxes} />
+          </SceneLayer>
+          <SceneLayer
+            order={1}
+            sx={
+              isTwoDV2
+                ? {
+                    filter: 'saturate(0.92) contrast(1.04)'
+                  }
+                : undefined
+            }
+          >
+            <Nodes nodes={visibleNodes} />
+          </SceneLayer>
+          <SceneLayer order={3} sx={{ pointerEvents: 'none' }}>
+            <MarqueeSelection />
+          </SceneLayer>
+          {(isClassic2d || isTwoDV3) && (
+            <SceneLayer order={2} sx={{ pointerEvents: 'none' }}>
+              <Connectors connectors={visibleConnectors} />
+            </SceneLayer>
+          )}
+          {isTwoDV3 && (
+            <SceneLayer order={5} sx={{ pointerEvents: 'none' }}>
+              <ConnectorV3Preview />
+              <V3DensityGroupsOverlay />
+            </SceneLayer>
+          )}
+          {isClassic2d && (
+            <SceneLayer order={4} sx={{ pointerEvents: 'none' }}>
+              <WaypointGuides />
+            </SceneLayer>
+          )}
+        </SceneViewport>
       )}
       <Box
         sx={{
@@ -203,62 +257,8 @@ export const Renderer = ({ showGrid, backgroundColor }: RendererProps) => {
         {isShowGrid && <Grid />}
       </Box>
       {mode.showCursor && mode.type !== 'CURSOR' && (
-        <SceneLayer>
+        <SceneLayer omitTransform={false}>
           <Cursor />
-        </SceneLayer>
-      )}
-      {!isTwoD && (
-        <>
-          <SceneLayer>
-            <Connectors connectors={visibleConnectors} />
-          </SceneLayer>
-          <SceneLayer>
-            <ConnectorLabels connectors={visibleConnectors} />
-          </SceneLayer>
-        </>
-      )}
-      <SceneLayer order={isTwoD ? 2 : 0}>
-        <TextBoxes textBoxes={textBoxes} />
-      </SceneLayer>
-      <SceneLayer
-        order={isTwoD ? 1 : 11}
-        sx={
-          !isTwoD
-            ? { pointerEvents: 'none' }
-            : isTwoDV2
-              ? {
-                  // Distinct schematic look: soft lift, no cable clutter.
-                  filter: 'saturate(0.92) contrast(1.04)'
-                }
-              : undefined
-        }
-      >
-        <Nodes nodes={visibleNodes} />
-      </SceneLayer>
-      {isTwoD && (
-        <SceneLayer order={3} sx={{ pointerEvents: 'none' }}>
-          <MarqueeSelection />
-        </SceneLayer>
-      )}
-      {(isClassic2d || isTwoDV3) && (
-        <SceneLayer order={2} sx={{ pointerEvents: 'none' }}>
-          <Connectors connectors={visibleConnectors} />
-        </SceneLayer>
-      )}
-      {isTwoDV3 && (
-        <SceneLayer order={5} sx={{ pointerEvents: 'none' }}>
-          <ConnectorV3Preview />
-          <V3DensityGroupsOverlay />
-        </SceneLayer>
-      )}
-      {isClassic2d && (
-        <SceneLayer order={4} sx={{ pointerEvents: 'none' }}>
-          <WaypointGuides />
-        </SceneLayer>
-      )}
-      {!isTwoD && (
-        <SceneLayer order={12} sx={{ pointerEvents: 'none' }}>
-          <TransformControlsManager />
         </SceneLayer>
       )}
       {/* Must stay on top so mouse events reach interaction manager */}
@@ -274,28 +274,27 @@ export const Renderer = ({ showGrid, backgroundColor }: RendererProps) => {
           zIndex: 10
         }}
       />
-      {/* Above interaction overlay so description bubbles stay visible + draggable */}
+      {/* Above interaction overlay — own transform (outside SceneViewport) */}
       {isTwoD && (
-        <SceneLayer order={12} sx={{ pointerEvents: 'none' }}>
+        <SceneLayer omitTransform={false} order={12} sx={{ pointerEvents: 'none' }}>
           <NodeDescriptionLabels nodes={visibleNodes} />
         </SceneLayer>
       )}
-      {/* Above interaction overlay so badge / rectangle / multi-move handles work */}
       {isClassic2d && (
-        <SceneLayer order={11} sx={{ pointerEvents: 'none' }}>
+        <SceneLayer omitTransform={false} order={11} sx={{ pointerEvents: 'none' }}>
           <ConnectorStackBadges />
           <MultiSelectMoveHandle />
           <TransformControlsManager />
         </SceneLayer>
       )}
       {isTwoDV2 && (
-        <SceneLayer order={11} sx={{ pointerEvents: 'none' }}>
+        <SceneLayer omitTransform={false} order={11} sx={{ pointerEvents: 'none' }}>
           <MultiSelectMoveHandle />
           <TransformControlsManager />
         </SceneLayer>
       )}
       {isTwoDV3 && (
-        <SceneLayer order={11} sx={{ pointerEvents: 'none' }}>
+        <SceneLayer omitTransform={false} order={11} sx={{ pointerEvents: 'none' }}>
           <MultiSelectMoveHandle />
         </SceneLayer>
       )}

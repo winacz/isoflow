@@ -49,6 +49,8 @@ import {
   getItemByIdOrThrow
 } from 'src/utils';
 import { isPlanProjection } from './projection';
+import { getCachedBoundingClientRect } from './domRectCache';
+import { computeHighlightScale } from './nodeHighlightScale';
 import { useScene } from 'src/hooks/useScene';
 
 interface ScreenToIso {
@@ -1228,7 +1230,8 @@ export const getMouse = ({
   rendererSize,
   projectionMode = 'ISOMETRIC'
 }: GetMouse): Mouse => {
-  const componentOffset = interactiveElement.getBoundingClientRect();
+  // Cached rect — ResizeObserver invalidates; avoid layout thrash every move.
+  const componentOffset = getCachedBoundingClientRect(interactiveElement);
   const offset: Coords = {
     x: componentOffset?.left ?? 0,
     y: componentOffset?.top ?? 0
@@ -1741,16 +1744,8 @@ export const isShape2dPortInUse = ({
 };
 
 /**
- * Item ids that currently render with CSS scale(1.15) — selected nodes and
- * gear mounted in a selected cabinet. Optional extras: e.g. port-hover peer.
- * Must stay in sync with Nodes.tsx selectionTone === 'highlighted' scale.
- *
- * `excludeItemIds`: e.g. the node under an active loupe — selection must not
- * scale it or port hit-tests / loupe framing drift apart.
- */
-/**
  * Item ids currently CSS-scaled on the plan canvas.
- * Selection alone no longer enlarges — pass header-click enlarge / port peers
+ * Selection alone no longer enlarges — pass header-click / loupe enlarge
  * via `extraScaledItemIds`. `selectedItemIds` is kept for API compatibility
  * (cabinet children of an enlarged parent can still be listed in extra).
  */
@@ -1802,7 +1797,8 @@ export const getShape2dPortAtPoint = ({
   modelItems,
   isPortAvailable,
   stickyHover = null,
-  highlightedItemIds
+  highlightedItemIds,
+  zoom = 1
 }: {
   point: Coords;
   scene: GetShape2dItemAtTile['scene'];
@@ -1810,18 +1806,17 @@ export const getShape2dPortAtPoint = ({
   isPortAvailable?: (hit: Shape2dPortHit) => boolean;
   stickyHover?: Shape2dPortHover | null;
   /**
-   * Item ids currently highlighted (CSS scale 1.15). Port positions are
-   * adjusted to match the visual layout so hit-testing stays accurate.
+   * Item ids currently CSS-scaled on the canvas. Port positions are adjusted
+   * with `computeHighlightScale` (zoom-aware) so hit-testing matches Nodes.tsx.
    */
   highlightedItemIds?: Set<string> | null;
+  /** Current viewport zoom — required for accurate scaled port hits. */
+  zoom?: number;
 }): Shape2dPortHit | null => {
   const baseHalf = SHAPE_2D_PORT_VISUAL_SIZE_TILES / 2;
   const stickyHalf = baseHalf * SHAPE_2D_PORT_HOVER_SCALE;
   let best: Shape2dPortHit | null = null;
   let bestDistSq = Infinity;
-
-  /** Visual highlight scale applied to non-cabinet nodes (must match Nodes.tsx). */
-  const HIGHLIGHT_SCALE = 1.15;
 
   const map = new Map(modelItems.map((i) => [i.id, i]));
   for (const viewItem of scene.items) {
@@ -1829,15 +1824,18 @@ export const getShape2dPortAtPoint = ({
 
     if (!modelItem?.icon) continue;
 
-    // Is this item visually scaled by the highlight effect?
     const isScaled =
       highlightedItemIds?.has(viewItem.id) &&
       modelItem.icon !== SHAPE_2D_CABINET_ID;
 
-    // Device center in tile-space (CSS transform origin for the scale).
+    const size = getModelItemSize(modelItem) ?? { width: 1, height: 1 };
+    const areaTiles = size.width * size.height;
+    const highlightScale = isScaled
+      ? computeHighlightScale(areaTiles, zoom)
+      : 1;
+
     let deviceCenterTile: { x: number; y: number } | null = null;
     if (isScaled) {
-      const size = getModelItemSize(modelItem) ?? { width: 1, height: 1 };
       deviceCenterTile = {
         x: viewItem.tile.x + size.width / 2,
         y: viewItem.tile.y + size.height / 2
@@ -1851,11 +1849,12 @@ export const getShape2dPortAtPoint = ({
       let cx = worldTile.x + 0.5;
       let cy = worldTile.y + 0.5;
 
-      // Compensate for the CSS scale(1.15) on highlighted nodes:
-      // visual position = center + HIGHLIGHT_SCALE * (port - center).
+      // visual position = center + scale * (port - center)
       if (isScaled && deviceCenterTile) {
-        cx = deviceCenterTile.x + HIGHLIGHT_SCALE * (cx - deviceCenterTile.x);
-        cy = deviceCenterTile.y + HIGHLIGHT_SCALE * (cy - deviceCenterTile.y);
+        cx =
+          deviceCenterTile.x + highlightScale * (cx - deviceCenterTile.x);
+        cy =
+          deviceCenterTile.y + highlightScale * (cy - deviceCenterTile.y);
       }
 
       const dx = Math.abs(point.x - cx);
@@ -1863,15 +1862,12 @@ export const getShape2dPortAtPoint = ({
       const isSticky =
         stickyHover?.itemId === viewItem.id &&
         stickyHover?.portId === port.id;
-      // When the node is CSS-scaled, the jack is also larger on screen.
       const half =
-        (isSticky ? stickyHalf : baseHalf) *
-        (isScaled ? HIGHLIGHT_SCALE : 1);
+        (isSticky ? stickyHalf : baseHalf) * (isScaled ? highlightScale : 1);
 
       if (dx > half || dy > half) continue;
 
       const distSq = dx * dx + dy * dy;
-      // Prefer keeping the sticky hover when still inside its expanded box.
       const score = isSticky ? distSq * 0.35 : distSq;
       if (score >= bestDistSq) continue;
 
@@ -1899,13 +1895,15 @@ export const getShape2dPortAtTile = ({
   isPortAvailable,
   point,
   stickyHover = null,
-  highlightedItemIds
+  highlightedItemIds,
+  zoom = 1
 }: GetShape2dItemAtTile & {
   isPortAvailable?: (hit: Shape2dPortHit) => boolean;
   /** Continuous tile coords — preferred for accurate visual hits. */
   point?: Coords;
   stickyHover?: Shape2dPortHover | null;
   highlightedItemIds?: Set<string> | null;
+  zoom?: number;
 }): Shape2dPortHit | null => {
   return getShape2dPortAtPoint({
     point: point ?? { x: tile.x + 0.5, y: tile.y + 0.5 },
@@ -1913,7 +1911,8 @@ export const getShape2dPortAtTile = ({
     modelItems,
     isPortAvailable,
     stickyHover,
-    highlightedItemIds
+    highlightedItemIds,
+    zoom
   });
 };
 

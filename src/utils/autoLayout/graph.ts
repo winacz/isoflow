@@ -21,8 +21,8 @@ const footprintOf = (
   return {
     id: item.id,
     tile: { ...item.tile },
-    width: size.width,
-    height: size.height
+    width: Math.max(1, Math.ceil(size.width)),
+    height: Math.max(1, Math.ceil(size.height))
   };
 };
 

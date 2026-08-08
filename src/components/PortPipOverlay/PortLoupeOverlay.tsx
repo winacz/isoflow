@@ -10,7 +10,8 @@ import {
   TILE_SIZE_2D,
   getModelItemSize,
   getShape2dSize,
-  getShape2dPortIfaceName
+  getShape2dPortIfaceName,
+  getModelItemPorts
 } from 'src/config';
 import {
   getShape2dCenterPosition,
@@ -21,7 +22,14 @@ import {
   applyPortHoverInRoot,
   getConnectorRelationSummary,
   TRUNK_RAINBOW_COLORS,
-  TRUNK_MISMATCH_COLOR
+  TRUNK_MISMATCH_COLOR,
+  computeHighlightScale,
+  getShape2dPortWorldTile,
+  getShape2dPortAtPoint,
+  setLoupeRevealLock,
+  setLoupeGlassActive,
+  isLoupeRevealLocked,
+  isLoupeGlassActive
 } from 'src/utils';
 import { ModelItem } from 'src/types';
 
@@ -33,17 +41,15 @@ const LOUPE_MAG = 0.55;
 const LOUPE_FADE_OUT_MS = 320;
 /** Fade-in when appearing (ms). */
 const LOUPE_FADE_IN_MS = 180;
-/** Dwell before the loupe appears on port hover (ms). */
+/** Dwell while the cursor is still over an RJ45 before the loupe appears (ms). */
 const LOUPE_PORT_SHOW_DELAY_MS = 700;
+/** Screen-px movement that cancels the pending show dwell (must "stand still"). */
+const LOUPE_STILL_PX = 4;
 
+/** After node hover + correct pan, one frame then show glass. */
+const LOUPE_HOVER_SETTLE_MS = 50;
 /** Light cursor follow smoothing (ms). Low = stuck to the pointer. */
 const LOUPE_CURSOR_TAU_MS = 45;
-
-/**
- * Canvas node under the loupe never CSS-scales (see Nodes.tsx). Loupe content
- * must stay at scale 1 so ports stay aligned with hit-tests.
- */
-const LOUPE_NODE_SCALE = 1;
 
 /**
  * When true, loupe highlights the hovered RJ45 / cable via imperative DOM
@@ -65,8 +71,16 @@ type LoupeContent = {
   modelItem: ModelItem;
   deviceCenter: { x: number; y: number };
   diameter: number;
-  /** Always 1 — loupe-focused canvas node does not selection-scale. */
+  /** Matches canvas node enlarge (loupe hover-first). */
   highlightScale: number;
+};
+
+const loupeHighlightScaleFor = (modelItem: ModelItem, zoom: number) => {
+  const size =
+    getModelItemSize(modelItem) ??
+    (modelItem.icon ? getShape2dSize(modelItem.icon) : null);
+  const areaTiles = size ? size.width * size.height : 0;
+  return computeHighlightScale(areaTiles, zoom);
 };
 
 /** Resolve loupe stroke the same way Connector2d does (VLAN / trunk / mismatch). */
@@ -340,9 +354,9 @@ function applyLoupeDom(
 }
 
 /**
- * Circular magnifying-glass that follows the cursor while a port is hovered
- * OR when the cursor dwells on the body of a switch.
- * Magnifies the device under the pointer so port-to-port motion stays smooth.
+ * Circular magnifying-glass that follows the cursor after the pointer dwells
+ * still on an RJ45/SFP jack. Leaving the port (node body / empty canvas)
+ * hides the loupe — glancing a port then stopping on the chassis does not.
  *
  * Performance note: cursor tracking uses zustand.subscribe + refs to avoid
  * triggering React re-renders of DeviceShape2d on every mouse-move frame.
@@ -354,10 +368,18 @@ export const PortLoupeOverlay = () => {
   const zoom = useUiStateStore((state) => {
     return state.zoom;
   });
-  // Only the hovered ITEM drives loupe React state. Port-id changes are
-  // applied imperatively (see applyLoupePortHoverDom) so DeviceShape2d does
-  // not re-render while sliding along a port row.
+  // Item alone is not enough — body sticky hover keeps itemId after leaving
+  // a jack; loupe must require an actual port under the cursor.
   const hoverItemId = useUiStateStore((state) => {
+    return state.shape2dPortHover?.portId
+      ? state.shape2dPortHover.itemId
+      : null;
+  });
+  const hoverPortId = useUiStateStore((state) => {
+    return state.shape2dPortHover?.portId ?? null;
+  });
+  /** Body sticky may keep itemId after leaving a jack — used to hold enlarge. */
+  const stickyHoverItemId = useUiStateStore((state) => {
     return state.shape2dPortHover?.itemId ?? null;
   });
   const showLoupe = useUiStateStore((state) => {
@@ -380,23 +402,37 @@ export const PortLoupeOverlay = () => {
     return state.items;
   });
 
-  /** Compute the loupe device from a port/body hover (item only). */
+  /**
+   * Once the glass opens on a node, stay anchored to that node until the
+   * pointer leaves its body — ignore other nodes underneath the enlarge.
+   */
+  const [loupeAnchorItemId, setLoupeAnchorItemId] = useState<string | null>(
+    null
+  );
+  const loupeAnchorItemIdRef = useRef<string | null>(null);
+  loupeAnchorItemIdRef.current = loupeAnchorItemId;
+
+  const activeLoupeItemId = loupeAnchorItemId ?? hoverItemId;
+
+  /** Open from port dwell; keep for the whole node body after that. */
   const deviceFromPortHover = useMemo((): LoupeDevice | null => {
-    if (!showLoupe || !hoverItemId) return null;
+    if (!showLoupe || !activeLoupeItemId) return null;
     if (!isPlanProjection(projectionMode) || projectionMode === 'TWO_D_V2') {
       return null;
     }
 
-    // Ukryj lupę przy przybliżeniu 30% i większym
     if (zoom >= 0.3) {
       return null;
     }
 
+    // Opening still requires a jack (unless already anchored on the node).
+    if (!loupeAnchorItemId && !hoverPortId) return null;
+
     const viewItem = items.find((item) => {
-      return item.id === hoverItemId;
+      return item.id === activeLoupeItemId;
     });
     const modelItem = modelItems.find((item) => {
-      return item.id === hoverItemId;
+      return item.id === activeLoupeItemId;
     });
     if (!viewItem || !modelItem?.icon) return null;
 
@@ -404,16 +440,12 @@ export const PortLoupeOverlay = () => {
       getShape2dSize(modelItem.icon) ?? { width: 1, height: 1 };
     const deviceCenter = getShape2dCenterPosition(viewItem.tile, size);
 
-    // Oblicz rozmiar lupy na ekranie.
-    // Od 30% w górę: ukryta. Poniżej 30% zaczyna od 248px.
-    // Osiąga maksymalny rozmiar przy 20% (ok. 320px).
     let targetPx = 248;
     const MAX_LOUPE_PX = 320;
     if (zoom <= 0.2) {
       targetPx = MAX_LOUPE_PX;
     } else if (zoom < 0.3) {
       const linearRatio = (0.3 - zoom) / (0.3 - 0.2);
-      // Nieliniowy przyrost (quartic ease-in): na początku rośnie jeszcze wolniej.
       const ratio = linearRatio ** 4;
       targetPx = 248 + ratio * (MAX_LOUPE_PX - 248);
     }
@@ -424,7 +456,16 @@ export const PortLoupeOverlay = () => {
       deviceCenter,
       diameter: targetPx
     };
-  }, [hoverItemId, items, modelItems, projectionMode, zoom, showLoupe]);
+  }, [
+    activeLoupeItemId,
+    loupeAnchorItemId,
+    hoverPortId,
+    items,
+    modelItems,
+    projectionMode,
+    zoom,
+    showLoupe
+  ]);
 
   const device = deviceFromPortHover;
   const hasDevice = Boolean(device);
@@ -457,7 +498,23 @@ export const PortLoupeOverlay = () => {
   const lastTsRef = useRef<number | null>(null);
   const fadeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const showDelayTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const hoverSettleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(
+    null
+  );
   const showFrameRef = useRef<number | null>(null);
+  /** True while waiting for the still-on-port dwell before first reveal. */
+  const pendingDwellRef = useRef(false);
+  const dwellScreenRef = useRef<{ x: number; y: number } | null>(null);
+  /** Enlarge owned by loupe reveal (cleared when glass hides). */
+  const loupeOwnedEnlargeRef = useRef<string | null>(null);
+  /** Scroll delta applied so the dwell port stays under the cursor after scale. */
+  const loupePanCompRef = useRef<{ x: number; y: number } | null>(null);
+  const itemsRef = useRef(items);
+  itemsRef.current = items;
+  const modelItemsRef = useRef(modelItems);
+  modelItemsRef.current = modelItems;
+  const visibleRef = useRef(visible);
+  visibleRef.current = visible;
 
   latestDeviceRef.current = device;
   zoomRef.current = zoom;
@@ -488,7 +545,19 @@ export const PortLoupeOverlay = () => {
       clearTimeout(showDelayTimerRef.current);
       showDelayTimerRef.current = null;
     }
+    if (hoverSettleTimerRef.current) {
+      clearTimeout(hoverSettleTimerRef.current);
+      hoverSettleTimerRef.current = null;
+    }
+    pendingDwellRef.current = false;
+    dwellScreenRef.current = null;
   };
+
+  const revealLoupeRef = useRef<
+    ((dev: LoupeDevice, cursor: { x: number; y: number }) => void) | null
+  >(null);
+  const hideLoupeGlassRef = useRef<() => void>(() => {});
+  const clearLoupeNodeHoverRef = useRef<() => void>(() => {});
 
   const tick = (ts: number) => {
     const focus = focusRef.current;
@@ -542,6 +611,238 @@ export const PortLoupeOverlay = () => {
     }
   };
 
+  const clearLoupeNodeHover = () => {
+    setLoupeRevealLock(false);
+    setLoupeGlassActive(false);
+    setLoupeAnchorItemId(null);
+    const st = uiStoreApi.getState();
+    if (
+      loupeOwnedEnlargeRef.current &&
+      st.shape2dEnlargedItemId === loupeOwnedEnlargeRef.current
+    ) {
+      st.actions.setShape2dEnlargedItemId(null);
+    }
+    loupeOwnedEnlargeRef.current = null;
+    // Do NOT reverse the reveal pan — cursor has usually moved, and undoing
+    // scroll teleports the view (e.g. off the right ports → middle of switch).
+    loupePanCompRef.current = null;
+  };
+
+  /** Hide glass only — keep node enlarge while the pointer stays on the chassis. */
+  const hideLoupeGlass = () => {
+    setLoupeRevealLock(false);
+    setLoupeGlassActive(false);
+    setLoupeAnchorItemId(null);
+    loupeAnchorItemIdRef.current = null;
+    setVisible(false);
+    cursorTargetRef.current = null;
+    applyLoupePortHoverDom(contentElRef.current, null, hoveredJackRef);
+    if (fadeTimerRef.current) clearTimeout(fadeTimerRef.current);
+    fadeTimerRef.current = setTimeout(() => {
+      stopRaf();
+      focusRef.current = null;
+      deviceCenterRef.current = null;
+      setContent(null);
+      fadeTimerRef.current = null;
+    }, LOUPE_FADE_OUT_MS);
+  };
+
+  /**
+   * screen = origin + scroll + zoom * world
+   * ⇒ Δscroll = zoom * (worldBefore - worldAfter) to keep the same screen point.
+   */
+  const panScrollToKeepWorldUnderCursor = (
+    fromWorld: { x: number; y: number },
+    toWorld: { x: number; y: number },
+    zoom: number
+  ) => {
+    const dx = zoom * (fromWorld.x - toWorld.x);
+    const dy = zoom * (fromWorld.y - toWorld.y);
+    if (Math.abs(dx) < 0.5 && Math.abs(dy) < 0.5) return null;
+    return { x: dx, y: dy };
+  };
+
+  const readCursorWorld = (): { x: number; y: number } | null => {
+    const st = uiStoreApi.getState();
+    const rSize = rendererSizeRef.current;
+    if (!rSize?.width || !rSize?.height) return cursorWorldRef.current;
+    const tile = screenToTile2dContinuous({
+      mouse: st.mouse.position.screen,
+      zoom: st.zoom,
+      scroll: st.scroll,
+      rendererSize: rSize
+    });
+    const world = continuousTileToWorld(tile);
+    cursorWorldRef.current = world;
+    return world;
+  };
+
+  /**
+   * 1) Enlarge node (hover)
+   * 2) Pan so the scaled dwell jack sits under the pointer
+   * Does not show the glass yet.
+   */
+  const prepareLoupeNodeHover = (
+    dev: LoupeDevice,
+    cursorWorld: { x: number; y: number },
+    portId: string
+  ): { x: number; y: number } => {
+    setLoupeRevealLock(true);
+
+    const st = uiStoreApi.getState();
+    const zoom = zoomRef.current;
+    const scale = loupeHighlightScaleFor(dev.modelItem, zoom);
+
+    // Keep port hover pinned for the whole align window.
+    st.actions.setShape2dPortHover({ itemId: dev.itemId, portId });
+    loupeOwnedEnlargeRef.current = dev.itemId;
+    if (st.shape2dEnlargedItemId !== dev.itemId) {
+      st.actions.setShape2dEnlargedItemId(dev.itemId);
+    }
+    st.actions.setShape2dNodeHoverItemId(dev.itemId);
+
+    if (!loupePanCompRef.current && scale > 1.01) {
+      const viewItem = itemsRef.current.find((item) => item.id === dev.itemId);
+      const port = viewItem
+        ? getModelItemPorts(dev.modelItem).find((p) => p.id === portId)
+        : null;
+      if (viewItem && port) {
+        const worldTile = getShape2dPortWorldTile(viewItem.tile, port.tile);
+        const px = (worldTile.x + 0.5) * TILE_SIZE_2D;
+        const py = (worldTile.y + 0.5) * TILE_SIZE_2D;
+        const vis = {
+          x: dev.deviceCenter.x + scale * (px - dev.deviceCenter.x),
+          y: dev.deviceCenter.y + scale * (py - dev.deviceCenter.y)
+        };
+        const delta = panScrollToKeepWorldUnderCursor(cursorWorld, vis, zoom);
+        if (delta) {
+          loupePanCompRef.current = delta;
+          const scroll = st.scroll;
+          st.actions.setScroll({
+            position: {
+              x: scroll.position.x + delta.x,
+              y: scroll.position.y + delta.y
+            },
+            offset: scroll.offset
+          });
+        }
+      }
+    }
+
+    return readCursorWorld() ?? cursorWorld;
+  };
+
+  /** 3) Show loupe glass on the aligned cursor/port. */
+  const showLoupeGlass = (
+    dev: LoupeDevice,
+    focusCursor: { x: number; y: number }
+  ) => {
+    setLoupeAnchorItemId(dev.itemId);
+    loupeAnchorItemIdRef.current = dev.itemId;
+    deviceCenterRef.current = { ...dev.deviceCenter };
+    diameterRef.current = dev.diameter;
+    cursorTargetRef.current = { ...focusCursor };
+    focusRef.current = { ...focusCursor };
+
+    setContent({
+      itemId: dev.itemId,
+      modelItem: dev.modelItem,
+      deviceCenter: { ...dev.deviceCenter },
+      diameter: dev.diameter,
+      highlightScale: loupeHighlightScaleFor(dev.modelItem, zoomRef.current)
+    });
+
+    applyLoupeDom(
+      loupeRef.current,
+      contentElRef.current,
+      focusRef.current,
+      deviceCenterRef.current,
+      diameterRef.current,
+      zoomRef.current
+    );
+    stopRaf();
+
+    if (showFrameRef.current) {
+      cancelAnimationFrame(showFrameRef.current);
+      showFrameRef.current = null;
+    }
+    showFrameRef.current = requestAnimationFrame(() => {
+      showFrameRef.current = null;
+      setVisible(true);
+      setLoupeRevealLock(false);
+      setLoupeGlassActive(true, dev.itemId);
+      if (focusRef.current && deviceCenterRef.current) {
+        applyLoupeDom(
+          loupeRef.current,
+          contentElRef.current,
+          focusRef.current,
+          deviceCenterRef.current,
+          diameterRef.current,
+          zoomRef.current
+        );
+      }
+      syncLoupePortHover();
+    });
+  };
+
+  /**
+   * Dwell done → hover node → pan port under cursor → show loupe.
+   */
+  const revealLoupe = (dev: LoupeDevice, cursor: { x: number; y: number }) => {
+    const hover = uiStoreApi.getState().shape2dPortHover;
+    if (!hover?.portId || hover.itemId !== dev.itemId) return;
+
+    const focusAfterHover = prepareLoupeNodeHover(dev, cursor, hover.portId);
+
+    if (showFrameRef.current) {
+      cancelAnimationFrame(showFrameRef.current);
+      showFrameRef.current = null;
+    }
+    if (hoverSettleTimerRef.current) {
+      clearTimeout(hoverSettleTimerRef.current);
+      hoverSettleTimerRef.current = null;
+    }
+
+    hoverSettleTimerRef.current = setTimeout(() => {
+      hoverSettleTimerRef.current = null;
+      const latest = latestDeviceRef.current;
+      const liveHover = uiStoreApi.getState().shape2dPortHover;
+      if (!latest || latest.itemId !== dev.itemId) {
+        clearLoupeNodeHover();
+        return;
+      }
+      // Prefer pinned hover from prepare; fall back to live.
+      if (!liveHover?.portId || liveHover.itemId !== dev.itemId) {
+        clearLoupeNodeHover();
+        return;
+      }
+
+      const focus = readCursorWorld() ?? focusAfterHover;
+      showLoupeGlass(latest, focus);
+    }, LOUPE_HOVER_SETTLE_MS);
+  };
+  revealLoupeRef.current = revealLoupe;
+  hideLoupeGlassRef.current = hideLoupeGlass;
+  clearLoupeNodeHoverRef.current = clearLoupeNodeHover;
+
+  const armShowDelay = () => {
+    clearShowDelay();
+    pendingDwellRef.current = true;
+    dwellScreenRef.current = null;
+    showDelayTimerRef.current = setTimeout(() => {
+      showDelayTimerRef.current = null;
+      pendingDwellRef.current = false;
+      dwellScreenRef.current = null;
+      const latest = latestDeviceRef.current;
+      const cursor = cursorWorldRef.current;
+      // Still need a live port under the cursor at fire time.
+      const hover = uiStoreApi.getState().shape2dPortHover;
+      if (!latest || !cursor || !hover?.portId) return;
+      if (hover.itemId !== latest.itemId) return;
+      revealLoupeRef.current?.(latest, cursor);
+    }, LOUPE_PORT_SHOW_DELAY_MS);
+  };
+
   // Track the cursor imperatively so pointer movement never re-renders the
   // loupe's DeviceShape2d subtree.
   useEffect(() => {
@@ -558,6 +859,96 @@ export const PortLoupeOverlay = () => {
       });
       const world = continuousTileToWorld(tile);
       cursorWorldRef.current = world;
+
+      // Glass is open: stay on THIS node until leaving its body.
+      // Chassis (non-port) keeps the loupe; nodes underneath are ignored.
+      if (isLoupeGlassActive() && contentItemIdRef.current) {
+        const itemId =
+          loupeAnchorItemIdRef.current ?? contentItemIdRef.current;
+        const modelItem = modelItemsRef.current.find((m) => m.id === itemId);
+        const viewItem = itemsRef.current.find((v) => v.id === itemId);
+        if (modelItem?.icon && viewItem) {
+          const scale = loupeHighlightScaleFor(modelItem, z);
+          const size =
+            getModelItemSize(modelItem) ?? getShape2dSize(modelItem.icon);
+          if (size) {
+            const cx = viewItem.tile.x + size.width / 2;
+            const cy = viewItem.tile.y + size.height / 2;
+            const halfW = (size.width * scale) / 2;
+            const halfH = (size.height * scale) / 2;
+            const tx = world.x / TILE_SIZE_2D;
+            const ty = world.y / TILE_SIZE_2D;
+            const onBody =
+              tx >= cx - halfW &&
+              tx < cx + halfW &&
+              ty >= cy - halfH &&
+              ty < cy + halfH;
+
+            if (!onBody) {
+              if (visibleRef.current) hideLoupeGlassRef.current();
+              clearLoupeNodeHoverRef.current();
+              uiStoreApi.getState().actions.setShape2dPortHover(null);
+              return;
+            }
+
+            const centerX = (viewItem.tile.x + size.width / 2) * TILE_SIZE_2D;
+            const centerY = (viewItem.tile.y + size.height / 2) * TILE_SIZE_2D;
+            const inv = Math.max(scale, 0.01);
+            const ux = centerX + (world.x - centerX) / inv;
+            const uy = centerY + (world.y - centerY) / inv;
+            const hit = getShape2dPortAtPoint({
+              point: { x: ux / TILE_SIZE_2D, y: uy / TILE_SIZE_2D },
+              scene: { items: [viewItem] } as any,
+              modelItems: modelItemsRef.current,
+              stickyHover: null,
+              highlightedItemIds: null,
+              zoom: 1
+            });
+
+            const { setShape2dPortHover } = uiStoreApi.getState().actions;
+            const prev = uiStoreApi.getState().shape2dPortHover;
+            if (hit?.portId) {
+              if (
+                prev?.itemId !== itemId ||
+                prev?.portId !== hit.portId
+              ) {
+                setShape2dPortHover({ itemId, portId: hit.portId });
+              }
+            } else if (prev?.itemId !== itemId || prev?.portId != null) {
+              // On chassis — keep loupe, clear jack highlight only.
+              setShape2dPortHover({ itemId, portId: null });
+            }
+          }
+        }
+      }
+
+      // Pending dwell: movement restarts the still-on-port timer.
+      if (pendingDwellRef.current && showDelayTimerRef.current) {
+        const screen = mouse.position.screen;
+        if (!dwellScreenRef.current) {
+          dwellScreenRef.current = { x: screen.x, y: screen.y };
+        } else {
+          const moved = Math.hypot(
+            screen.x - dwellScreenRef.current.x,
+            screen.y - dwellScreenRef.current.y
+          );
+          if (moved > LOUPE_STILL_PX) {
+            dwellScreenRef.current = { x: screen.x, y: screen.y };
+            clearTimeout(showDelayTimerRef.current);
+            showDelayTimerRef.current = setTimeout(() => {
+              showDelayTimerRef.current = null;
+              pendingDwellRef.current = false;
+              dwellScreenRef.current = null;
+              const latest = latestDeviceRef.current;
+              const cursor = cursorWorldRef.current;
+              const hover = uiStoreApi.getState().shape2dPortHover;
+              if (!latest || !cursor || !hover?.portId) return;
+              if (hover.itemId !== latest.itemId) return;
+              revealLoupeRef.current?.(latest, cursor);
+            }, LOUPE_PORT_SHOW_DELAY_MS);
+          }
+        }
+      }
 
       // Freeze framing while the button is down so click jitter / hover churn
       // cannot pan the loupe mid-interaction.
@@ -607,54 +998,8 @@ export const PortLoupeOverlay = () => {
     return uiStoreApi.subscribe(onStore);
   }, [uiStoreApi]);
 
-  const revealLoupe = (dev: LoupeDevice, cursor: { x: number; y: number }) => {
-    deviceCenterRef.current = { ...dev.deviceCenter };
-    diameterRef.current = dev.diameter;
-    cursorTargetRef.current = { ...cursor };
-    focusRef.current = { ...cursor };
-
-    setContent({
-      itemId: dev.itemId,
-      modelItem: dev.modelItem,
-      deviceCenter: { ...dev.deviceCenter },
-      diameter: dev.diameter,
-      highlightScale: LOUPE_NODE_SCALE
-    });
-
-    applyLoupeDom(
-      loupeRef.current,
-      contentElRef.current,
-      focusRef.current,
-      deviceCenterRef.current,
-      diameterRef.current,
-      zoomRef.current
-    );
-    stopRaf();
-
-    if (showFrameRef.current) {
-      cancelAnimationFrame(showFrameRef.current);
-      showFrameRef.current = null;
-    }
-    showFrameRef.current = requestAnimationFrame(() => {
-      showFrameRef.current = requestAnimationFrame(() => {
-        setVisible(true);
-        showFrameRef.current = null;
-        if (focusRef.current && deviceCenterRef.current) {
-          applyLoupeDom(
-            loupeRef.current,
-            contentElRef.current,
-            focusRef.current,
-            deviceCenterRef.current,
-            diameterRef.current,
-            zoomRef.current
-          );
-        }
-        syncLoupePortHover();
-      });
-    });
-  };
-
-  // Show / hide with dwell delay.
+  // Show / hide with still-on-port dwell. Do NOT put `content` in deps —
+  // updating content inside the effect would re-fire and freeze the app.
   useEffect(() => {
     if (fadeTimerRef.current) {
       clearTimeout(fadeTimerRef.current);
@@ -662,17 +1007,26 @@ export const PortLoupeOverlay = () => {
     }
 
     if (!device) {
+      // Align / glass: canvas hover is frozen — ignore underside "miss".
+      if (isLoupeRevealLocked() || isLoupeGlassActive()) {
+        return undefined;
+      }
       clearShowDelay();
-      setVisible(false);
-      cursorTargetRef.current = null;
-      applyLoupePortHoverDom(contentElRef.current, null, hoveredJackRef);
-      fadeTimerRef.current = setTimeout(() => {
-        stopRaf();
-        focusRef.current = null;
-        deviceCenterRef.current = null;
-        setContent(null);
-        fadeTimerRef.current = null;
-      }, LOUPE_FADE_OUT_MS);
+
+      const stickyItem = stickyHoverItemId;
+      const stillOnSameNode =
+        Boolean(loupeOwnedEnlargeRef.current) &&
+        stickyItem === loupeOwnedEnlargeRef.current;
+
+      if (stillOnSameNode) {
+        hideLoupeGlass();
+        return () => {
+          if (fadeTimerRef.current) clearTimeout(fadeTimerRef.current);
+        };
+      }
+
+      hideLoupeGlass();
+      clearLoupeNodeHover();
       return () => {
         if (fadeTimerRef.current) clearTimeout(fadeTimerRef.current);
       };
@@ -681,8 +1035,8 @@ export const PortLoupeOverlay = () => {
     deviceCenterRef.current = { ...device.deviceCenter };
     diameterRef.current = device.diameter;
 
-    if (content) {
-      clearShowDelay();
+    // Already showing this device — sync geometry without re-arming dwell.
+    if (contentItemIdRef.current === device.itemId) {
       setContent((prev) => {
         if (
           prev &&
@@ -694,41 +1048,34 @@ export const PortLoupeOverlay = () => {
         ) {
           return prev;
         }
-        // Loupe node never selection-scales on canvas — keep glass at 1.
         return {
           itemId: device.itemId,
           modelItem: device.modelItem,
           deviceCenter: { ...device.deviceCenter },
           diameter: device.diameter,
-          highlightScale: LOUPE_NODE_SCALE
+          highlightScale: loupeHighlightScaleFor(device.modelItem, zoomRef.current)
         };
       });
       setVisible(true);
-      return;
+      return undefined;
     }
 
-    const delayMs = LOUPE_PORT_SHOW_DELAY_MS;
+    // Not visible yet (or switching device) — dwell still on this port.
+    armShowDelay();
 
-    if (!showDelayTimerRef.current) {
-      showDelayTimerRef.current = setTimeout(() => {
-        showDelayTimerRef.current = null;
-        const latest = latestDeviceRef.current;
-        const cursor = cursorWorldRef.current;
-        if (!latest || !cursor) return;
-        revealLoupe(latest, cursor);
-      }, delayMs);
-    }
-
-    return undefined;
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- dwell + device identity
+    return () => {
+      clearShowDelay();
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- dwell + port identity
   }, [
     device?.itemId,
     device?.diameter,
     device?.modelItem,
     device?.deviceCenter.x,
     device?.deviceCenter.y,
-    hasDevice,
-    content
+    hoverPortId,
+    stickyHoverItemId,
+    hasDevice
   ]);
 
   useEffect(() => {
@@ -785,7 +1132,7 @@ export const PortLoupeOverlay = () => {
   };
 
   return (
-    <SceneLayer order={55} disableAnimation>
+    <SceneLayer order={55} disableAnimation omitTransform={false}>
       <Box
         ref={setLoupeEl}
         aria-hidden

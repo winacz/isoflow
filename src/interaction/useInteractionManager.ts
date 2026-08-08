@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef } from 'react';
-import { useModelStore } from 'src/stores/modelStore';
+import { useModelStore, useModelStoreApi } from 'src/stores/modelStore';
 import { useUiStateStore, useUiStateStoreApi } from 'src/stores/uiStateStore';
 import { ModeActions, State, SlimMouseEvent } from 'src/types';
 import {
@@ -10,7 +10,12 @@ import {
   setWindowCursor,
   BLACK_CROSSHAIR_CURSOR,
   connectorPathTouchesTile,
-  isPlanProjection
+  isPlanProjection,
+  refreshBoundingClientRectCache,
+  recordSetMouse,
+  recordMousemoveDuration,
+  isPerfHudEnabled,
+  getLiveViewport
 } from 'src/utils';
 import { useResizeObserver } from 'src/hooks/useResizeObserver';
 import { useScene } from 'src/hooks/useScene';
@@ -86,33 +91,72 @@ export const useInteractionManager = () => {
     didPan: false
   });
   const uiStore = useUiStateStoreApi();
+  const modelStore = useModelStoreApi();
   const editorMode = useUiStateStore((state) => state.editorMode);
   const modeType = useUiStateStore((state) => state.mode.type);
   const rendererEl = useUiStateStore((state) => state.rendererEl);
 
-  const model = useModelStore((state) => {
-    return state;
-  });
+  // Narrow subscription — handlers use getState() for full model.
+  const modelActions = useModelStore((state) => state.actions);
   const scene = useScene();
   const { size: rendererSize } = useResizeObserver(rendererEl);
 
   const mouseRef = useRef(uiStore.getState().mouse);
+  const pendingStoreMouseRef = useRef<typeof mouseRef.current | null>(null);
+  const mouseRafRef = useRef<number | null>(null);
   // Do not clobber the live event-chain mouse while a button is held —
   // a stale React snapshot would clear `mousedown` and break marquee.
   if (!mouseRef.current.mousedown) {
     mouseRef.current = uiStore.getState().mouse;
   }
 
-  const commitMouse = (nextMouse: typeof mouseRef.current) => {
-    mouseRef.current = nextMouse;
-    uiStore.getState().actions.setMouse(nextMouse);
-  };
+  const flushMouseToStore = useCallback(() => {
+    mouseRafRef.current = null;
+    const pending = pendingStoreMouseRef.current;
+    if (!pending) return;
+    pendingStoreMouseRef.current = null;
+    uiStore.getState().actions.setMouse(pending);
+    if (isPerfHudEnabled()) {
+      recordSetMouse();
+    }
+  }, [uiStore]);
+
+  /**
+   * Always update mouseRef sync (hit-tests / mode handlers).
+   * Coalesce Zustand writes to at most once per animation frame for mousemove.
+   * mousedown/mouseup/keyboard flush immediately so React sees press state.
+   */
+  const commitMouse = useCallback(
+    (nextMouse: typeof mouseRef.current, options?: { immediate?: boolean }) => {
+      mouseRef.current = nextMouse;
+
+      if (options?.immediate) {
+        pendingStoreMouseRef.current = null;
+        if (mouseRafRef.current !== null) {
+          window.cancelAnimationFrame(mouseRafRef.current);
+          mouseRafRef.current = null;
+        }
+        uiStore.getState().actions.setMouse(nextMouse);
+        if (isPerfHudEnabled()) {
+          recordSetMouse();
+        }
+        return;
+      }
+
+      pendingStoreMouseRef.current = nextMouse;
+      if (mouseRafRef.current === null) {
+        mouseRafRef.current = window.requestAnimationFrame(flushMouseToStore);
+      }
+    },
+    [uiStore, flushMouseToStore]
+  );
 
   /** Open lock / connector context menu for the tile under the cursor. */
   const openContextMenuAtTile = useCallback(() => {
     const liveUiState = uiStore.getState();
-    const tile = liveUiState.mouse.position.tile;
-    const modelItems = model.actions.get().items;
+    const tile = mouseRef.current.position.tile;
+    const modelItems = modelActions.get().items;
+    const model = modelStore.getState();
 
     // Prefer topmost cable (same order as Connectors paint: later = on top).
     let connectorAtTile: (typeof scene.connectors)[number] | undefined;
@@ -180,11 +224,15 @@ export const useInteractionManager = () => {
     } else if (liveUiState.contextMenu) {
       liveUiState.actions.setContextMenu(null);
     }
-  }, [scene, uiStore, model]);
+
+    void model;
+  }, [scene, uiStore, modelActions, modelStore]);
 
   const onMouseEvent = useCallback(
     (e: SlimMouseEvent) => {
       if (!rendererRef.current) return;
+
+      const perfStart = isPerfHudEnabled() ? performance.now() : 0;
 
       const isRendererInteraction = rendererRef.current === e.target;
       const rightButtonPan = rightButtonPanRef.current;
@@ -195,15 +243,22 @@ export const useInteractionManager = () => {
       // Use the ref chain, not the React snapshot — otherwise a mousemove in the
       // same frame as mousedown drops `mousedown` and marquee / multi-drag break.
       const liveUiState = uiStore.getState();
+      const liveViewport = getLiveViewport();
       const nextMouse = getMouse({
         interactiveElement: rendererRef.current,
-        zoom: liveUiState.zoom,
-        scroll: liveUiState.scroll,
+        zoom: liveViewport.zoom,
+        scroll: {
+          position: liveViewport.scroll,
+          offset: liveUiState.scroll.offset
+        },
         lastMouse: mouseRef.current,
         mouseEvent: e,
         rendererSize,
         projectionMode: liveUiState.projectionMode
       });
+
+      const immediate =
+        e.type === 'mousedown' || e.type === 'mouseup' || e.type === 'dblclick';
 
       if (e.type === 'mousedown' && e.button === RIGHT_MOUSE_BUTTON) {
         if (!isRendererInteraction) return;
@@ -216,7 +271,7 @@ export const useInteractionManager = () => {
           liveUiState.actions.setContextMenu(null);
         }
         setWindowCursor('grabbing');
-        commitMouse(nextMouse);
+        commitMouse(nextMouse, { immediate: true });
         return;
       }
 
@@ -249,12 +304,15 @@ export const useInteractionManager = () => {
         live.actions.setScroll(
           getPanScrollFromDelta(live.scroll, nextMouse.delta?.screen)
         );
+        if (isPerfHudEnabled()) {
+          recordMousemoveDuration(performance.now() - perfStart);
+        }
         return;
       }
 
       if (rightButtonPan.active && e.type === 'mouseup') {
         const wasClick = !rightButtonPan.didPan;
-        commitMouse(nextMouse);
+        commitMouse(nextMouse, { immediate: true });
         rightButtonPan.active = false;
         rightButtonPan.didPan = false;
         restoreCursorForMode(uiStore.getState().mode.type);
@@ -265,20 +323,29 @@ export const useInteractionManager = () => {
         return;
       }
 
-      commitMouse(nextMouse);
+      commitMouse(nextMouse, { immediate });
 
-      // Read mode / selection from the store — React's snapshot lags behind
-      // setMode (marquee) and setMouse from earlier events in the same frame.
+      // Mode handlers need the latest mouse immediately (ref), not the coalesced store.
       const liveUi = uiStore.getState();
       const mode = modes[liveUi.mode.type];
       const modeFunction = getModeFunction(mode, e);
 
-      if (!modeFunction) return;
+      if (!modeFunction) {
+        if (isPerfHudEnabled() && e.type === 'mousemove') {
+          recordMousemoveDuration(performance.now() - perfStart);
+        }
+        return;
+      }
 
       const uiForHandler =
         e.type === 'mouseup' && activePress
-          ? { ...liveUi, mouse: { ...liveUi.mouse, mousedown: activePress } }
-          : liveUi;
+          ? {
+              ...liveUi,
+              mouse: { ...nextMouse, mousedown: activePress }
+            }
+          : { ...liveUi, mouse: nextMouse };
+
+      const model = modelStore.getState();
 
       const baseState: State = {
         model,
@@ -305,8 +372,19 @@ export const useInteractionManager = () => {
 
       modeFunction(baseState);
       reducerTypeRef.current = uiStore.getState().mode.type;
+
+      if (isPerfHudEnabled() && e.type === 'mousemove') {
+        recordMousemoveDuration(performance.now() - perfStart);
+      }
     },
-    [model, scene, uiStore, rendererSize, openContextMenuAtTile]
+    [
+      scene,
+      uiStore,
+      modelStore,
+      rendererSize,
+      openContextMenuAtTile,
+      commitMouse
+    ]
   );
 
   // Native contextmenu only blocks the browser menu — app toolbar opens on RMB mouseup.
@@ -355,8 +433,13 @@ export const useInteractionManager = () => {
         ...mouseRef.current,
         shiftKey: e.type === 'keydown'
       };
-      mouseRef.current = nextMouse;
-      uiStore.getState().actions.setMouse(nextMouse);
+      commitMouse(nextMouse, { immediate: true });
+    };
+
+    const onScrollOrResize = () => {
+      if (rendererRef.current) {
+        refreshBoundingClientRectCache(rendererRef.current);
+      }
     };
 
     el.addEventListener('mousemove', onMouseEvent);
@@ -369,6 +452,8 @@ export const useInteractionManager = () => {
     el.addEventListener('touchend', onTouchEnd);
     el.addEventListener('keydown', onKeyChange);
     el.addEventListener('keyup', onKeyChange);
+    el.addEventListener('scroll', onScrollOrResize, true);
+    el.addEventListener('resize', onScrollOrResize);
 
     return () => {
       el.removeEventListener('mousemove', onMouseEvent);
@@ -381,17 +466,24 @@ export const useInteractionManager = () => {
       el.removeEventListener('touchend', onTouchEnd);
       el.removeEventListener('keydown', onKeyChange);
       el.removeEventListener('keyup', onKeyChange);
+      el.removeEventListener('scroll', onScrollOrResize, true);
+      el.removeEventListener('resize', onScrollOrResize);
+      if (mouseRafRef.current !== null) {
+        window.cancelAnimationFrame(mouseRafRef.current);
+        mouseRafRef.current = null;
+      }
     };
   }, [
     editorMode,
     onMouseEvent,
     modeType,
     onContextMenu,
-    uiStore
+    commitMouse
   ]);
 
   const setInteractionsElement = useCallback((element: HTMLElement) => {
     rendererRef.current = element;
+    refreshBoundingClientRectCache(element);
   }, []);
 
   return {

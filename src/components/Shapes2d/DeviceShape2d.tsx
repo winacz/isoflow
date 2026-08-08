@@ -33,6 +33,8 @@ import {
   resolveDeviceTypeIconKind,
   type NodeIconKind
 } from 'src/components/Icons/DeviceTypeIcon';
+import { useUiStateStore } from 'src/stores/uiStateStore';
+import { buildNodeChassisVisual } from 'src/styles/nodeVisualStyles';
 
 interface Props {
   itemId?: string;
@@ -96,6 +98,11 @@ interface Props {
   poePowerWarning?: boolean;
   /** Port currently under the cursor (hover zoom). */
   hoveredPortId?: string | null;
+  /**
+   * Zoomed-out LOD: chassis + name only (no RJ45 port DOM).
+   * Hit-testing uses geometry in renderer.ts — do not rely on port DOM.
+   */
+  lodSimplified?: boolean;
 }
 
 /**
@@ -129,8 +136,10 @@ const DeviceShape2dComponent = ({
   vlanBorderColor = null,
   poweredByPoe = false,
   poePowerWarning = false,
-  hoveredPortId = null
+  hoveredPortId = null,
+  lodSimplified = false
 }: Props) => {
+  const nodeVisualStyle = useUiStateStore((state) => state.nodeVisualStyle);
   const templateLayout = layoutOverride ?? getDeviceTemplateLayout(shapeId);
   const footprint =
     layoutOverride?.size ?? getShape2dSize(shapeId) ?? { width: 8, height: 7 };
@@ -386,8 +395,19 @@ const DeviceShape2dComponent = ({
 
   const chassisBorderWidth = vlanBorderColor
     ? Math.max(5, Math.round(cellSize * 0.16))
-    : Math.max(1, Math.round(cellSize * 0.05));
-  const chassisBorderColor = vlanBorderColor ?? '#7a8ba3';
+    : nodeVisualStyle === 'outline'
+      ? Math.max(2, Math.round(cellSize * 0.1))
+      : Math.max(1, Math.round(cellSize * 0.05));
+  const chassisVisual = buildNodeChassisVisual(nodeVisualStyle, chassisTint);
+  const chassisBorderColor =
+    vlanBorderColor ?? chassisVisual?.borderColor ?? '#7a8ba3';
+  const chassisStyleSx = chassisVisual?.sx ?? null;
+  const skipTintOverlay = Boolean(chassisVisual?.skipTintOverlay);
+  const outerDropShadow =
+    chassisVisual?.outerFilter ??
+    (showShadow
+      ? 'drop-shadow(0 3px 5px rgba(15,23,42,0.22)) drop-shadow(0 1px 2px rgba(15,23,42,0.12))'
+      : undefined);
 
   /** Host jack: inherit peer switch access VLAN (cable / pill source). */
   const resolveHostPortStatusColor = (portId: string) => {
@@ -402,6 +422,90 @@ const DeviceShape2dComponent = ({
     }
     return vlanBorderColor ?? VLAN_1_COLOR;
   };
+
+  // Zoomed-out LOD: chassis + name only (no RJ45 port DOM).
+  if (lodSimplified) {
+    const nameSize = Math.max(
+      10,
+      Math.round(Math.min(pxWidth / 8, pxHeight * 0.22))
+    );
+    return (
+      <Box
+        sx={{
+          position: centered ? 'absolute' : 'relative',
+          width: pxWidth,
+          height: pxHeight,
+          left: centered ? -pxWidth / 2 : 0,
+          top: centered ? -pxHeight / 2 : 0,
+          pointerEvents: 'none',
+          boxSizing: 'border-box',
+          overflow: 'hidden',
+          filter:
+            chassisVisual?.outerFilter ??
+            (showShadow
+              ? 'drop-shadow(0 2px 3px rgba(15,23,42,0.18))'
+              : undefined)
+        }}
+      >
+        <Box
+          sx={{
+            position: 'absolute',
+            inset: 0,
+            bgcolor: chassisStyleSx ? undefined : '#ffffff',
+            ...(chassisStyleSx ?? null),
+            border: `${chassisBorderWidth}px solid ${chassisBorderColor}`,
+            borderRadius: chassisRadius,
+            boxSizing: 'border-box',
+            overflow: 'hidden',
+            boxShadow: vlanBorderColor
+              ? `0 0 0 1px ${chassisBorderColor}55`
+              : undefined
+          }}
+        >
+          {/* Solid tint overlay fights styled fills — skip when a preset owns the chassis */}
+          {chassisTint.alpha > 0.01 && !skipTintOverlay && (
+            <Box
+              sx={{
+                position: 'absolute',
+                inset: 0,
+                bgcolor: chassisTint.css,
+                pointerEvents: 'none'
+              }}
+            />
+          )}
+          <Box
+            sx={{
+              position: 'absolute',
+              inset: 0,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              px: `${Math.max(4, tileW * 0.2)}px`,
+              boxSizing: 'border-box'
+            }}
+          >
+            <Typography
+              sx={{
+                color: '#1f2937',
+                fontSize: nameSize,
+                fontWeight: 700,
+                letterSpacing: 0.15,
+                lineHeight: 1.1,
+                userSelect: 'none',
+                textAlign: 'center',
+                overflow: 'hidden',
+                whiteSpace: 'nowrap',
+                textOverflow: 'ellipsis',
+                maxWidth: '100%'
+              }}
+            >
+              {name}
+            </Typography>
+          </Box>
+        </Box>
+      </Box>
+    );
+  }
 
   if (isCamera) {
     return (
@@ -606,9 +710,7 @@ const DeviceShape2dComponent = ({
         pointerEvents: 'none',
         boxSizing: 'border-box',
         overflow: 'visible',
-        filter: showShadow
-          ? 'drop-shadow(0 3px 5px rgba(15,23,42,0.22)) drop-shadow(0 1px 2px rgba(15,23,42,0.12))'
-          : undefined
+        filter: outerDropShadow
       }}
     >
       {/* Chassis — square left/right edges when rack so ears join flush */}
@@ -616,7 +718,8 @@ const DeviceShape2dComponent = ({
         sx={{
           position: 'absolute',
           inset: 0,
-          bgcolor: '#ffffff',
+          bgcolor: chassisStyleSx ? undefined : '#ffffff',
+          ...(chassisStyleSx ?? null),
           // Node face content (IP label) paints above this box — border is drawn
           // as a separate overlay so it sits on top of the label.
           border: isPc
@@ -633,7 +736,7 @@ const DeviceShape2dComponent = ({
             : undefined
         }}
       >
-        {chassisTint.alpha > 0.01 && (
+        {chassisTint.alpha > 0.01 && !skipTintOverlay && (
           <Box
             sx={{
               position: 'absolute',
@@ -1936,6 +2039,7 @@ export const DeviceShape2d = React.memo(
     if (prev.attentionPortId !== next.attentionPortId) return false;
     if (prev.attentionToken !== next.attentionToken) return false;
     if (prev.layoutOverride !== next.layoutOverride) return false;
+    if (prev.lodSimplified !== next.lodSimplified) return false;
 
     if (!shallowCompareArraysOrSets(prev.ports, next.ports)) return false;
     if (!shallowCompareArraysOrSets(prev.svis, next.svis)) return false;

@@ -45,11 +45,12 @@ export const buildFootprints = (
     const size = getModelItemSize(model) ?? getShape2dSize(model.icon) ?? null;
     if (!size) return;
 
+    // Whole tiles only — fractional w/h under-block A* and overlap in packs.
     footprints.set(item.id, {
       id: item.id,
       tile: item.tile,
-      width: size.width,
-      height: size.height
+      width: Math.max(1, Math.ceil(size.width)),
+      height: Math.max(1, Math.ceil(size.height))
     });
   });
 

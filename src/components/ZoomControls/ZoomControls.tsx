@@ -16,6 +16,7 @@ import { MAX_ZOOM, MIN_ZOOM, MIN_ZOOM_2D } from 'src/config';
 import { useUiStateStore } from 'src/stores/uiStateStore';
 import { useDiagramUtils } from 'src/hooks/useDiagramUtils';
 import { isPlanProjection } from 'src/utils';
+import { NodeStylePicker } from 'src/components/ZoomControls/NodeStylePicker';
 
 export const ZoomControls = () => {
   const uiStateStoreActions = useUiStateStore((state) => {
@@ -86,6 +87,7 @@ export const ZoomControls = () => {
           isActive={showGrid}
         />
       </UiElement>
+      <NodeStylePicker />
       <UiElement>
         <IconButton
           name={showLoupe ? 'Wyłącz lupę' : 'Włącz lupę'}
@@ -97,7 +99,20 @@ export const ZoomControls = () => {
       <UiElement>
         <IconButton
           name={animateConnectors ? 'Wyłącz animację' : 'Włącz animację'}
-          Icon={<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"></polyline></svg>}
+          Icon={
+            <svg
+              width="24"
+              height="24"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            >
+              <polyline points="22 12 18 12 15 21 9 3 6 12 2 12" />
+            </svg>
+          }
           onClick={uiStateStoreActions.toggleAnimateConnectors}
           isActive={animateConnectors}
         />

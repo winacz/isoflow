@@ -21,6 +21,7 @@ import { Shape2dPortHoverController } from 'src/components/PortPipOverlay/Shape2
 import { PortLoupeOverlay } from 'src/components/PortPipOverlay/PortLoupeOverlay';
 import { SviHoverController } from 'src/components/UiOverlay/SviHoverController';
 import { WorkshopView } from 'src/components/Workshop/WorkshopView';
+import { PerfHud } from 'src/components/PerfHud/PerfHud';
 import { ExportImageDialog } from '../ExportImageDialog/ExportImageDialog';
 import { useScene } from 'src/hooks/useScene';
 import { isPlanProjection, isPlan2dCanvas } from 'src/utils';
@@ -87,9 +88,12 @@ export const UiOverlay = () => {
   const mode = useUiStateStore((state) => {
     return state.mode;
   });
-  const mouse = useUiStateStore((state) => {
-    return state.mouse;
-  });
+  const placeIconTileX = useUiStateStore((state) =>
+    state.mode.type === 'PLACE_ICON' ? state.mouse.position.tile.x : 0
+  );
+  const placeIconTileY = useUiStateStore((state) =>
+    state.mode.type === 'PLACE_ICON' ? state.mouse.position.tile.y : 0
+  );
   const dialog = useUiStateStore((state) => {
     return state.dialog;
   });
@@ -507,10 +511,10 @@ export const UiOverlay = () => {
       </Box>
 
       {mode.type === 'PLACE_ICON' && mode.id && (
-        <SceneLayer disableAnimation>
+        <SceneLayer omitTransform={false} disableAnimation>
           <DragAndDrop
             iconId={mode.id}
-            tile={mouse.position.tile}
+            tile={{ x: placeIconTileX, y: placeIconTileY }}
             draftModelItem={mode.draftModelItem}
           />
         </SceneLayer>
@@ -524,10 +528,11 @@ export const UiOverlay = () => {
         />
       )}
 
-      <SceneLayer>
+      <SceneLayer omitTransform={false}>
         <Box ref={contextMenuAnchorRef} />
         <ContextMenuManager anchorEl={contextMenuAnchorRef.current} />
       </SceneLayer>
+      <PerfHud />
     </>
   );
 };

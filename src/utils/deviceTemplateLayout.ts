@@ -2,8 +2,10 @@ import {
   MAX_SWITCH_TEMPLATE_PORTS,
   RACK_1U_HEIGHT_TILES,
   RACK_1U_WIDTH_TILES,
+  PLAN_SIZE_MODULE_TILES,
   Shape2dPort,
-  Shape2dPortMedia
+  Shape2dPortMedia,
+  ceilSizeToTiles
 } from 'src/config';
 import type { DeviceTemplate, Size } from 'src/types';
 
@@ -174,10 +176,17 @@ export const layoutDeviceTemplate = (
     }
   }
   
-  const size: Size = {
+  // Free-plan (DIN/CUSTOM / overflow): whole rack-grid modules so neighbours
+  // snapped onto the rack grid cannot tuck under a fractional overhang.
+  // Fixed RACK bay stays exact so devices still fit the cabinet slot (60).
+  const rawSize: Size = {
     width: bay,
     height: rackUnits * RACK_1U_HEIGHT_TILES
   };
+  const size: Size =
+    isRack && !overflow
+      ? ceilSizeToTiles(rawSize, 1)
+      : ceilSizeToTiles(rawSize, PLAN_SIZE_MODULE_TILES);
 
   let cursorX = isRack ? margin : SIDE_MARGIN;
 

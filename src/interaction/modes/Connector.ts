@@ -133,7 +133,9 @@ export const Connector: ModeActions = {
     });
 
     scene.updateConnector(uiState.mode.id, newConnector, {
-      overlapResolve: 'off'
+      overlapResolve: 'off',
+      // Live drag: polyline preview only — full A* on mouseup.
+      fastPath: true
     });
   },
   mousedown: ({ uiState, scene, model, isRendererInteraction }) => {
@@ -241,7 +243,7 @@ export const Connector: ModeActions = {
       scene.updateConnector(
         uiState.mode.id,
         {},
-        { overlapResolve: 'off', materializeBends: true }
+        { overlapResolve: 'off', materializeBends: true, fastPath: false }
       );
     }
 

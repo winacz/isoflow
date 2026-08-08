@@ -16,6 +16,7 @@ import {
   supportsConnectorTools
 } from 'src/utils';
 import type { PlacementMode, RouteStyle } from 'src/utils/autoLayout';
+import { yieldToMain } from 'src/utils/scheduleHeavyWork';
 import { useScene } from 'src/hooks/useScene';
 import { useModelStore } from 'src/stores/modelStore';
 import { computeDensityGroups } from 'src/v3/densityGroups';
@@ -231,17 +232,19 @@ export const ContextMenuManager = ({ anchorEl }: Props) => {
 
     const runBus = (exitStyle: DensityBusExitStyle) => {
       setDensityVisible(true);
-      setTimeout(() => {
+      void (async () => {
+        await yieldToMain();
         runDensityGroupBuses({ exitStyle });
-      }, 0);
+      })();
       onClose();
     };
 
     const runArrange = (mode?: 'magistrala') => {
       setDensityVisible(true);
-      setTimeout(() => {
+      void (async () => {
+        await yieldToMain();
         runArrangeDensityGroups(mode ? { mode } : undefined);
-      }, 0);
+      })();
       onClose();
     };
 

@@ -121,8 +121,8 @@ const getFootprint = (
   return {
     id: viewItem.id,
     tile: { ...viewItem.tile },
-    width: size.width,
-    height: size.height
+    width: Math.max(1, Math.ceil(size.width)),
+    height: Math.max(1, Math.ceil(size.height))
   };
 };
 

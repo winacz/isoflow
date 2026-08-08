@@ -1,56 +1,119 @@
 import React, { useEffect, useRef } from 'react';
 import { Box, Typography } from '@mui/material';
-import { useUiStateStore } from 'src/stores/uiStateStore';
+import { useUiStateStore, useUiStateStoreApi } from 'src/stores/uiStateStore';
 
+type SviTooltipPayload = {
+  vlan: number | string;
+  ip?: string;
+  color: string;
+};
+
+/**
+ * SVI tooltip — store subscribe + rAF (not React re-render on every mouse px).
+ * Tooltip attribute is parsed only when the hovered element changes.
+ */
 export const SviHoverController = () => {
-  const mouse = useUiStateStore((state) => state.mouse);
   const setSviHover = useUiStateStore((state) => state.actions.setSviHover);
   const sviHover = useUiStateStore((state) => state.sviHover);
-  
+  const store = useUiStateStoreApi();
   const tooltipRef = useRef<HTMLDivElement>(null);
+  const lastHoverKeyRef = useRef<string | null>(null);
+  const rafRef = useRef<number | null>(null);
 
   useEffect(() => {
-    // We only need to check when mouse moves
-    const interactionLayer = document.querySelector('.isoflow-interaction-layer') as HTMLElement;
-    
-    if (!interactionLayer) {
-      setSviHover(null);
-      return;
-    }
+    const runHitTest = () => {
+      rafRef.current = null;
+      const mouse = store.getState().mouse;
+      const interactionLayer = document.querySelector(
+        '.isoflow-interaction-layer'
+      ) as HTMLElement | null;
 
-    // Micro-toggle pointer events to pierce through the interaction overlay
-    const originalEvents = interactionLayer.style.pointerEvents;
-    interactionLayer.style.pointerEvents = 'none';
-    
-    const target = document.elementFromPoint(mouse.position.screen.x, mouse.position.screen.y);
-    
-    interactionLayer.style.pointerEvents = originalEvents;
-
-    const hoverable = target?.closest('.svi-hoverable');
-    
-    if (hoverable) {
-      const tooltipData = hoverable.getAttribute('data-svi-tooltip');
-      if (tooltipData) {
-        try {
-          const parsed = JSON.parse(tooltipData);
-          setSviHover({
-            vlan: parsed.vlan,
-            ip: parsed.ip,
-            color: parsed.color,
-            screen: {
-              x: mouse.position.screen.x,
-              y: mouse.position.screen.y
-            }
-          });
-          return;
-        } catch (e) {
-          // parse error
+      if (!interactionLayer) {
+        if (lastHoverKeyRef.current !== null) {
+          lastHoverKeyRef.current = null;
+          setSviHover(null);
         }
+        return;
       }
-    }
-    
-    setSviHover(null);
-  }, [mouse.position.screen.x, mouse.position.screen.y, setSviHover]);
+
+      const originalEvents = interactionLayer.style.pointerEvents;
+      interactionLayer.style.pointerEvents = 'none';
+      const target = document.elementFromPoint(
+        mouse.position.screen.x,
+        mouse.position.screen.y
+      );
+      interactionLayer.style.pointerEvents = originalEvents;
+
+      const hoverable = target?.closest('.svi-hoverable') as HTMLElement | null;
+      if (!hoverable) {
+        if (lastHoverKeyRef.current !== null) {
+          lastHoverKeyRef.current = null;
+          setSviHover(null);
+        }
+        return;
+      }
+
+      const tooltipData = hoverable.getAttribute('data-svi-tooltip');
+      if (!tooltipData) {
+        if (lastHoverKeyRef.current !== null) {
+          lastHoverKeyRef.current = null;
+          setSviHover(null);
+        }
+        return;
+      }
+
+      const hoverKey = tooltipData;
+      let parsed: SviTooltipPayload | null = null;
+      try {
+        parsed = JSON.parse(tooltipData) as SviTooltipPayload;
+      } catch {
+        parsed = null;
+      }
+
+      if (!parsed) {
+        if (lastHoverKeyRef.current !== null) {
+          lastHoverKeyRef.current = null;
+          setSviHover(null);
+        }
+        return;
+      }
+
+      // Always update screen position; skip JSON re-parse identity churn when same key.
+      lastHoverKeyRef.current = hoverKey;
+      setSviHover({
+        vlan: typeof parsed.vlan === 'number' ? parsed.vlan : Number(parsed.vlan) || 0,
+        ip: parsed.ip,
+        color: parsed.color,
+        screen: {
+          x: mouse.position.screen.x,
+          y: mouse.position.screen.y
+        }
+      });
+    };
+
+    const schedule = () => {
+      if (rafRef.current !== null) return;
+      rafRef.current = window.requestAnimationFrame(runHitTest);
+    };
+
+    const unsub = store.subscribe((state, prev) => {
+      if (
+        state.mouse.position.screen.x === prev.mouse.position.screen.x &&
+        state.mouse.position.screen.y === prev.mouse.position.screen.y
+      ) {
+        return;
+      }
+      schedule();
+    });
+
+    return () => {
+      unsub();
+      if (rafRef.current !== null) {
+        window.cancelAnimationFrame(rafRef.current);
+        rafRef.current = null;
+      }
+    };
+  }, [store, setSviHover]);
 
   if (!sviHover) return null;
 
@@ -71,7 +134,6 @@ export const SviHoverController = () => {
         borderRadius: '8px',
         boxShadow: '0 4px 16px rgba(0,0,0,0.35)',
         whiteSpace: 'nowrap',
-        // Arrow pointing down
         '&::after': {
           content: '""',
           position: 'absolute',

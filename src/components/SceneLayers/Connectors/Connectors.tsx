@@ -1,16 +1,19 @@
-import React, { useMemo } from 'react';
+import React, { useMemo, useRef } from 'react';
 import { GlobalStyles } from '@mui/material';
 import type { useScene } from 'src/hooks/useScene';
 import { useUiStateStore } from 'src/stores/uiStateStore';
 import { useModelStore } from 'src/stores/modelStore';
 import { getActiveStackKey, useStackFanStore } from 'src/stores/stackFanStore';
 import {
-  findConnectorJumpsById,
+  buildConnectorTileIndex,
+  findConnectorIdAtTile,
+  findConnectorJumpsIncremental,
   findConnectorStackBadges,
   getConnectorGlobalTiles,
   getStackFanOffsetsPx,
   expandConnectorIdsThroughPatchPanels,
-  isPlan2dCanvas
+  isPlan2dCanvas,
+  type ConnectorJump
 } from 'src/utils';
 import { TILE_SIZE_2D } from 'src/config';
 import { Connector } from './Connector';
@@ -43,6 +46,19 @@ const connectorUsesPort = (
 
 const stackKey = (tile: { x: number; y: number }) => {
   return `${tile.x},${tile.y}`;
+};
+
+type PathInput = { id: string; tiles: { x: number; y: number }[] };
+
+const pathTilesEqual = (
+  a: { x: number; y: number }[],
+  b: { x: number; y: number }[]
+) => {
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i += 1) {
+    if (a[i].x !== b[i].x || a[i].y !== b[i].y) return false;
+  }
+  return true;
 };
 
 export const Connectors = ({ connectors }: Props) => {
@@ -192,6 +208,13 @@ export const Connectors = ({ connectors }: Props) => {
     });
   }, [connectors, projectionMode, softDim]);
 
+  const tileIndex = useMemo(() => {
+    return buildConnectorTileIndex(pathInputs);
+  }, [pathInputs]);
+
+  const prevPathInputsRef = useRef<PathInput[]>([]);
+  const prevJumpsRef = useRef<Record<string, ConnectorJump[]>>({});
+
   /** Cable under cursor — emphasize before click (idle CURSOR only). */
   const hoveredConnectorId = useMemo(() => {
     if (!isPlan2dCanvas(projectionMode)) return null;
@@ -199,28 +222,13 @@ export const Connectors = ({ connectors }: Props) => {
     if (hasMouseDown || softDim) return null;
 
     const tile = { x: mouseTileX, y: mouseTileY };
-    const onTile = (tiles: { x: number; y: number }[]) => {
-      return tiles.some((pathTile) => {
-        return pathTile.x === tile.x && pathTile.y === tile.y;
-      });
-    };
+    const onTileIds = tileIndex.get(stackKey(tile));
 
-    if (selectedConnectorId) {
-      const selected = pathInputs.find((entry) => {
-        return entry.id === selectedConnectorId;
-      });
-      if (selected && onTile(selected.tiles)) {
-        return selectedConnectorId;
-      }
+    if (selectedConnectorId && onTileIds?.includes(selectedConnectorId)) {
+      return selectedConnectorId;
     }
 
-    for (let i = pathInputs.length - 1; i >= 0; i -= 1) {
-      if (onTile(pathInputs[i].tiles)) {
-        return pathInputs[i].id;
-      }
-    }
-
-    return null;
+    return findConnectorIdAtTile(tileIndex, tile);
   }, [
     projectionMode,
     mode.type,
@@ -229,13 +237,56 @@ export const Connectors = ({ connectors }: Props) => {
     mouseTileX,
     mouseTileY,
     selectedConnectorId,
-    pathInputs
+    tileIndex
   ]);
 
   const jumpsByConnectorId = useMemo(() => {
-    if (!isPlan2dCanvas(projectionMode) || softDim) return {};
+    if (!isPlan2dCanvas(projectionMode) || softDim) {
+      prevPathInputsRef.current = [];
+      prevJumpsRef.current = {};
+      return {};
+    }
 
-    return findConnectorJumpsById(pathInputs);
+    const prevPaths = prevPathInputsRef.current;
+    const prevById = new Map(
+      prevPaths.map((entry) => {
+        return [entry.id, entry] as const;
+      })
+    );
+    const nextById = new Map(
+      pathInputs.map((entry) => {
+        return [entry.id, entry] as const;
+      })
+    );
+
+    const changedIds = new Set<string>();
+    for (const next of pathInputs) {
+      const prev = prevById.get(next.id);
+      if (!prev || !pathTilesEqual(prev.tiles, next.tiles)) {
+        changedIds.add(next.id);
+      }
+    }
+    for (const prev of prevPaths) {
+      if (!nextById.has(prev.id)) {
+        changedIds.add(prev.id);
+      }
+    }
+
+    // Nothing moved — reuse cached jumps (incremental helper would full-recompute on empty).
+    if (changedIds.size === 0 && prevPaths.length > 0) {
+      return prevJumpsRef.current;
+    }
+
+    const jumps = findConnectorJumpsIncremental(
+      prevJumpsRef.current,
+      prevPaths,
+      pathInputs,
+      changedIds
+    );
+
+    prevPathInputsRef.current = pathInputs;
+    prevJumpsRef.current = jumps;
+    return jumps;
   }, [pathInputs, projectionMode, softDim]);
 
   const fanOffsets = useMemo(() => {

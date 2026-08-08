@@ -31,7 +31,7 @@ import { useScene } from 'src/hooks/useScene';
 import { ExpandableLabel } from 'src/components/Label/ExpandableLabel';
 import { MarkdownEditor } from 'src/components/MarkdownEditor/MarkdownEditor';
 import { useUiStateStore, useUiStateStoreApi } from 'src/stores/uiStateStore';
-import { useModelStore } from 'src/stores/modelStore';
+import { useModelStore, useModelStoreApi } from 'src/stores/modelStore';
 import { useNodeDragStore } from 'src/stores/nodeDragStore';
 import { useView } from 'src/hooks/useView';
 import { useResizeObserver } from 'src/hooks/useResizeObserver';
@@ -81,9 +81,7 @@ export const Node = React.memo(({
   );
   const modelItem = useModelItem(node.id);
   const { connectors: sceneConnectors } = useScene();
-  const model = useModelStore((state) => {
-    return state;
-  });
+  const modelStoreApi = useModelStoreApi();
   const modelItems = useModelStore((state) => {
     return state.items;
   });
@@ -194,6 +192,10 @@ export const Node = React.memo(({
     )
   );
 
+  // LOD that stripped RJ45 DOM at zoom < 0.35 is off — common plan zooms
+  // (fit-to-view) sit under that threshold and looked like "no ports".
+  const lodSimplified = false;
+
   const { iconComponent } = useIcon(
     modelItem.icon,
     modelItem.name,
@@ -211,7 +213,8 @@ export const Node = React.memo(({
     vlanBorderColor,
     Boolean(modelItem.poweredByPoe),
     poePowerWarning,
-    null
+    null,
+    lodSimplified
   );
   const liveTile = useNodeDragStore((state) => {
     return state.tiles[node.id];
@@ -244,8 +247,10 @@ export const Node = React.memo(({
     return { left: -pxW / 2, top: -pxH / 2, width: pxW, height: pxH };
   }, [isPlanShape, shapeSize, modelItem.icon]);
 
+  const showLoupe = useUiStateStore((state) => state.showLoupe);
   /**
    * Enlarge only after header click — not on node / header hover.
+   * Loupe reveal also sets enlarge; skip CSS transition so hit-tests stay aligned.
    */
   const activeScale = shouldEnlarge ? highlightScale : 1;
   const isScaled =
@@ -284,8 +289,8 @@ export const Node = React.memo(({
 
   const portalLabel = useMemo(() => {
     if (isTwoD || !modelItem.portal) return null;
-    return getPortalDisplayLabel(modelItem.portal, model);
-  }, [isTwoD, modelItem.portal, model]);
+    return getPortalDisplayLabel(modelItem.portal, modelStoreApi.getState());
+  }, [isTwoD, modelItem.portal, modelStoreApi, views, modelItems]);
 
   const onPortalClick = useCallback(
     (event: React.MouseEvent) => {
@@ -296,6 +301,7 @@ export const Node = React.memo(({
 
       uiStateActions.setPortPipHover(null);
 
+      const model = modelStoreApi.getState();
       const jump = planPortalJump({
         portal,
         model,
@@ -327,7 +333,7 @@ export const Node = React.memo(({
         });
       }
     },
-    [modelItem.portal, model, rendererSize, changeView, uiStateActions]
+    [modelItem.portal, modelStoreApi, changeView, uiStateActions]
   );
 
   const onPortalMouseEnter = useCallback(
@@ -424,7 +430,8 @@ export const Node = React.memo(({
               ? `translate(${repelOffset.x}px, ${repelOffset.y}px)`
               : 'none',
           transformOrigin: '0 0',
-          transition: 'transform 0.18s ease'
+          // Loupe reveal snaps enlarge + pans in the same frame — no tween.
+          transition: showLoupe ? 'none' : 'transform 0.18s ease'
         }}
         style={{
           left: position.x,

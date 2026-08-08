@@ -11,7 +11,9 @@ import {
   isPlanProjection,
   isTileInShape2dBounds,
   applyScenePortHoverDom,
-  resolvePortPipPeer
+  resolvePortPipPeer,
+  computeHighlightScale,
+  isLoupePortHoverFrozen
 } from 'src/utils';
 import {
   getModelItemSize,
@@ -25,8 +27,6 @@ import type { Connector } from 'src/types';
 const PORT_HOVER_CLEAR_DELAY_MS = 140;
 /** Sticky device-under-cursor — avoids relation/ring flicker in port gaps. */
 const NODE_HOVER_CLEAR_DELAY_MS = 100;
-/** Must match Nodes.tsx / getShape2dPortAtPoint highlight scale (selection baseline). */
-const NODE_HIGHLIGHT_SCALE = 1.15;
 
 /**
  * Tracks RJ45/SFP under the cursor on Plan 2D and stores `shape2dPortHover`
@@ -174,6 +174,12 @@ export const Shape2dPortHoverController = () => {
         return;
       }
 
+      // Loupe glass magnifies; canvas hit-tests underneath must not steal hover.
+      if (isLoupePortHoverFrozen()) {
+        clearPending();
+        return;
+      }
+
       // While clicking with the loupe active, freeze hover. Selection scale /
       // sticky hit-boxes would otherwise switch the hovered port mid-click and
       // reframe the loupe ("obraz przeskakuje").
@@ -223,15 +229,7 @@ export const Shape2dPortHoverController = () => {
         selectedItemIds: uiState.selectedItemIds,
         viewItems,
         modelItems: model.items,
-        extraScaledItemIds: [
-          // Only header-click enlarge CSS-scales — keep port hits aligned.
-          shape2dEnlargedItemId
-        ],
-        // Loupe node must stay unscaled — hit-tests follow Nodes.tsx.
-        excludeItemIds:
-          uiState.showLoupe && shape2dPortHover
-            ? [shape2dPortHover.itemId]
-            : null
+        extraScaledItemIds: [shape2dEnlargedItemId]
       });
 
       const portHit = getShape2dPortAtPoint({
@@ -239,7 +237,8 @@ export const Shape2dPortHoverController = () => {
         scene: mockScene,
         modelItems: model.items,
         stickyHover: shape2dPortHover,
-        highlightedItemIds: scaledItemIds.size > 0 ? scaledItemIds : null
+        highlightedItemIds: scaledItemIds.size > 0 ? scaledItemIds : null,
+        zoom: uiState.zoom
       });
 
       if (!portHit) {
@@ -271,11 +270,14 @@ export const Shape2dPortHoverController = () => {
                 scaledItemIds.has(viewItem.id) &&
                 modelItem.icon !== SHAPE_2D_CABINET_ID
               ) {
-                // Body is CSS-scaled from the device centre — expand AABB.
+                const bodyScale = computeHighlightScale(
+                  size.width * size.height,
+                  uiState.zoom
+                );
                 const cx = viewItem.tile.x + size.width / 2;
                 const cy = viewItem.tile.y + size.height / 2;
-                const halfW = (size.width * NODE_HIGHLIGHT_SCALE) / 2;
-                const halfH = (size.height * NODE_HIGHLIGHT_SCALE) / 2;
+                const halfW = (size.width * bodyScale) / 2;
+                const halfH = (size.height * bodyScale) / 2;
                 isOnBody =
                   point.x >= cx - halfW &&
                   point.x < cx + halfW &&
@@ -307,10 +309,20 @@ export const Shape2dPortHoverController = () => {
 
         // Header hover accent (only when not over a port jack) — no enlarge.
         // Use real enlarge scale for hit-testing (hover must not pretend-scale).
-        const enlargeScale =
-          shape2dEnlargedItemId && scaledItemIds.has(shape2dEnlargedItemId)
-            ? Math.max(NODE_HIGHLIGHT_SCALE, 1.15)
-            : NODE_HIGHLIGHT_SCALE;
+        let enlargeScale = 1.15;
+        if (shape2dEnlargedItemId && scaledItemIds.has(shape2dEnlargedItemId)) {
+          const enlModel = model.items.find((m) => m.id === shape2dEnlargedItemId);
+          const enlSize = enlModel
+            ? getModelItemSize(enlModel) ??
+              (enlModel.icon ? getShape2dSize(enlModel.icon) : null)
+            : null;
+          if (enlSize) {
+            enlargeScale = computeHighlightScale(
+              enlSize.width * enlSize.height,
+              uiState.zoom
+            );
+          }
+        }
         const headerItemId = getShape2dHeaderAtPoint({
           point,
           items: viewItems,

@@ -56,8 +56,11 @@ export const ToolMenu = ({
   const uiStateStoreActions = useUiStateStore((state) => {
     return state.actions;
   });
-  const mousePosition = useUiStateStore((state) => {
-    return state.mouse.position.tile;
+  const mouseTileX = useUiStateStore((state) => {
+    return state.mouse.position.tile.x;
+  });
+  const mouseTileY = useUiStateStore((state) => {
+    return state.mouse.position.tile.y;
   });
 
   const isTwoD = isPlan2dCanvas(projectionMode);
@@ -157,7 +160,7 @@ export const ToolMenu = ({
     createTextBox({
       ...TEXTBOX_DEFAULTS,
       id: textBoxId,
-      tile: mousePosition
+      tile: { x: mouseTileX, y: mouseTileY }
     });
 
     uiStateStoreActions.setMode({
@@ -165,7 +168,7 @@ export const ToolMenu = ({
       showCursor: false,
       id: textBoxId
     });
-  }, [uiStateStoreActions, createTextBox, mousePosition]);
+  }, [uiStateStoreActions, createTextBox, mouseTileX, mouseTileY]);
 
   const openAddMenu = useCallback(() => {
     uiStateStoreActions.setItemControls({

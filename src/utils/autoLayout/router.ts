@@ -251,8 +251,10 @@ const buildField = ({
     const model = modelById.get(item.id);
     if (model && (isCabinetItem(model) || isBlankingItem(model))) return;
 
-    for (let x = 0; x < footprint.width; x += 1) {
-      for (let y = 0; y < footprint.height; y += 1) {
+    const fw = Math.max(1, Math.ceil(footprint.width));
+    const fh = Math.max(1, Math.ceil(footprint.height));
+    for (let x = 0; x < fw; x += 1) {
+      for (let y = 0; y < fh; y += 1) {
         const k = key(item.tile.x + x, item.tile.y + y);
         if (walkableNodes) field.underNode.add(k);
         else field.blocked.add(k);
@@ -278,15 +280,17 @@ const buildField = ({
       const normal = sideNormal(port.side);
       if (!normal) return;
 
+      const fw = Math.max(1, Math.ceil(footprint.width));
+      const fh = Math.max(1, Math.ceil(footprint.height));
       const left = item.tile.x;
       const top = item.tile.y;
-      const right = item.tile.x + footprint.width - 1;
-      const bottom = item.tile.y + footprint.height - 1;
+      const right = item.tile.x + fw - 1;
+      const bottom = item.tile.y + fh - 1;
 
       let cx = px;
       let cy = py;
       // Enough to clear this body plus a stacked neighbour.
-      const maxSteps = footprint.width + footprint.height + 12;
+      const maxSteps = fw + fh + 12;
 
       for (let step = 0; step < maxSteps; step += 1) {
         cx += normal.x;
@@ -314,8 +318,10 @@ const buildField = ({
     const model = modelById.get(item.id);
     if (model && (isCabinetItem(model) || isBlankingItem(model))) return;
 
-    for (let x = -1; x <= footprint.width; x += 1) {
-      for (let y = -1; y <= footprint.height; y += 1) {
+    const fw = Math.max(1, Math.ceil(footprint.width));
+    const fh = Math.max(1, Math.ceil(footprint.height));
+    for (let x = -1; x <= fw; x += 1) {
+      for (let y = -1; y <= fh; y += 1) {
         const k = key(item.tile.x + x, item.tile.y + y);
         if (!field.blocked.has(k) && !field.underNode.has(k)) {
           field.nearNode.add(k);

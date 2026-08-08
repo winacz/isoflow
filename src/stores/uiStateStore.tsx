@@ -15,6 +15,11 @@ import {
   decrementZoom,
   createSmoothZoomController
 } from 'src/utils/zoom';
+import {
+  setLiveViewport,
+  syncLiveViewportFromStore,
+  getLiveViewport
+} from 'src/utils/liveViewport';
 import { UiStateStore } from 'src/types';
 import {
   INITIAL_UI_STATE,
@@ -24,6 +29,33 @@ import {
 } from 'src/config';
 
 const smoothZoom = createSmoothZoomController();
+
+const publishStoreViewport = (zoom: number, scroll: { position: { x: number; y: number } }) => {
+  syncLiveViewportFromStore({
+    zoom,
+    scroll: scroll.position
+  });
+};
+
+/** Coalesce trackpad pan store writes to one React update per frame. */
+let panStoreRaf = 0;
+let pendingPanScroll: { position: { x: number; y: number }; offset: { x: number; y: number } } | null =
+  null;
+
+const schedulePanStoreCommit = (
+  set: (partial: Partial<UiStateStore>) => void,
+  scroll: { position: { x: number; y: number }; offset: { x: number; y: number } }
+) => {
+  pendingPanScroll = scroll;
+  if (panStoreRaf) return;
+  panStoreRaf = requestAnimationFrame(() => {
+    panStoreRaf = 0;
+    const next = pendingPanScroll;
+    pendingPanScroll = null;
+    if (!next) return;
+    set({ scroll: next });
+  });
+};
 
 const initialState = () => {
   setSimplePathsEnabled(INITIAL_UI_STATE.simplePaths);
@@ -66,6 +98,7 @@ const initialState = () => {
       showGrid: INITIAL_UI_STATE.showGrid,
       showLoupe: INITIAL_UI_STATE.showLoupe,
       animateConnectors: INITIAL_UI_STATE.animateConnectors,
+      nodeVisualStyle: INITIAL_UI_STATE.nodeVisualStyle,
       gridStyle: INITIAL_UI_STATE.gridStyle,
       canvasByMode: INITIAL_UI_STATE.canvasByMode,
       viewTransformByMode: INITIAL_UI_STATE.viewTransformByMode,
@@ -129,22 +162,24 @@ const initialState = () => {
           });
         },
         incrementZoom: () => {
-          const { zoom, projectionMode } = get();
+          const { zoom, projectionMode, scroll } = get();
           const minZoom = isPlanProjection(projectionMode)
             ? MIN_ZOOM_2D
             : MIN_ZOOM;
           const next = incrementZoom(zoom, minZoom);
           smoothZoom.sync(next);
           set({ zoom: next });
+          publishStoreViewport(next, scroll);
         },
         decrementZoom: () => {
-          const { zoom, projectionMode } = get();
+          const { zoom, projectionMode, scroll } = get();
           const minZoom = isPlanProjection(projectionMode)
             ? MIN_ZOOM_2D
             : MIN_ZOOM;
           const next = decrementZoom(zoom, minZoom);
           smoothZoom.sync(next);
           set({ zoom: next });
+          publishStoreViewport(next, scroll);
         },
         setZoom: (zoom) => {
           const minZoom = isPlanProjection(get().projectionMode)
@@ -153,21 +188,23 @@ const initialState = () => {
           const next = clamp(zoom, minZoom, MAX_ZOOM);
           smoothZoom.sync(next);
           set({ zoom: next });
+          publishStoreViewport(next, get().scroll);
         },
         adjustZoomByWheel: (deltaY, deltaMode = 0, focalFromCenter) => {
-          const { zoom, projectionMode } = get();
+          const { zoom, projectionMode, scroll } = get();
           const minZoom = isPlanProjection(projectionMode)
             ? MIN_ZOOM_2D
             : MIN_ZOOM;
           smoothZoom.applyWheel(deltaY, deltaMode, {
             zoom,
             minZoom,
+            scroll,
             focalFromCenter,
             setZoom: (next) => {
               set({ zoom: next });
             },
-            setScroll: (updater) => {
-              set((state) => ({ scroll: updater(state.scroll) }));
+            setScroll: (nextScroll) => {
+              set({ scroll: nextScroll });
             }
           });
         },
@@ -181,15 +218,26 @@ const initialState = () => {
             dx *= 800;
             dy *= 800;
           }
-          // Negate so natural two-finger scroll moves the canvas with the fingers.
-          const next = getPanScrollFromDelta(get().scroll, {
-            x: -dx,
-            y: -dy
+          const live = getLiveViewport();
+          const offset = get().scroll.offset;
+          const next = getPanScrollFromDelta(
+            { position: live.scroll, offset },
+            {
+              x: -dx,
+              y: -dy
+            }
+          );
+          // Visual pan immediately; React store catch-up is rAF-coalesced.
+          setLiveViewport({
+            zoom: live.zoom,
+            scroll: next.position
           });
-          set({ scroll: next });
+          schedulePanStoreCommit(set, next);
         },
         setScroll: ({ position, offset }) => {
-          set({ scroll: { position, offset: offset ?? get().scroll.offset } });
+          const next = { position, offset: offset ?? get().scroll.offset };
+          publishStoreViewport(get().zoom, next);
+          set({ scroll: next });
         },
         setItemControls: (itemControls) => {
           if (itemControls?.type === 'ITEM') {
@@ -424,6 +472,20 @@ const initialState = () => {
           set({ shape2dEnlargedItemId });
         },
         setSviHover: (sviHover) => {
+          const prev = get().sviHover;
+          if (prev === sviHover) return;
+          if (
+            prev &&
+            sviHover &&
+            prev.vlan === sviHover.vlan &&
+            prev.ip === sviHover.ip &&
+            prev.color === sviHover.color &&
+            prev.screen.x === sviHover.screen.x &&
+            prev.screen.y === sviHover.screen.y
+          ) {
+            return;
+          }
+          if (!prev && !sviHover) return;
           set({ sviHover });
         },
         setContextMenu: (contextMenu) => {
@@ -484,6 +546,10 @@ const initialState = () => {
         },
         toggleAnimateConnectors: () => {
           set({ animateConnectors: !get().animateConnectors });
+        },
+        setNodeVisualStyle: (nodeVisualStyle) => {
+          if (get().nodeVisualStyle === nodeVisualStyle) return;
+          set({ nodeVisualStyle });
         },
         setGridStyle: (gridStyle) => {
           set({ gridStyle, showGrid: true });

@@ -23,6 +23,8 @@ const MAX_WORLD_ZOOM = 0.5;
 const MIN_WORLD_ZOOM = 0.04;
 /** How far (tiles) around the focus to include neighbors. */
 const NEIGHBOR_PAD_TILES = 14;
+/** Cap duplicated neighbor DeviceShape2d mounts in the PiP card. */
+const MAX_PIP_NEIGHBORS = 8;
 /** Offset from cursor. */
 const CURSOR_GAP = 56;
 
@@ -149,13 +151,17 @@ const collectNearbyNodes = ({
 
   const nodes = Array.from(byId.values());
   if (focusItemId) {
-    nodes.sort((a, b) => {
-      if (a.modelItem.id === focusItemId) return 1;
-      if (b.modelItem.id === focusItemId) return -1;
-      return 0;
+    const focusNodes = nodes.filter((node) => {
+      return node.modelItem.id === focusItemId;
     });
+    const neighbors = nodes
+      .filter((node) => {
+        return node.modelItem.id !== focusItemId;
+      })
+      .slice(0, MAX_PIP_NEIGHBORS);
+    return [...neighbors, ...focusNodes];
   }
-  return nodes;
+  return nodes.slice(0, MAX_PIP_NEIGHBORS);
 };
 
 /**

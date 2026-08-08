@@ -1,6 +1,11 @@
 import { MIN_ZOOM, MAX_ZOOM } from 'src/config';
 import type { Coords, Scroll } from 'src/types';
 import { clamp } from './common';
+import {
+  setLiveViewport,
+  setViewportGestureActive,
+  getLiveViewport
+} from './liveViewport';
 
 /** Button zoom: ~10% multiplicative step, no snapping. */
 export const incrementZoom = (zoom: number, minZoom = MIN_ZOOM) => {
@@ -13,8 +18,6 @@ export const decrementZoom = (zoom: number, minZoom = MIN_ZOOM) => {
 
 /**
  * Keep the world point under `focalFromCenter` fixed when zoom changes.
- * Kept for callers that need zoom-to-point; default 2D zoom leaves scroll alone
- * so zooming out does not pull the map toward the viewport center.
  */
 export const getScrollForZoomChange = (
   oldZoom: number,
@@ -34,12 +37,6 @@ export const getScrollForZoomChange = (
   };
 };
 
-/**
- * Apply one wheel event to a zoom value.
- * Mouse notches (±100/120) stay as small consistent steps; Mac trackpad
- * pinch (ctrl+wheel, tiny pixel deltas) uses a higher gain so you do not
- * need a long gesture to zoom a useful amount.
- */
 export const zoomFromWheelDelta = (
   zoom: number,
   deltaY: number,
@@ -51,25 +48,23 @@ export const zoomFromWheelDelta = (
 
   const abs = Math.abs(pixels);
 
-  // Typical mouse wheel notch — treat as a small, consistent step (~8%).
   if (abs >= 40) {
     pixels = Math.sign(pixels) * 40;
     const factor = Math.exp(-pixels * 0.002);
     return clamp(zoom * factor, minZoom, MAX_ZOOM);
   }
 
-  // Trackpad pinch / fine pixel deltas (often |Δ| ≈ 1–20 per event on macOS).
-  // Previous gain (0.0015) felt sluggish — ~3× makes pinch usable.
   const factor = Math.exp(-pixels * 0.0045);
   return clamp(zoom * factor, minZoom, MAX_ZOOM);
 };
 
 type ZoomSetter = (zoom: number) => void;
-type ScrollSetter = (updater: (prevScroll: Scroll) => Scroll) => void;
+type ScrollSetter = (scroll: Scroll) => void;
 
 /**
- * Smooth zoom controller: wheel updates a target; rAF lerps the displayed zoom.
- * Avoids discrete notch jumps on physical mouse wheels.
+ * Smooth zoom: every rAF updates live CSS transform only.
+ * Zustand commits once on settle — so Nodes / Connectors do not
+ * React-reconcile every zoom frame.
  */
 export const createSmoothZoomController = () => {
   let target: number | null = null;
@@ -79,12 +74,29 @@ export const createSmoothZoomController = () => {
   let setZoom: ZoomSetter | null = null;
   let setScroll: ScrollSetter | null = null;
   let currentFocal: Coords | null = null;
-
+  let scrollOffset: Coords = { x: 0, y: 0 };
   const stop = () => {
     if (rafId) {
       cancelAnimationFrame(rafId);
       rafId = 0;
     }
+    setViewportGestureActive(false);
+  };
+
+  const publishLive = (zoom: number, scrollPos: Coords) => {
+    setLiveViewport({
+      zoom,
+      scroll: scrollPos
+    });
+  };
+
+  /** Zustand only on settle — mid-gesture React would re-layout the whole scene. */
+  const commitStore = (zoom: number, scrollPos: Coords) => {
+    setZoom?.(zoom);
+    setScroll?.({
+      position: { x: scrollPos.x, y: scrollPos.y },
+      offset: scrollOffset
+    });
   };
 
   const tick = () => {
@@ -92,28 +104,37 @@ export const createSmoothZoomController = () => {
     if (target === null || !setZoom) return;
 
     const diff = target - current;
+    let scrollPos = { ...getLiveViewport().scroll };
+
     if (Math.abs(diff) < 0.0008) {
       current = target;
-      setZoom(current);
+      publishLive(current, scrollPos);
+      commitStore(current, scrollPos);
       target = null;
+      setViewportGestureActive(false);
       return;
     }
 
     const oldZoom = current;
-    // Slightly snappier follow so trackpad pinch does not feel delayed.
     current += diff * 0.38;
-    
-    if (setScroll && currentFocal) {
-      const fc = currentFocal; // copy for closure
-      setScroll((prevScroll) => getScrollForZoomChange(oldZoom, current, prevScroll, fc));
+
+    if (currentFocal) {
+      const nextScroll = getScrollForZoomChange(
+        oldZoom,
+        current,
+        { position: scrollPos, offset: scrollOffset },
+        currentFocal
+      );
+      scrollPos = nextScroll.position;
     }
-    
-    setZoom(current);
+
+    setViewportGestureActive(true);
+    publishLive(current, scrollPos);
+
     rafId = requestAnimationFrame(tick);
   };
 
   return {
-    /** Keep controller in sync when zoom is set externally (fit, buttons, etc.). */
     sync(zoom: number) {
       current = zoom;
       if (target === null) return;
@@ -129,18 +150,34 @@ export const createSmoothZoomController = () => {
         setZoom: ZoomSetter;
         setScroll?: ScrollSetter;
         focalFromCenter?: Coords;
+        scroll?: Scroll;
       }
     ) {
       setZoom = opts.setZoom;
       setScroll = opts.setScroll ?? null;
       currentFocal = opts.focalFromCenter ?? null;
       minZoom = opts.minZoom;
-      if (target === null) {
+
+      if (opts.scroll) {
+        scrollOffset = opts.scroll.offset ?? { x: 0, y: 0 };
+        if (target === null) {
+          current = opts.zoom;
+          target = opts.zoom;
+          setLiveViewport(
+            {
+              zoom: opts.zoom,
+              scroll: opts.scroll.position
+            },
+            { notify: false }
+          );
+        }
+      } else if (target === null) {
         current = opts.zoom;
         target = opts.zoom;
       }
 
-      target = zoomFromWheelDelta(target, deltaY, deltaMode, minZoom);
+      target = zoomFromWheelDelta(target!, deltaY, deltaMode, minZoom);
+      setViewportGestureActive(true);
 
       if (!rafId) {
         rafId = requestAnimationFrame(tick);
@@ -151,10 +188,6 @@ export const createSmoothZoomController = () => {
   };
 };
 
-/**
- * Pinch-zoom (ctrl/meta + wheel) or discrete mouse-wheel notches → zoom.
- * Continuous trackpad two-finger scroll → pan instead (2D only).
- */
 export const isWheelZoomGesture = (e: {
   ctrlKey: boolean;
   metaKey: boolean;
@@ -162,20 +195,15 @@ export const isWheelZoomGesture = (e: {
   deltaY: number;
   deltaMode?: number;
 }): boolean => {
-  // Safari / Chrome report trackpad pinch as wheel + ctrlKey
   if (e.ctrlKey || e.metaKey) return true;
 
   const deltaMode = e.deltaMode ?? 0;
-  // Line/page modes come from mouse wheels / legacy devices
   if (deltaMode === 1 || deltaMode === 2) return true;
 
   const ax = Math.abs(e.deltaX);
   const ay = Math.abs(e.deltaY);
-  // Any horizontal component → trackpad pan, not zoom
   if (ax > 0.5) return false;
 
-  // Pixel-mode mouse wheels report quantized notches (±100 / ±120 / ±150).
-  // Trackpad flicks are rarely exact — keep those as pan.
   if (
     Math.abs(ay - 100) < 0.51 ||
     Math.abs(ay - 120) < 0.51 ||

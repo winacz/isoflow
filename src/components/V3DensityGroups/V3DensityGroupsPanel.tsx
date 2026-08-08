@@ -14,6 +14,7 @@ import { useModelStore } from 'src/stores/modelStore';
 import { computeDensityGroups } from 'src/v3/densityGroups';
 import { useDensityGroupsDebugStore } from 'src/v3/densityGroupsStore';
 import type { DensityBusExitStyle } from 'src/v3/densityGroupBuses';
+import { yieldToMain } from 'src/utils/scheduleHeavyWork';
 
 /**
  * Test panel for 2D v3 density grouping — rings + magistrala routing.
@@ -44,7 +45,8 @@ export const V3DensityGroupsPanel = () => {
     (exitStyle: DensityBusExitStyle, label: string) => {
       setBusBusy(true);
       setVisible(true);
-      setTimeout(() => {
+      void (async () => {
+        await yieldToMain();
         try {
           const result = runDensityGroupBuses({ exitStyle });
           setBusSummary(
@@ -60,7 +62,7 @@ export const V3DensityGroupsPanel = () => {
         } finally {
           setBusBusy(false);
         }
-      }, 0);
+      })();
     },
     [runDensityGroupBuses, setVisible]
   );
@@ -68,7 +70,8 @@ export const V3DensityGroupsPanel = () => {
   const runArrange = useCallback(() => {
     setBusBusy(true);
     setVisible(true);
-    setTimeout(() => {
+    void (async () => {
+      await yieldToMain();
       try {
         const result = runArrangeDensityGroups();
         setBusSummary(
@@ -88,13 +91,14 @@ export const V3DensityGroupsPanel = () => {
       } finally {
         setBusBusy(false);
       }
-    }, 0);
+    })();
   }, [runArrangeDensityGroups, setVisible]);
 
   const runArrangeMagistrala = useCallback(() => {
     setBusBusy(true);
     setVisible(true);
-    setTimeout(() => {
+    void (async () => {
+      await yieldToMain();
       try {
         const result = runArrangeDensityGroups({ mode: 'magistrala' });
         setBusSummary(
@@ -114,7 +118,7 @@ export const V3DensityGroupsPanel = () => {
       } finally {
         setBusBusy(false);
       }
-    }, 0);
+    })();
   }, [runArrangeDensityGroups, setVisible]);
 
   return (

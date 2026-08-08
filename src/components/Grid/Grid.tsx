@@ -11,7 +11,11 @@ import {
 } from 'src/config';
 import { SizeUtils } from 'src/utils/SizeUtils';
 import { useResizeObserver } from 'src/hooks/useResizeObserver';
-import { isPlanProjection, projectionPrefsKey } from 'src/utils';
+import {
+  isPlanProjection,
+  projectionPrefsKey,
+  subscribeLiveViewport
+} from 'src/utils';
 
 type GridVisualConfig = {
   majorStepX: number;
@@ -51,7 +55,6 @@ const GRID_STYLES: Record<GridStyle, GridVisualConfig> = {
     fineColor: 'rgba(0, 0, 0, 0)'
   },
   rack: {
-    // Square cells: side = RACK switch 1U height
     majorStepX: RACK_1U_HEIGHT_TILES,
     majorStepY: RACK_1U_HEIGHT_TILES,
     showFine: false,
@@ -91,12 +94,6 @@ export const Grid = () => {
   const fineRef = useRef<HTMLDivElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const { size } = useResizeObserver(containerRef.current);
-  const scroll = useUiStateStore((state) => {
-    return state.scroll;
-  });
-  const zoom = useUiStateStore((state) => {
-    return state.zoom;
-  });
   const projectionMode = useUiStateStore((state) => {
     return state.projectionMode;
   });
@@ -135,54 +132,46 @@ export const Grid = () => {
     return lineBackground(fineColor);
   }, [fineColor]);
 
+  // Paint grid from live viewport — no React re-render on every zoom frame.
   useEffect(() => {
-    if (!isTwoD) {
+    const paint = (zoom: number, scrollX: number, scrollY: number) => {
       if (!majorRef.current) return;
 
+      if (!isTwoD) {
+        const elSize = majorRef.current.getBoundingClientRect();
+        const tileSize = SizeUtils.multiply(PROJECTED_TILE_SIZE, zoom);
+        const backgroundPosition: Size = {
+          width: elSize.width / 2 + scrollX + tileSize.width / 2,
+          height: elSize.height / 2 + scrollY
+        };
+        majorRef.current.style.backgroundSize = `${tileSize.width}px ${tileSize.height * 2}px`;
+        majorRef.current.style.backgroundPosition = `${backgroundPosition.width}px ${backgroundPosition.height}px`;
+        return;
+      }
+
       const elSize = majorRef.current.getBoundingClientRect();
-      const tileSize = SizeUtils.multiply(PROJECTED_TILE_SIZE, zoom);
-      const backgroundPosition: Size = {
-        width: elSize.width / 2 + scroll.position.x + tileSize.width / 2,
-        height: elSize.height / 2 + scroll.position.y
+      const fine = {
+        width: TILE_SIZE_2D * zoom,
+        height: TILE_SIZE_2D * zoom
       };
+      const major = {
+        width: TILE_SIZE_2D * style.majorStepX * zoom,
+        height: TILE_SIZE_2D * style.majorStepY * zoom
+      };
+      const pos = `${elSize.width / 2 + scrollX}px ${elSize.height / 2 + scrollY}px`;
 
-      majorRef.current.style.backgroundSize = `${tileSize.width}px ${tileSize.height * 2}px`;
-      majorRef.current.style.backgroundPosition = `${backgroundPosition.width}px ${backgroundPosition.height}px`;
-      return;
-    }
-
-    if (!majorRef.current) return;
-
-    const elSize = majorRef.current.getBoundingClientRect();
-    const fine = {
-      width: TILE_SIZE_2D * zoom,
-      height: TILE_SIZE_2D * zoom
+      if (fineRef.current) {
+        fineRef.current.style.backgroundSize = `${fine.width}px ${fine.height}px`;
+        fineRef.current.style.backgroundPosition = pos;
+      }
+      majorRef.current.style.backgroundSize = `${major.width}px ${major.height}px`;
+      majorRef.current.style.backgroundPosition = pos;
     };
-    const major = {
-      width: TILE_SIZE_2D * style.majorStepX * zoom,
-      height: TILE_SIZE_2D * style.majorStepY * zoom
-    };
-    const backgroundPosition: Size = {
-      width: elSize.width / 2 + scroll.position.x,
-      height: elSize.height / 2 + scroll.position.y
-    };
-    const pos = `${backgroundPosition.width}px ${backgroundPosition.height}px`;
 
-    if (fineRef.current) {
-      fineRef.current.style.backgroundSize = `${fine.width}px ${fine.height}px`;
-      fineRef.current.style.backgroundPosition = pos;
-    }
-    majorRef.current.style.backgroundSize = `${major.width}px ${major.height}px`;
-    majorRef.current.style.backgroundPosition = pos;
-  }, [
-    scroll,
-    zoom,
-    size,
-    projectionMode,
-    isTwoD,
-    style.majorStepX,
-    style.majorStepY
-  ]);
+    return subscribeLiveViewport((viewport) => {
+      paint(viewport.zoom, viewport.scroll.x, viewport.scroll.y);
+    });
+  }, [isTwoD, style.majorStepX, style.majorStepY, size.width, size.height]);
 
   return (
     <Box

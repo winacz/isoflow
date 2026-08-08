@@ -199,6 +199,152 @@ const isRealCrossing = (
   return { alongA: throughA, alongB: throughB };
 };
 
+const tileKey = (tile: Coords) => {
+  return `${tile.x},${tile.y}`;
+};
+
+/**
+ * Map `"x,y"` → connector ids that occupy that tile.
+ * Order matches `connectors` (later entry = drawn on top).
+ */
+export const buildConnectorTileIndex = (
+  connectors: { id: string; tiles: Coords[] }[]
+): Map<string, string[]> => {
+  const index = new Map<string, string[]>();
+
+  for (const connector of connectors) {
+    const seen = new Set<string>();
+    for (const tile of connector.tiles) {
+      const key = tileKey(tile);
+      if (seen.has(key)) continue;
+      seen.add(key);
+
+      const list = index.get(key);
+      if (list) {
+        list.push(connector.id);
+      } else {
+        index.set(key, [connector.id]);
+      }
+    }
+  }
+
+  return index;
+};
+
+/** Topmost connector on a tile, or null if none. */
+export const findConnectorIdAtTile = (
+  index: Map<string, string[]>,
+  tile: Coords
+): string | null => {
+  const list = index.get(tileKey(tile));
+  if (!list || list.length === 0) return null;
+  return list[list.length - 1];
+};
+
+type PairJump = { hopperId: string; jump: ConnectorJump };
+
+/** All hop jumps produced by a single connector pair. */
+const collectJumpsForPair = (a: Polyline, b: Polyline): PairJump[] => {
+  const out: PairJump[] = [];
+
+  for (let ai = 0; ai < a.points.length - 1; ai += 1) {
+    for (let bi = 0; bi < b.points.length - 1; bi += 1) {
+      const hit = segmentIntersection(
+        a.points[ai],
+        a.points[ai + 1],
+        b.points[bi],
+        b.points[bi + 1]
+      );
+      if (!hit) continue;
+
+      if (
+        isNearPathEnd(hit.point, a.points) ||
+        isNearPathEnd(hit.point, b.points)
+      ) {
+        continue;
+      }
+
+      const dirs = isRealCrossing(
+        a.points,
+        ai,
+        hit.t,
+        b.points,
+        bi,
+        hit.u
+      );
+      if (!dirs) continue;
+
+      const aHops = a.id > b.id;
+      out.push({
+        hopperId: aHops ? a.id : b.id,
+        jump: {
+          point: hit.point,
+          along: aHops ? dirs.alongA : dirs.alongB
+        }
+      });
+    }
+  }
+
+  return out;
+};
+
+const toPolyline = (connector: PathInput): Polyline => {
+  return {
+    id: connector.id,
+    points: tileCenters(connector.tiles)
+  };
+};
+
+const addJumpsForPair = (
+  result: Record<string, ConnectorJump[]>,
+  pathA: PathInput,
+  pathB: PathInput
+) => {
+  for (const { hopperId, jump } of collectJumpsForPair(
+    toPolyline(pathA),
+    toPolyline(pathB)
+  )) {
+    pushUniqueJump(result, hopperId, jump);
+  }
+};
+
+const removeJumpsForPair = (
+  result: Record<string, ConnectorJump[]>,
+  pathA: PathInput,
+  pathB: PathInput
+) => {
+  for (const { hopperId, jump } of collectJumpsForPair(
+    toPolyline(pathA),
+    toPolyline(pathB)
+  )) {
+    const list = result[hopperId];
+    if (!list) continue;
+    const next = list.filter((existing) => {
+      return !nearlyEqual(existing.point, jump.point);
+    });
+    if (next.length === 0) {
+      delete result[hopperId];
+    } else {
+      result[hopperId] = next;
+    }
+  }
+};
+
+const cloneJumpsRecord = (
+  jumps: Record<string, ConnectorJump[]>
+): Record<string, ConnectorJump[]> => {
+  const result: Record<string, ConnectorJump[]> = {};
+  for (const [id, list] of Object.entries(jumps)) {
+    result[id] = list.map((jump) => {
+      return {
+        point: { x: jump.point.x, y: jump.point.y },
+        along: { x: jump.along.x, y: jump.along.y }
+      };
+    });
+  }
+  return result;
+};
+
 /**
  * Detect path crossings (orthogonal and diagonal).
  * Greater connector id hops over the other (underpass stays continuous).
@@ -208,53 +354,83 @@ export const findConnectorJumpsById = (
 ): Record<string, ConnectorJump[]> => {
   const result: Record<string, ConnectorJump[]> = {};
 
-  const polylines: Polyline[] = connectors.map((connector) => {
-    return {
-      id: connector.id,
-      points: tileCenters(connector.tiles)
-    };
+  for (let i = 0; i < connectors.length; i += 1) {
+    for (let j = i + 1; j < connectors.length; j += 1) {
+      addJumpsForPair(result, connectors[i], connectors[j]);
+    }
+  }
+
+  return result;
+};
+
+/**
+ * When only some cables changed, recompute jumps that involve those cables.
+ * Falls back to full `findConnectorJumpsById` if `changedIds` is empty or
+ * larger than half the connector count.
+ */
+export const findConnectorJumpsIncremental = (
+  prevJumps: Record<string, ConnectorJump[]>,
+  prevPaths: PathInput[],
+  nextPaths: PathInput[],
+  changedIds: Set<string>
+): Record<string, ConnectorJump[]> => {
+  if (
+    changedIds.size === 0 ||
+    changedIds.size > nextPaths.length / 2
+  ) {
+    return findConnectorJumpsById(nextPaths);
+  }
+
+  const prevById = new Map(
+    prevPaths.map((path) => {
+      return [path.id, path] as const;
+    })
+  );
+  const nextById = new Map(
+    nextPaths.map((path) => {
+      return [path.id, path] as const;
+    })
+  );
+
+  const result = cloneJumpsRecord(prevJumps);
+
+  // Drop connectors that no longer exist or whose geometry changed
+  for (const id of Object.keys(result)) {
+    if (!nextById.has(id) || changedIds.has(id)) {
+      delete result[id];
+    }
+  }
+
+  const unchangedNext = nextPaths.filter((path) => {
+    return !changedIds.has(path.id);
   });
 
-  for (let i = 0; i < polylines.length; i += 1) {
-    for (let j = i + 1; j < polylines.length; j += 1) {
-      const a = polylines[i];
-      const b = polylines[j];
+  // Strip stale hops on unchanged cables that crossed a changed cable (prev geom)
+  for (const changedId of changedIds) {
+    const prevChanged = prevById.get(changedId);
+    if (!prevChanged) continue;
 
-      for (let ai = 0; ai < a.points.length - 1; ai += 1) {
-        for (let bi = 0; bi < b.points.length - 1; bi += 1) {
-          const hit = segmentIntersection(
-            a.points[ai],
-            a.points[ai + 1],
-            b.points[bi],
-            b.points[bi + 1]
-          );
-          if (!hit) continue;
+    for (const other of unchangedNext) {
+      const prevOther = prevById.get(other.id);
+      if (!prevOther) continue;
+      removeJumpsForPair(result, prevOther, prevChanged);
+    }
+  }
 
-          if (
-            isNearPathEnd(hit.point, a.points) ||
-            isNearPathEnd(hit.point, b.points)
-          ) {
-            continue;
-          }
+  // Re-test each changed cable against every other next path
+  const changedNext = nextPaths.filter((path) => {
+    return changedIds.has(path.id);
+  });
 
-          const dirs = isRealCrossing(
-            a.points,
-            ai,
-            hit.t,
-            b.points,
-            bi,
-            hit.u
-          );
-          if (!dirs) continue;
+  for (let i = 0; i < changedNext.length; i += 1) {
+    const changed = changedNext[i];
 
-          const aHops = a.id > b.id;
+    for (const other of unchangedNext) {
+      addJumpsForPair(result, changed, other);
+    }
 
-          pushUniqueJump(result, aHops ? a.id : b.id, {
-            point: hit.point,
-            along: aHops ? dirs.alongA : dirs.alongB
-          });
-        }
-      }
+    for (let j = i + 1; j < changedNext.length; j += 1) {
+      addJumpsForPair(result, changed, changedNext[j]);
     }
   }
 

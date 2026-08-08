@@ -235,8 +235,8 @@ const itemFootprint = (
   return {
     x: item.tile.x,
     y: item.tile.y,
-    w: size.width,
-    h: size.height
+    w: Math.max(1, Math.ceil(size.width)),
+    h: Math.max(1, Math.ceil(size.height))
   };
 };
 

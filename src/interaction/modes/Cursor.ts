@@ -36,8 +36,12 @@ import {
   isPlanProjection,
   supportsConnectorTools,
   supportsDrawingConnections,
-  connectorModeForProjection
+  connectorModeForProjection,
+  isLoupeGlassActive,
+  getLoupeAnchorItemId,
+  getShape2dPortWorldTile
 } from 'src/utils';
+import { getModelItemPorts } from 'src/config';
 import { useScene } from 'src/hooks/useScene';
 import { isShape2dIcon, getShape2dSize } from 'src/config';
 import { useStackFanStore } from 'src/stores/stackFanStore';
@@ -357,16 +361,82 @@ const getHighlightedItemIdsForPortHit = ({
   scene: { items: { id: string; parentId?: string }[]; currentView: { connectors?: ConnectorI[] } };
   modelItems: ModelItem[];
 }): Set<string> | null => {
-  const hover = uiState.shape2dPortHover;
   const ids = getScaledShape2dItemIds({
     selectedItemIds: uiState.selectedItemIds,
     viewItems: scene.items,
     modelItems,
-    extraScaledItemIds: [uiState.shape2dEnlargedItemId],
-    excludeItemIds:
-      uiState.showLoupe && hover ? [hover.itemId] : null
+    // Loupe sets enlarge only when the glass appears — not on port hover.
+    extraScaledItemIds: [uiState.shape2dEnlargedItemId]
   });
   return ids.size > 0 ? ids : null;
+};
+
+/**
+ * While the loupe glass is open, clicks must use the jack the loupe is showing
+ * (shape2dPortHover, kept in sync by PortLoupeOverlay) — not canvas hit-tests
+ * that see a different port underneath the magnified / enlarged node.
+ */
+const resolvePortHitForClick = ({
+  uiState,
+  scene,
+  modelItems,
+  tile,
+  tilePoint
+}: {
+  uiState: {
+    selectedItemIds: string[];
+    showLoupe: boolean;
+    shape2dPortHover: { itemId: string; portId: string | null } | null;
+    shape2dEnlargedItemId: string | null;
+    zoom: number;
+  };
+  scene: {
+    items: { id: string; tile: Coords; parentId?: string }[];
+    currentView: { connectors?: ConnectorI[] };
+  };
+  modelItems: ModelItem[];
+  tile: Coords;
+  tilePoint: Coords;
+}) => {
+  if (isLoupeGlassActive()) {
+    const hover = uiState.shape2dPortHover;
+    const anchorId = getLoupeAnchorItemId();
+    if (
+      hover?.portId &&
+      (!anchorId || hover.itemId === anchorId)
+    ) {
+      const viewItem = scene.items.find((item) => item.id === hover.itemId);
+      const modelItem = modelItems.find((item) => item.id === hover.itemId);
+      const port = modelItem
+        ? getModelItemPorts(modelItem).find((p) => p.id === hover.portId)
+        : null;
+      if (viewItem && port) {
+        return {
+          itemId: hover.itemId,
+          portId: hover.portId,
+          portTile: port.tile,
+          worldTile: getShape2dPortWorldTile(viewItem.tile, port.tile)
+        };
+      }
+      return null;
+    }
+    // Loupe open on chassis (no jack under glass centre) — do not pick a
+    // stacked node/port underneath.
+    return null;
+  }
+
+  return getShape2dPortAtTile({
+    tile,
+    point: tilePoint,
+    scene: scene as any,
+    modelItems,
+    zoom: uiState.zoom,
+    highlightedItemIds: getHighlightedItemIdsForPortHit({
+      uiState,
+      scene,
+      modelItems
+    })
+  });
 };
 
 const resolveWaypointAtTile = (
@@ -423,6 +493,14 @@ const mousedown: ModeActionsAction = ({
           scene
         });
 
+  // Loupe locks interaction to its anchored node — never the stack underneath.
+  if (isLoupeGlassActive()) {
+    const anchorId = getLoupeAnchorItemId();
+    if (anchorId) {
+      itemAtTile = { type: 'ITEM', id: anchorId };
+    }
+  }
+
   let clickedPortId: string | null = null;
 
   if (isPlanProjection(uiState.projectionMode)) {
@@ -431,33 +509,32 @@ const mousedown: ModeActionsAction = ({
         ? uiState.itemControls.id
         : null;
 
-    const portHit = getShape2dPortAtTile({
-      tile,
-      point: tilePoint,
+    const portHit = resolvePortHitForClick({
+      uiState,
       scene,
       modelItems: model.items,
-      highlightedItemIds: getHighlightedItemIdsForPortHit({
-        uiState,
-        scene,
-        modelItems: model.items
-      })
+      tile,
+      tilePoint
     });
 
+    const loupeActive = isLoupeGlassActive();
     const onDeviceBody = isTileOnDeviceBody(tile, scene, model.items);
-    const connectorAtTile = findConnectorAtTile(
-      tile,
-      scene,
-      selectedConnectorId
-    );
-    const waypoint = resolveWaypointAtTile(tile, scene);
+    // Loupe: cables stay visible but are not interactive — only ports click.
+    const connectorAtTile = loupeActive
+      ? null
+      : findConnectorAtTile(tile, scene, selectedConnectorId);
+    const waypoint = loupeActive
+      ? null
+      : resolveWaypointAtTile(tile, scene);
     const togglePort =
       Boolean(portHit) &&
       (uiState.mouse.ctrlKey || uiState.mouse.metaKey);
     // Port settings win when there is no cable on this tile, or when Ctrl/Cmd
     // multi-selects ports (including already-connected ones).
     // Plain click on a cable+port tile still selects the cable.
+    // With loupe open, ports always win (cables are display-only).
     const portBlocksCable = Boolean(
-      portHit && (!connectorAtTile || togglePort)
+      portHit && (loupeActive || !connectorAtTile || togglePort)
     );
 
     if (portBlocksCable && portHit) {
@@ -716,16 +793,12 @@ export const Cursor: ModeActions = {
         scroll: uiState.scroll,
         rendererSize
       });
-      const portHit = getShape2dPortAtTile({
-        tile: uiState.mouse.mousedown.tile,
-        point: mousedownPoint,
+      const portHit = resolvePortHitForClick({
+        uiState,
         scene,
         modelItems: model.items,
-        highlightedItemIds: getHighlightedItemIdsForPortHit({
-          uiState,
-          scene,
-          modelItems: model.items
-        })
+        tile: uiState.mouse.mousedown.tile,
+        tilePoint: mousedownPoint
       });
 
       if (
@@ -1215,18 +1288,17 @@ export const Cursor: ModeActions = {
     // Skip pure port handles — those stay as port attachments.
     if (uiState.simplePaths) return;
 
-    const portHit = getShape2dPortAtTile({
-      tile,
-      point: tilePoint,
+    const portHit = resolvePortHitForClick({
+      uiState,
       scene,
       modelItems: model.items,
-      highlightedItemIds: getHighlightedItemIdsForPortHit({
-        uiState,
-        scene,
-        modelItems: model.items
-      })
+      tile,
+      tilePoint
     });
     if (portHit) return;
+
+    // Loupe: cables are visible but not interactive.
+    if (isLoupeGlassActive()) return;
 
     const connector = findConnectorAtTile(tile, scene);
     if (!connector || connector.locked) return;

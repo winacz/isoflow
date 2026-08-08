@@ -39,6 +39,15 @@ export * from './cloneModelItem';
 export * from './clonePlanView';
 export * from './vlanIpHint';
 export * from './portHoverDom';
+export * from './viewportCulling';
+export * from './domRectCache';
+export * from './perfMetrics';
+export * from './liveViewport';
+export * from './scheduleHeavyWork';
+export * from './pathfinderCalls';
+export * from './loupeRevealLock';
+export * from './nodeHighlightScale';
+export * from './connectorBodyCrossingCache';
 
 // NOT re-exported here on purpose: offscreenPlanRenderer, exportAsHtml and
 // exportAsPdf render React. Re-exporting them made every consumer of this

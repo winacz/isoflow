@@ -6,7 +6,6 @@ import {
   connectorPathTileToGlobal,
   getAnchorTile,
   findWaypointSegmentAtTile,
-  splitConnectorPathByNodeBodies,
   buildConnectorSvgPathD,
   getConnectorRelationSummary,
   getConnectorPathPreview,
@@ -15,6 +14,8 @@ import {
   TRUNK_RAINBOW_COLORS,
   TRUNK_MISMATCH_COLOR,
   CONNECTOR_JUMP_RADIUS_TILES,
+  buildForeignNodesFingerprint,
+  getCachedConnectorBodyStyleRuns,
   type ConnectorJump
 } from 'src/utils';
 import { Circle } from 'src/components/Circle/Circle';
@@ -210,15 +211,39 @@ export const Connector2d = memo(({
       modelItems
     });
 
-    return splitConnectorPathByNodeBodies({
-      tiles: globalTiles,
+    const foreignFingerprint = buildForeignNodesFingerprint(
       items,
       modelItems,
-      endpointItemIds,
-      endpointPorts,
-      fadeCabinetRect
-    });
-  }, [globalTiles, items, modelItems, endpointItemIds, endpointPorts, softDim]);
+      endpointItemIds
+    );
+
+    return getCachedConnectorBodyStyleRuns(
+      {
+        connectorId: connector.id,
+        tiles: globalTiles,
+        foreignFingerprint,
+        endpointItemIds,
+        endpointPorts,
+        fadeCabinetRect
+      },
+      {
+        tiles: globalTiles,
+        items,
+        modelItems,
+        endpointItemIds,
+        endpointPorts,
+        fadeCabinetRect
+      }
+    );
+  }, [
+    connector.id,
+    globalTiles,
+    items,
+    modelItems,
+    endpointItemIds,
+    endpointPorts,
+    softDim
+  ]);
 
   const anchorPositions = useMemo(() => {
     if (!isSelected) return [];

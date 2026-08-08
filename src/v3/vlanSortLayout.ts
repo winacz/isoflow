@@ -5,7 +5,6 @@ import {
   SHAPE_2D_CABINET_ID
 } from 'src/config';
 import { isSwitchLikeIcon } from 'src/utils/shape2dLayout';
-import { snapTile2dToGrid } from 'src/utils/renderer';
 import {
   isNonVlanAwareDevice,
   isPassiveBridgeDevice,
@@ -44,10 +43,13 @@ const footprintOf = (
   modelById: Map<string, ModelItem>
 ): { width: number; height: number } => {
   const model = modelById.get(itemId);
-  return (
+  const size =
     getModelItemSize(model ?? {}) ??
-    getShape2dSize(model?.icon ?? '') ?? { width: 1, height: 1 }
-  );
+    getShape2dSize(model?.icon ?? '') ?? { width: 1, height: 1 };
+  return {
+    width: Math.max(1, Math.ceil(size.width)),
+    height: Math.max(1, Math.ceil(size.height))
+  };
 };
 
 /**
@@ -246,6 +248,11 @@ export const densityGroupsFromVlanMembers = ({
   return groups;
 };
 
+const ceilToStep = (value: number, step: number): number => {
+  const s = Math.max(1, step);
+  return Math.max(s, Math.ceil(value / s) * s);
+};
+
 const packMemberClusters = ({
   clusters,
   items,
@@ -261,6 +268,8 @@ const packMemberClusters = ({
 
   const modelById = new Map(modelItems.map((item) => [item.id, item]));
   const itemById = new Map(items.map((item) => [item.id, item]));
+  const stepX = Math.max(1, gridStep.x);
+  const stepY = Math.max(1, gridStep.y);
 
   let minX = Infinity;
   let minY = Infinity;
@@ -274,6 +283,10 @@ const packMemberClusters = ({
   });
   if (!Number.isFinite(minX)) minX = 0;
   if (!Number.isFinite(minY)) minY = 0;
+
+  // Anchor on a grid line so every packed tile stays aligned.
+  minX = Math.round(minX / stepX) * stepX;
+  minY = Math.round(minY / stepY) * stepY;
 
   const targets: Record<string, Coords> = {};
   let cursorX = minX;
@@ -302,47 +315,47 @@ const packMemberClusters = ({
     let packH = 0;
 
     cells.forEach((cell) => {
-      if (row.length > 0 && rowW + cell.w > MAX_CLUSTER_ROW_TILES) {
+      const cellAdvance = ceilToStep(cell.w, stepX);
+      if (row.length > 0 && rowW + cellAdvance > MAX_CLUSTER_ROW_TILES) {
         rows.push(row);
         row = [];
         rowW = 0;
       }
       row.push(cell);
-      rowW += cell.w;
+      rowW += cellAdvance;
       packW = Math.max(packW, rowW);
     });
     if (row.length > 0) rows.push(row);
 
     rows.forEach((r) => {
-      const h = Math.max(...r.map((c) => c.h), 1);
+      const h = ceilToStep(Math.max(...r.map((c) => c.h), 1), stepY);
       packH += h;
     });
 
     if (clusterIndex > 0 && cursorX + packW - minX > MAX_CLUSTER_ROW_TILES * 1.5) {
       cursorX = minX;
-      cursorY += rowMaxH + VLAN_CLUSTER_GAP;
+      cursorY += rowMaxH + ceilToStep(VLAN_CLUSTER_GAP, stepY);
       rowMaxH = 0;
     }
 
     let localY = 0;
     rows.forEach((r) => {
-      const h = Math.max(...r.map((c) => c.h), 1);
+      const h = ceilToStep(Math.max(...r.map((c) => c.h), 1), stepY);
       let localX = 0;
       r.forEach((cell) => {
-        const tile = snapTile2dToGrid(
-          { x: cursorX + localX, y: cursorY + localY },
-          gridStep
-        );
+        const tile = { x: cursorX + localX, y: cursorY + localY };
         const prev = itemById.get(cell.id)?.tile;
         if (!prev || prev.x !== tile.x || prev.y !== tile.y) {
           targets[cell.id] = tile;
         }
-        localX += cell.w;
+        // Advance by whole grid cells — never snap(prev+w) which can round
+        // *down* into the previous footprint (19 → snap 18 on a 9-step grid).
+        localX += ceilToStep(cell.w, stepX);
       });
       localY += h;
     });
 
-    cursorX += packW + VLAN_CLUSTER_GAP;
+    cursorX += packW + ceilToStep(VLAN_CLUSTER_GAP, stepX);
     rowMaxH = Math.max(rowMaxH, packH);
   });
 
