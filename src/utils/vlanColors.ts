@@ -298,7 +298,8 @@ export const getVlanColor = (
   return colorFromVlanNumber((hashString(key) % 4094) + 2);
 };
 
-/** Port jack color. PC / VLAN 1 → gray. Trunk → first rainbow stop (use CSS gradient for full rainbow). */
+/** Port jack color. VLAN 1 → gray. Trunk → first rainbow stop (use CSS gradient for full rainbow).
+ * Hosts should use `getHostPortVlanColor` (peer switch VLAN) instead of `isPc`. */
 export const getPortStatusColor = (
   vlan: string | undefined | null,
   _fallbackIndex = 0,
@@ -358,6 +359,48 @@ export const getConnectorVlanColor = ({
   }).vlanColor;
 };
 
+type ConnectorVlanLookup = {
+  id?: string;
+  anchors: { ref: { item?: string; port?: string } }[];
+};
+
+/**
+ * Jack tint for a non–VLAN-aware host port (PC / camera / …).
+ * Uses the cable’s access VLAN from the peer switch — same source as cable
+ * colors / switch port pills (`getConnectorRelationSummary`).
+ * Returns null when the port is not connected.
+ */
+export const getHostPortVlanColor = ({
+  itemId,
+  portId,
+  connectors,
+  modelItems
+}: {
+  itemId: string;
+  portId: string;
+  connectors: ConnectorVlanLookup[];
+  modelItems: ModelItemVlanFields[];
+}): string | null => {
+  const connector = connectors.find((candidate) => {
+    return candidate.anchors.some((anchor) => {
+      return anchor.ref.item === itemId && anchor.ref.port === portId;
+    });
+  });
+  if (!connector) return null;
+
+  const summary = getConnectorRelationSummary({
+    anchors: connector.anchors,
+    modelItems,
+    connectors,
+    connectorId: connector.id
+  });
+
+  if (summary.linkMode === 'mismatch') return TRUNK_MISMATCH_COLOR;
+  if (summary.linkMode === 'trunk') return null;
+  if (summary.vlanColor) return summary.vlanColor;
+  return VLAN_1_COLOR;
+};
+
 /**
  * Border tint for single-port hosts (PC / camera / 1-port templates).
  * Uses the cable’s access VLAN (peer switch), same as link coloring.
@@ -371,31 +414,18 @@ export const getSinglePortNodeVlanBorderColor = ({
 }: {
   itemId: string;
   icon?: string | null;
-  connectors: { anchors: { ref: { item?: string; port?: string } }[] }[];
+  connectors: ConnectorVlanLookup[];
   modelItems: ModelItemVlanFields[];
 }): string | null => {
   const layoutPorts = getShape2dPorts(icon ?? '');
   if (layoutPorts.length !== 1) return null;
 
-  const portId = layoutPorts[0].id;
-  const connector = connectors.find((candidate) => {
-    return candidate.anchors.some((anchor) => {
-      return anchor.ref.item === itemId && anchor.ref.port === portId;
-    });
-  });
-  if (!connector) return null;
-
-  const summary = getConnectorRelationSummary({
-    anchors: connector.anchors,
-    modelItems,
+  return getHostPortVlanColor({
+    itemId,
+    portId: layoutPorts[0].id,
     connectors,
-    connectorId: (connector as { id?: string }).id
+    modelItems
   });
-
-  if (summary.linkMode === 'mismatch') return TRUNK_MISMATCH_COLOR;
-  if (summary.linkMode === 'trunk') return null;
-  if (summary.vlanColor) return summary.vlanColor;
-  return VLAN_1_COLOR;
 };
 
 export type ConnectorEndpointSummary = {

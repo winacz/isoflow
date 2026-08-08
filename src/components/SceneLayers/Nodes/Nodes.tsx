@@ -66,9 +66,17 @@ export const Nodes = React.memo(({ nodes }: Props) => {
   const shape2dPortHover = useUiStateStore((state) => {
     return state.shape2dPortHover;
   });
+  const showLoupe = useUiStateStore((state) => {
+    return state.showLoupe;
+  });
   const projectionMode = useUiStateStore((state) => {
     return state.projectionMode;
   });
+  /** Node currently under the loupe — must not CSS-scale or the glass drifts. */
+  const loupeItemId =
+    showLoupe && isPlanProjection(projectionMode)
+      ? shape2dPortHover?.itemId ?? null
+      : null;
   const mode = useUiStateStore((state) => {
     return state.mode;
   });
@@ -328,6 +336,12 @@ export const Nodes = React.memo(({ nodes }: Props) => {
         // Port hover: make the far-side device stand out (scale + glow).
         if (portHoverPeerId === node.id) {
           selectionTone = 'highlighted';
+        }
+
+        // Loupe on this node: keep glow if selected, but never hover-scale —
+        // scale(1.15) shifts the chassis under the glass ("rozjeżdża się").
+        if (loupeItemId === node.id && selectionTone === 'highlighted') {
+          selectionTone = 'related';
         }
 
         const isCabinet = iconById.get(node.id) === SHAPE_2D_CABINET_ID;

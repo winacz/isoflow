@@ -16,7 +16,15 @@ import {
   getShape2dSize,
   getShape2dPorts
 } from 'src/config';
-import { getPortStatusColor, getDeviceTemplateLayout, parseDeviceColor, toDeviceColorHex8, SHAPE_2D_PORT_VISUAL_SIZE_TILES } from 'src/utils';
+import {
+  getPortStatusColor,
+  getHostPortVlanColor,
+  getDeviceTemplateLayout,
+  parseDeviceColor,
+  toDeviceColorHex8,
+  SHAPE_2D_PORT_VISUAL_SIZE_TILES,
+  VLAN_1_COLOR
+} from 'src/utils';
 import type { ModelItem } from 'src/types';
 import type { DeviceTemplateLayout } from 'src/utils/deviceTemplateLayout';
 import { Rj45Port } from 'src/components/Shapes2d/Rj45Port';
@@ -52,6 +60,14 @@ interface Props {
   peerHighlightPortIds?: ReadonlySet<string> | string[];
   /** All model items — used to resolve shared VLAN colors. */
   modelItems?: ModelItem[];
+  /**
+   * Scene connectors — used so host (PC) jacks inherit the peer switch
+   * access VLAN color (same source as cable tint).
+   */
+  connectors?: {
+    id?: string;
+    anchors: { ref: { item?: string; port?: string } }[];
+  }[];
   /**
    * Canvas nodes are centered on their tile; menu previews need top-left
    * anchoring inside a fixed box.
@@ -102,6 +118,7 @@ const DeviceShape2dComponent = ({
   attentionToken = null,
   peerHighlightPortIds,
   modelItems,
+  connectors,
   centered = true,
   layoutOverride,
   color = '#ffffff',
@@ -372,6 +389,20 @@ const DeviceShape2dComponent = ({
     : Math.max(1, Math.round(cellSize * 0.05));
   const chassisBorderColor = vlanBorderColor ?? '#7a8ba3';
 
+  /** Host jack: inherit peer switch access VLAN (cable / pill source). */
+  const resolveHostPortStatusColor = (portId: string) => {
+    if (itemId && connectors && modelItems) {
+      const peerColor = getHostPortVlanColor({
+        itemId,
+        portId,
+        connectors,
+        modelItems
+      });
+      if (peerColor) return peerColor;
+    }
+    return vlanBorderColor ?? VLAN_1_COLOR;
+  };
+
   if (isCamera) {
     return (
       <Box
@@ -501,12 +532,14 @@ const DeviceShape2dComponent = ({
           const iface = String(index + 1);
           const config = portConfigs?.[port.id];
           const isTrunk = false;
-          const statusColor = getPortStatusColor(config?.vlan, index, {
-            isPc,
-            customColor: config?.vlanColor,
-            modelItems,
-            portType: 'access'
-          });
+          const statusColor = isPc
+            ? resolveHostPortStatusColor(port.id)
+            : getPortStatusColor(config?.vlan, index, {
+                isPc,
+                customColor: config?.vlanColor,
+                modelItems,
+                portType: 'access'
+              });
 
           return (
             <Box
@@ -1789,12 +1822,14 @@ const DeviceShape2dComponent = ({
         const iface = String(index + 1);
         const config = portConfigs?.[port.id];
         const isTrunk = !isPc && config?.type === 'trunk';
-        const statusColor = getPortStatusColor(config?.vlan, index, {
-          isPc,
-          customColor: config?.vlanColor,
-          modelItems,
-          portType: isTrunk ? 'trunk' : 'access'
-        });
+        const statusColor = isPc
+          ? resolveHostPortStatusColor(port.id)
+          : getPortStatusColor(config?.vlan, index, {
+              isPc,
+              customColor: config?.vlanColor,
+              modelItems,
+              portType: isTrunk ? 'trunk' : 'access'
+            });
 
         return (
           <Box
@@ -1841,7 +1876,6 @@ const DeviceShape2dComponent = ({
               isConnected={Boolean(connectedSet?.has(port.id))}
               media={port.media ?? 'RJ45'}
               compactLabel={compactPortLabels}
-              hideStatusBar={isPc}
               poe={isPc ? null : port.poe ?? null}
               poweredByPoe={isPc ? poweredByPoe : false}
               labelPosition="above"
@@ -1910,6 +1944,7 @@ export const DeviceShape2d = React.memo(
     if (!shallowCompareArraysOrSets(prev.focusedPortIds, next.focusedPortIds)) return false;
     if (!shallowCompareArraysOrSets(prev.peerHighlightPortIds, next.peerHighlightPortIds)) return false;
     if (prev.modelItems !== next.modelItems) return false;
+    if (prev.connectors !== next.connectors) return false;
 
     return true;
   }

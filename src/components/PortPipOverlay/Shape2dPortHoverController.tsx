@@ -176,7 +176,12 @@ export const Shape2dPortHoverController = () => {
         selectedItemIds: uiState.selectedItemIds,
         viewItems,
         modelItems: model.items,
-        extraScaledItemIds: peerId ? [peerId] : null
+        extraScaledItemIds: peerId ? [peerId] : null,
+        // Loupe node must stay unscaled — hit-tests follow Nodes.tsx.
+        excludeItemIds:
+          uiState.showLoupe && shape2dPortHover
+            ? [shape2dPortHover.itemId]
+            : null
       });
 
       const portHit = getShape2dPortAtPoint({

@@ -348,7 +348,11 @@ const getHighlightedItemIdsForPortHit = ({
   scene,
   modelItems
 }: {
-  uiState: { selectedItemIds: string[]; shape2dPortHover: { itemId: string; portId: string | null } | null };
+  uiState: {
+    selectedItemIds: string[];
+    showLoupe: boolean;
+    shape2dPortHover: { itemId: string; portId: string | null } | null;
+  };
   scene: { items: { id: string; parentId?: string }[]; currentView: { connectors?: ConnectorI[] } };
   modelItems: ModelItem[];
 }): Set<string> | null => {
@@ -370,7 +374,9 @@ const getHighlightedItemIdsForPortHit = ({
     selectedItemIds: uiState.selectedItemIds,
     viewItems: scene.items,
     modelItems,
-    extraScaledItemIds: peerId ? [peerId] : null
+    extraScaledItemIds: peerId ? [peerId] : null,
+    excludeItemIds:
+      uiState.showLoupe && hover ? [hover.itemId] : null
   });
   return ids.size > 0 ? ids : null;
 };

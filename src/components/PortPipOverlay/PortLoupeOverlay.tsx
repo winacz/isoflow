@@ -10,8 +10,7 @@ import {
   TILE_SIZE_2D,
   getModelItemSize,
   getShape2dSize,
-  getShape2dPortIfaceName,
-  SHAPE_2D_CABINET_ID
+  getShape2dPortIfaceName
 } from 'src/config';
 import {
   getShape2dCenterPosition,
@@ -41,10 +40,10 @@ const LOUPE_PORT_SHOW_DELAY_MS = 700;
 const LOUPE_CURSOR_TAU_MS = 45;
 
 /**
- * Must match Nodes.tsx / getShape2dPortAtPoint — selected nodes CSS-scale from
- * centre; loupe content must use the same scale or port hover drifts.
+ * Canvas node under the loupe never CSS-scales (see Nodes.tsx). Loupe content
+ * must stay at scale 1 so ports stay aligned with hit-tests.
  */
-const NODE_HIGHLIGHT_SCALE = 1.15;
+const LOUPE_NODE_SCALE = 1;
 
 /**
  * When true, loupe highlights the hovered RJ45 / cable via imperative DOM
@@ -66,7 +65,7 @@ type LoupeContent = {
   modelItem: ModelItem;
   deviceCenter: { x: number; y: number };
   diameter: number;
-  /** Locked at reveal so a click-select scale bump does not jump the glass. */
+  /** Always 1 — loupe-focused canvas node does not selection-scale. */
   highlightScale: number;
 };
 
@@ -614,23 +613,12 @@ export const PortLoupeOverlay = () => {
     cursorTargetRef.current = { ...cursor };
     focusRef.current = { ...cursor };
 
-    const ui = uiStoreApi.getState();
-    const viewItem = items.find((item) => {
-      return item.id === dev.itemId;
-    });
-    const highlightScaled =
-      dev.modelItem.icon !== SHAPE_2D_CABINET_ID &&
-      (ui.selectedItemIds.includes(dev.itemId) ||
-        Boolean(
-          viewItem?.parentId && ui.selectedItemIds.includes(viewItem.parentId)
-        ));
-
     setContent({
       itemId: dev.itemId,
       modelItem: dev.modelItem,
       deviceCenter: { ...dev.deviceCenter },
       diameter: dev.diameter,
-      highlightScale: highlightScaled ? NODE_HIGHLIGHT_SCALE : 1
+      highlightScale: LOUPE_NODE_SCALE
     });
 
     applyLoupeDom(
@@ -706,27 +694,13 @@ export const PortLoupeOverlay = () => {
         ) {
           return prev;
         }
-        // Keep highlightScale when the same device stays under the loupe so a
-        // click-select (canvas scale bump) does not jump the glass mid-session.
-        const keepScale =
-          prev?.itemId === device.itemId ? prev.highlightScale : undefined;
-        const viewItem = items.find((item) => {
-          return item.id === device.itemId;
-        });
-        const selected = uiStoreApi.getState().selectedItemIds;
-        const highlightScaled =
-          device.modelItem.icon !== SHAPE_2D_CABINET_ID &&
-          (selected.includes(device.itemId) ||
-            Boolean(
-              viewItem?.parentId && selected.includes(viewItem.parentId)
-            ));
+        // Loupe node never selection-scales on canvas — keep glass at 1.
         return {
           itemId: device.itemId,
           modelItem: device.modelItem,
           deviceCenter: { ...device.deviceCenter },
           diameter: device.diameter,
-          highlightScale:
-            keepScale ?? (highlightScaled ? NODE_HIGHLIGHT_SCALE : 1)
+          highlightScale: LOUPE_NODE_SCALE
         };
       });
       setVisible(true);
@@ -903,6 +877,8 @@ export const PortLoupeOverlay = () => {
                       description={modelItem.description}
                       color={modelItem.color}
                       poweredByPoe={Boolean(modelItem.poweredByPoe)}
+                      modelItems={modelItems}
+                      connectors={connectors}
                       showShadow={false}
                       centered
                       hoveredPortId={null}

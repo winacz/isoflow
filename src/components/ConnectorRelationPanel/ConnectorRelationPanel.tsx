@@ -217,14 +217,17 @@ export const ConnectorRelationPanel = ({
                     >
                       {endpoint.portLabel}
                     </Typography>
-                    {endpoint.type === 'trunk' && (
+                    {endpoint.isNonVlanAware ? (
+                      <Typography sx={{ fontSize: 9, color: 'text.secondary', fontWeight: 700, bgcolor: 'action.disabledBackground', px: 0.5, py: 0.1, borderRadius: 0.5, lineHeight: 1 }}>
+                        HOST
+                      </Typography>
+                    ) : endpoint.type === 'trunk' ? (
                       <Typography sx={{ fontSize: 9, fontWeight: 700, bgcolor: 'info.main', color: 'white', px: 0.5, py: 0.1, borderRadius: 0.5, lineHeight: 1 }}>
                         TRUNK
                       </Typography>
-                    )}
-                    {endpoint.isNonVlanAware && (
-                      <Typography sx={{ fontSize: 9, color: 'text.secondary', fontWeight: 700, bgcolor: 'action.disabledBackground', px: 0.5, py: 0.1, borderRadius: 0.5, lineHeight: 1 }}>
-                        HOST
+                    ) : (
+                      <Typography sx={{ fontSize: 9, fontWeight: 700, bgcolor: 'success.main', color: 'white', px: 0.5, py: 0.1, borderRadius: 0.5, lineHeight: 1 }}>
+                        ACCESS
                       </Typography>
                     )}
                   </Box>
@@ -234,7 +237,7 @@ export const ConnectorRelationPanel = ({
                       VLAN
                     </Typography>
                     <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
-                      {endpoint.vlanColor && !endpoint.isNonVlanAware && (
+                      {endpoint.vlanColor && (
                         <Box sx={{ width: 6, height: 6, borderRadius: '50%', bgcolor: endpoint.vlanColor }} />
                       )}
                       <Typography
@@ -246,6 +249,11 @@ export const ConnectorRelationPanel = ({
                         }}
                       >
                         {endpoint.vlan}
+                        {endpoint.isNonVlanAware && (
+                          <Box component="span" sx={{ fontSize: 9, color: 'text.secondary', ml: 0.5, fontWeight: 600 }}>
+                            (VLAN unaware)
+                          </Box>
+                        )}
                       </Typography>
                     </Box>
                   </Box>

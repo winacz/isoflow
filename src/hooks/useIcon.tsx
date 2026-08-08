@@ -60,6 +60,7 @@ export const useIcon = (
     return view?.items ?? [];
   });
   const deviceTemplates = useModelStore((state) => state.deviceTemplates);
+  const { connectors } = useScene();
   const snapCabinetId = useCabinetSnapStore((state) => {
     return state.cabinetId;
   });
@@ -245,6 +246,7 @@ export const useIcon = (
           color={color}
           showShadow={!isMountedInCabinet}
           vlanBorderColor={vlanBorderColor}
+          connectors={connectors}
           poweredByPoe={poweredByPoe}
           poePowerWarning={poePowerWarning}
           hoveredPortId={hoveredPortId}
@@ -288,6 +290,7 @@ export const useIcon = (
     poweredByPoe,
     poePowerWarning,
     hoveredPortId,
+    connectors,
     deviceTemplates
   ]);
 

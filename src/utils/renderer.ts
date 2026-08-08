@@ -1576,17 +1576,22 @@ export const isShape2dPortInUse = ({
  * Item ids that currently render with CSS scale(1.15) — selected nodes and
  * gear mounted in a selected cabinet. Optional extras: e.g. port-hover peer.
  * Must stay in sync with Nodes.tsx selectionTone === 'highlighted' scale.
+ *
+ * `excludeItemIds`: e.g. the node under an active loupe — selection must not
+ * scale it or port hit-tests / loupe framing drift apart.
  */
 export const getScaledShape2dItemIds = ({
   selectedItemIds,
   viewItems,
   modelItems,
-  extraScaledItemIds
+  extraScaledItemIds,
+  excludeItemIds
 }: {
   selectedItemIds: string[];
   viewItems: { id: string; parentId?: string }[];
   modelItems: { id: string; icon?: string }[];
   extraScaledItemIds?: Iterable<string | null | undefined> | null;
+  excludeItemIds?: Iterable<string | null | undefined> | null;
 }): Set<string> => {
   const ids = new Set<string>();
   const iconById = new Map(
@@ -1613,6 +1618,12 @@ export const getScaledShape2dItemIds = ({
       if (!id) continue;
       if (iconById.get(id) === SHAPE_2D_CABINET_ID) continue;
       ids.add(id);
+    }
+  }
+
+  if (excludeItemIds) {
+    for (const id of excludeItemIds) {
+      if (id) ids.delete(id);
     }
   }
 
