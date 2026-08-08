@@ -26,7 +26,10 @@ import type { State } from 'src/stores/reducers/types';
 import { routeDensityGroupBuses, resolveOverlapsWithTargetDiagonal } from 'src/v3/densityGroupBuses';
 import { arrangeDensityGroups } from 'src/v3/densityGroupLayout';
 import { computeDensityGroups } from 'src/v3/densityGroups';
-import { clusterItemsByVlan } from 'src/v3/vlanSortLayout';
+import {
+  clusterItemsByVlan,
+  primaryVlanKeyForItem
+} from 'src/v3/vlanSortLayout';
 import { isSwitchLikeIcon } from 'src/utils/shape2dLayout';
 import {
   getItemByIdOrThrow,
@@ -980,9 +983,9 @@ export const useScene = () => {
   ]);
 
   /**
-   * 2D v3 "Układanie via VLAN": pack leaves into VLAN clusters (density
-   * groups), seat those groups around switches (Ułóż grupy), then the same
-   * Test tidy + diagonal-fan as the context-menu Test button.
+   * 2D v3 "Układanie VLAN (1v)": pack leaves into VLAN clusters so VLANs do
+   * not intermix, seat those groups around switches (Ułóż grupy), then the
+   * same Test tidy + diagonal-fan as the context-menu Test button.
    */
   const runLayoutByVlanGroups = useCallback(() => {
     const state = getState();
@@ -1081,6 +1084,199 @@ export const useScene = () => {
 
     return {
       vlanGroupCount: clustered.vlanGroupCount,
+      movedNodes: clustered.movedNodes + arranged.movedNodes,
+      groupCount: groups.length
+    };
+  }, [
+    beginHistoryTransaction,
+    endHistoryTransaction,
+    getState,
+    setState,
+    currentViewId,
+    gridStyle,
+    routeTestFanForDensityGroups
+  ]);
+
+  /**
+   * 2D v3 "Układanie VLAN (2v)": pack leaves into per-VLAN density groups,
+   * tidy each VLAN group to minimise cable crossings, seat groups (Ułóż
+   * grupy), then the same Test tidy + diagonal-fan as 1v.
+   */
+  const runLayoutByVlanGroupsV2 = useCallback(() => {
+    const state = getState();
+    const view = getItemByIdOrThrow(state.model.views, currentViewId).value;
+    const viewItems = view.items ?? [];
+    if (viewItems.length === 0) {
+      return { vlanGroupCount: 0, movedNodes: 0, groupCount: 0 };
+    }
+
+    const gridStep = getGridSnapStep(gridStyle);
+    const connectors = view.connectors ?? [];
+    const clustered = clusterItemsByVlan({
+      items: viewItems,
+      modelItems: state.model.items,
+      connectors,
+      gridStep
+    });
+
+    // Explicit VLAN membership (same keys as clusterItemsByVlan).
+    const modelById = new Map(
+      state.model.items.map((item) => [item.id, item] as const)
+    );
+    const byVlan = new Map<string, string[]>();
+    viewItems.forEach((viewItem) => {
+      const vlan = primaryVlanKeyForItem({
+        itemId: viewItem.id,
+        modelItem: modelById.get(viewItem.id),
+        modelItems: state.model.items,
+        connectors
+      });
+      if (!vlan) return;
+      const list = byVlan.get(vlan) ?? [];
+      list.push(viewItem.id);
+      byVlan.set(vlan, list);
+    });
+    const vlanGroups = Array.from(byVlan.values()).filter((ids) => {
+      return ids.length >= 2;
+    });
+
+    beginHistoryTransaction();
+
+    if (clustered.movedNodes > 0) {
+      Object.entries(clustered.targets).forEach(([id, tile]) => {
+        const newState = reducers.view({
+          action: 'UPDATE_VIEWITEM',
+          payload: { id, tile, skipConnectorSync: true },
+          ctx: { viewId: currentViewId, state: getState() }
+        });
+        setState(newState, { skipHistory: true });
+      });
+    }
+
+    // Within each VLAN group: port-order tidy, then crossings 2-opt.
+    vlanGroups.forEach((ids) => {
+      const latest = getState();
+      const latestView = getItemByIdOrThrow(
+        latest.model.views,
+        currentViewId
+      ).value;
+      const selectedItems = (latestView.items ?? []).filter((item) => {
+        return ids.includes(item.id);
+      });
+      if (selectedItems.length < 2) return;
+
+      const tidyTargets = tidyShape2dItems({
+        selectedItems,
+        allItems: latestView.items ?? [],
+        modelItems: latest.model.items,
+        connectors: latestView.connectors ?? []
+      });
+
+      Object.entries(tidyTargets).forEach(([id, tile]) => {
+        const newState = reducers.view({
+          action: 'UPDATE_VIEWITEM',
+          payload: { id, tile, skipConnectorSync: true },
+          ctx: { viewId: currentViewId, state: getState() }
+        });
+        setState(newState, { skipHistory: true });
+      });
+
+      const afterTidy = getState();
+      const afterTidyView = getItemByIdOrThrow(
+        afterTidy.model.views,
+        currentViewId
+      ).value;
+      const selectedAfterTidy = (afterTidyView.items ?? []).filter((item) => {
+        return ids.includes(item.id);
+      });
+      if (selectedAfterTidy.length < 2) return;
+
+      const crossTargets = tidyInPlaceShape2dItems({
+        selectedItems: selectedAfterTidy,
+        allItems: afterTidyView.items ?? [],
+        modelItems: afterTidy.model.items,
+        connectors: afterTidyView.connectors ?? [],
+        variant: 'crossings'
+      });
+
+      Object.entries(crossTargets).forEach(([id, tile]) => {
+        const newState = reducers.view({
+          action: 'UPDATE_VIEWITEM',
+          payload: { id, tile, skipConnectorSync: true },
+          ctx: { viewId: currentViewId, state: getState() }
+        });
+        setState(newState, { skipHistory: true });
+      });
+    });
+
+    // Seat VLAN density groups around their switches (same as "Ułóż grupy").
+    const afterIntra = getState();
+    const afterIntraView = getItemByIdOrThrow(
+      afterIntra.model.views,
+      currentViewId
+    ).value;
+    const arranged = arrangeDensityGroups({
+      items: afterIntraView.items ?? [],
+      modelItems: afterIntra.model.items,
+      connectors: afterIntraView.connectors ?? [],
+      gridStep
+    });
+
+    if (arranged.movedNodes > 0) {
+      Object.entries(arranged.targets).forEach(([id, tile]) => {
+        const newState = reducers.view({
+          action: 'UPDATE_VIEWITEM',
+          payload: { id, tile, skipConnectorSync: true },
+          ctx: { viewId: currentViewId, state: getState() }
+        });
+        setState(newState, { skipHistory: true });
+      });
+    }
+
+    // Test: tidy each density group + diagonal-fan untangle.
+    const live = getState();
+    const liveView = getItemByIdOrThrow(live.model.views, currentViewId).value;
+    const groups = computeDensityGroups({
+      items: liveView.items ?? [],
+      modelItems: live.model.items
+    });
+
+    groups.forEach((group) => {
+      const ids = group.memberIds;
+      if (ids.length < 2) return;
+
+      const latest = getState();
+      const latestView = getItemByIdOrThrow(
+        latest.model.views,
+        currentViewId
+      ).value;
+      const selectedItems = (latestView.items ?? []).filter((item) => {
+        return ids.includes(item.id);
+      });
+      if (selectedItems.length < 2) return;
+
+      const targets = tidyShape2dItems({
+        selectedItems,
+        allItems: latestView.items ?? [],
+        modelItems: latest.model.items,
+        connectors: latestView.connectors ?? []
+      });
+
+      Object.entries(targets).forEach(([id, tile]) => {
+        const newState = reducers.view({
+          action: 'UPDATE_VIEWITEM',
+          payload: { id, tile, skipConnectorSync: true },
+          ctx: { viewId: currentViewId, state: getState() }
+        });
+        setState(newState, { skipHistory: true });
+      });
+    });
+
+    routeTestFanForDensityGroups({ skipHistory: true });
+    endHistoryTransaction();
+
+    return {
+      vlanGroupCount: Math.max(clustered.vlanGroupCount, vlanGroups.length),
       movedNodes: clustered.movedNodes + arranged.movedNodes,
       groupCount: groups.length
     };
@@ -1887,6 +2083,7 @@ export const useScene = () => {
       routeTestFanForDensityGroups,
       runSortByVlanLayout,
       runLayoutByVlanGroups,
+      runLayoutByVlanGroupsV2,
       runSmartLayoutForItems,
       runSmartLayout2ForItems,
       runAutoLayoutForItems,
@@ -1938,6 +2135,7 @@ export const useScene = () => {
       routeTestFanForDensityGroups,
       runSortByVlanLayout,
       runLayoutByVlanGroups,
+      runLayoutByVlanGroupsV2,
       runSmartLayoutForItems,
       runSmartLayout2ForItems,
       runAutoLayoutForItems,

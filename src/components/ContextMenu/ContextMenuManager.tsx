@@ -69,7 +69,8 @@ export const ContextMenuManager = ({ anchorEl }: Props) => {
     runArrangeDensityGroups,
     runTestLayoutForDensityGroups,
     runSortByVlanLayout,
-    runLayoutByVlanGroups
+    runLayoutByVlanGroups,
+    runLayoutByVlanGroupsV2
   } = scene;
 
   const densityVisible = useDensityGroupsDebugStore((state) => {
@@ -194,11 +195,21 @@ export const ContextMenuManager = ({ anchorEl }: Props) => {
         }
       },
       {
-        label: 'Układanie via VLAN',
+        label: 'Układanie VLAN (1v)',
         onClick: () => {
           setDensityVisible(true);
           setTimeout(() => {
             runLayoutByVlanGroups();
+          }, 0);
+          onClose();
+        }
+      },
+      {
+        label: 'Układanie VLAN (2v)',
+        onClick: () => {
+          setDensityVisible(true);
+          setTimeout(() => {
+            runLayoutByVlanGroupsV2();
           }, 0);
           onClose();
         }
@@ -211,6 +222,7 @@ export const ContextMenuManager = ({ anchorEl }: Props) => {
     runTestLayoutForDensityGroups,
     runSortByVlanLayout,
     runLayoutByVlanGroups,
+    runLayoutByVlanGroupsV2,
     onClose
   ]);
 

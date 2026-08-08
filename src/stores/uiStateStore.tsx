@@ -58,6 +58,7 @@ const initialState = () => {
       portAttention: null,
       portPipHover: null,
       shape2dPortHover: null,
+      shape2dPortHoverPinned: false,
       sviHover: null,
       showGrid: INITIAL_UI_STATE.showGrid,
       showLoupe: INITIAL_UI_STATE.showLoupe,
@@ -95,6 +96,8 @@ const initialState = () => {
             selectedItemIds: [],
             focusedPortIds: [],
             portAttention: null,
+            shape2dPortHover: null,
+            shape2dPortHoverPinned: false,
             zoom: 1,
             viewTransformByMode: INITIAL_UI_STATE.viewTransformByMode
           });
@@ -111,7 +114,9 @@ const initialState = () => {
             isMainMenuOpen,
             itemControls: null,
             selectedItemIds: [],
-            focusedPortIds: []
+            focusedPortIds: [],
+            shape2dPortHover: null,
+            shape2dPortHoverPinned: false
           });
         },
         incrementZoom: () => {
@@ -188,9 +193,29 @@ const initialState = () => {
 
           // Algorithms panel must keep the current multi-selection.
           if (itemControls?.type === 'ALGORITHMS') {
+            if (get().shape2dPortHoverPinned) {
+              set({
+                itemControls,
+                focusedPortIds: [],
+                shape2dPortHover: null,
+                shape2dPortHoverPinned: false
+              });
+              return;
+            }
             set({
               itemControls,
               focusedPortIds: []
+            });
+            return;
+          }
+
+          if (get().shape2dPortHoverPinned) {
+            set({
+              itemControls,
+              selectedItemIds: [],
+              focusedPortIds: [],
+              shape2dPortHover: null,
+              shape2dPortHoverPinned: false
             });
             return;
           }
@@ -214,6 +239,19 @@ const initialState = () => {
           }
 
           if (unique.length > 1) {
+            if (get().shape2dPortHoverPinned) {
+              set({
+                selectedItemIds: unique,
+                selectedWaypointIds: [],
+                // Keep primary item controls — no connection-layout algorithms UI.
+                itemControls: { type: 'ITEM', id: unique[0] },
+                focusedPortIds: [],
+                isRightSidebarOpen: true,
+                shape2dPortHover: null,
+                shape2dPortHoverPinned: false
+              });
+              return;
+            }
             set({
               selectedItemIds: unique,
               selectedWaypointIds: [],
@@ -221,6 +259,17 @@ const initialState = () => {
               itemControls: { type: 'ITEM', id: unique[0] },
               focusedPortIds: [],
               isRightSidebarOpen: true
+            });
+            return;
+          }
+
+          if (get().shape2dPortHoverPinned) {
+            set({
+              selectedItemIds: [],
+              itemControls: null,
+              focusedPortIds: [],
+              shape2dPortHover: null,
+              shape2dPortHoverPinned: false
             });
             return;
           }
@@ -247,11 +296,26 @@ const initialState = () => {
           get().actions.setSelectedItemIds([]);
         },
         setFocusedPortIds: (portIds) => {
-          set({
-            focusedPortIds: [...new Set(portIds.filter(Boolean))]
-          });
+          const focusedPortIds = [...new Set(portIds.filter(Boolean))];
+          if (focusedPortIds.length === 0 && get().shape2dPortHoverPinned) {
+            set({
+              focusedPortIds,
+              shape2dPortHover: null,
+              shape2dPortHoverPinned: false
+            });
+            return;
+          }
+          set({ focusedPortIds });
         },
         setFocusedPortId: (portId) => {
+          if (!portId && get().shape2dPortHoverPinned) {
+            set({
+              focusedPortIds: [],
+              shape2dPortHover: null,
+              shape2dPortHoverPinned: false
+            });
+            return;
+          }
           set({
             focusedPortIds: portId ? [portId] : []
           });
@@ -260,11 +324,18 @@ const initialState = () => {
           if (!portId) return;
           const current = get().focusedPortIds;
           if (current.includes(portId)) {
-            set({
-              focusedPortIds: current.filter((id) => {
-                return id !== portId;
-              })
+            const focusedPortIds = current.filter((id) => {
+              return id !== portId;
             });
+            if (focusedPortIds.length === 0 && get().shape2dPortHoverPinned) {
+              set({
+                focusedPortIds,
+                shape2dPortHover: null,
+                shape2dPortHoverPinned: false
+              });
+              return;
+            }
+            set({ focusedPortIds });
             return;
           }
           set({ focusedPortIds: [...current, portId] });
@@ -300,7 +371,22 @@ const initialState = () => {
           ) {
             return;
           }
-          set({ shape2dPortHover });
+          // Live hover target changed (or cleared) — drop click-pin.
+          set({ shape2dPortHover, shape2dPortHoverPinned: false });
+        },
+        pinShape2dPortHover: (hover) => {
+          const prev = get().shape2dPortHover;
+          if (
+            prev?.itemId === hover.itemId &&
+            prev?.portId === hover.portId &&
+            get().shape2dPortHoverPinned
+          ) {
+            return;
+          }
+          set({
+            shape2dPortHover: hover,
+            shape2dPortHoverPinned: true
+          });
         },
         setSviHover: (sviHover) => {
           set({ sviHover });
@@ -341,7 +427,8 @@ const initialState = () => {
             zoom: restored.zoom,
             scroll: restored.scroll,
             portPipHover: null,
-            shape2dPortHover: null
+            shape2dPortHover: null,
+            shape2dPortHoverPinned: false
           });
           smoothZoom.sync(restored.zoom);
         },

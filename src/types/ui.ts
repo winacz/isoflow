@@ -281,6 +281,11 @@ export interface UiState {
     itemId: string;
     portId: string | null;
   } | null;
+  /**
+   * After a port click, keep `shape2dPortHover` (blue jack + peer) until the
+   * cursor moves to another port or port selection clears.
+   */
+  shape2dPortHoverPinned: boolean;
   sviHover: {
     vlan: number;
     ip?: string;
@@ -376,6 +381,8 @@ export interface UiStateActions {
   setShape2dPortHover: (
     hover: UiState['shape2dPortHover']
   ) => void;
+  /** Lock blue port hover after a canvas port click. */
+  pinShape2dPortHover: (hover: { itemId: string; portId: string }) => void;
   setSviHover: (
     hover: UiState['sviHover']
   ) => void;

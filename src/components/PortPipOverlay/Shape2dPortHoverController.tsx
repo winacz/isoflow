@@ -27,6 +27,8 @@ const NODE_HIGHLIGHT_SCALE = 1.15;
 /**
  * Tracks RJ45/SFP under the cursor on Plan 2D and stores `shape2dPortHover`
  * so jacks can zoom on hover while keeping an expanded sticky hit box.
+ * After a port click (`shape2dPortHoverPinned`), keeps the blue hover until
+ * another port is hovered or port selection clears.
  */
 export const Shape2dPortHoverController = () => {
   const rendererEl = useUiStateStore((state) => {
@@ -97,7 +99,7 @@ export const Shape2dPortHoverController = () => {
       hitTestFrame = null;
       const uiState = uiStateStoreApi.getState();
       const { setShape2dPortHover } = uiState.actions;
-      const { shape2dPortHover } = uiState;
+      const { shape2dPortHover, shape2dPortHoverPinned } = uiState;
 
       if (
         !isPlanProjection(uiState.projectionMode) ||
@@ -193,7 +195,21 @@ export const Shape2dPortHoverController = () => {
       });
 
       if (!portHit) {
-        if (!shape2dPortHover) return;
+        // Click-pinned port: keep blue hover + peers until selection clears
+        // or the cursor moves onto a different port.
+        if (shape2dPortHoverPinned && shape2dPortHover?.portId) {
+          clearPending();
+          syncHoverVisual(shape2dPortHover, viewConnectors, model.items);
+          return;
+        }
+
+        if (!shape2dPortHover) {
+          // Selection/pin may have cleared the store while the DOM still
+          // shows the last imperative blue ring.
+          clearPending();
+          clearHoverVisual();
+          return;
+        }
 
         // Check if we are still on the body of the currently hovered device.
         let isOnBody = false;

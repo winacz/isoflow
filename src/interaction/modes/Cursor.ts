@@ -485,9 +485,25 @@ const mousedown: ModeActionsAction = ({
         uiState.itemControls.id === portHit.itemId;
 
       if (togglePort && sameDevice) {
+        const wasFocused = uiState.focusedPortIds.includes(portHit.portId);
         uiState.actions.toggleFocusedPortId(portHit.portId);
+        if (!wasFocused) {
+          // Keep blue hover (and peer jack/cable) after the click finishes.
+          uiState.actions.pinShape2dPortHover({
+            itemId: portHit.itemId,
+            portId: portHit.portId
+          });
+        } else {
+          // Deselected — drop sticky blue hover for this port.
+          uiState.actions.setShape2dPortHover(null);
+        }
       } else {
         uiState.actions.setFocusedPortId(portHit.portId);
+        // Keep blue hover (and peer jack/cable) after the click finishes.
+        uiState.actions.pinShape2dPortHover({
+          itemId: portHit.itemId,
+          portId: portHit.portId
+        });
       }
     } else {
       uiState.actions.setFocusedPortId(null);
