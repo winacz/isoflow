@@ -21,7 +21,8 @@ import {
   planPortalJump,
   getSinglePortNodeVlanBorderColor,
   hasPoePowerWarning,
-  CoordsUtils
+  CoordsUtils,
+  getShape2dHeaderFraction
 } from 'src/utils';
 import { useIcon } from 'src/hooks/useIcon';
 import { ViewItem } from 'src/types';
@@ -40,8 +41,8 @@ interface Props {
   order: number;
   /**
    * 2D selection styling:
-   * - highlighted = clicked / selected (scale + glow)
-   * - related = cable peer (glow only, no hover-scale)
+   * - highlighted = selected (glow); enlarge is separate (header click)
+   * - related = cable peer (glow only)
    * - dimmed = everything else while a selection is active
    */
   selectionTone?: 'normal' | 'highlighted' | 'related' | 'dimmed';
@@ -49,6 +50,17 @@ interface Props {
   dimmedOpacity?: number;
   /** Pixel translation so scaled highlighted nodes do not overlap. */
   repelOffset?: { x: number; y: number };
+  /**
+   * CSS scale magnitude (zoom-aware). Applied only when shouldEnlarge is true.
+   */
+  highlightScale?: number;
+  /**
+   * When true, apply highlightScale (header-click enlarge only).
+   * Header mouse-hover only accents the name band — it does not set this.
+   */
+  shouldEnlarge?: boolean;
+  /** Blue outline while the cursor is over this device (relation preview). */
+  showHoverRing?: boolean;
 }
 
 export const Node = React.memo(({
@@ -56,8 +68,17 @@ export const Node = React.memo(({
   order,
   selectionTone = 'normal',
   dimmedOpacity = 0.7,
-  repelOffset
+  repelOffset,
+  highlightScale = 1.15,
+  shouldEnlarge = false,
+  showHoverRing = false
 }: Props) => {
+  const isHeaderHovered = useUiStateStore(
+    useCallback(
+      (state) => state.shape2dHeaderHoverItemId === node.id,
+      [node.id]
+    )
+  );
   const modelItem = useModelItem(node.id);
   const { connectors: sceneConnectors } = useScene();
   const model = useModelStore((state) => {
@@ -200,6 +221,35 @@ export const Node = React.memo(({
   const isPlanShape = isShape2dIcon(modelItem.icon);
   const shapeSize = getModelItemSize(modelItem);
   const tile = liveTile ?? node.tile;
+
+  /**
+   * Header hit-area: positioned at the top of the node, same height as the
+   * header band used in DeviceShape2d (isPc → 30%, switch → 33%).
+   * Only computed for 2D plan shapes that are not cabinets.
+   */
+  const headerHitArea = useMemo(() => {
+    if (!isPlanShape || !shapeSize || modelItem.icon === SHAPE_2D_CABINET_ID) return null;
+    const pxW = shapeSize.width * TILE_SIZE_2D;
+    const pxH = shapeSize.height * TILE_SIZE_2D;
+    const headerH = pxH * getShape2dHeaderFraction(modelItem.icon);
+    return { left: -pxW / 2, top: -pxH / 2, width: pxW, height: headerH };
+  }, [isPlanShape, shapeSize, modelItem.icon]);
+
+  const hoverRingBox = useMemo(() => {
+    if (!isPlanShape || !shapeSize || modelItem.icon === SHAPE_2D_CABINET_ID) {
+      return null;
+    }
+    const pxW = shapeSize.width * TILE_SIZE_2D;
+    const pxH = shapeSize.height * TILE_SIZE_2D;
+    return { left: -pxW / 2, top: -pxH / 2, width: pxW, height: pxH };
+  }, [isPlanShape, shapeSize, modelItem.icon]);
+
+  /**
+   * Enlarge only after header click — not on node / header hover.
+   */
+  const activeScale = shouldEnlarge ? highlightScale : 1;
+  const isScaled =
+    activeScale > 1.01 && modelItem.icon !== SHAPE_2D_CABINET_ID;
 
   const position = useMemo(() => {
     if (isTwoD && shapeSize) {
@@ -368,21 +418,62 @@ export const Node = React.memo(({
       <Box
         sx={{
           position: 'absolute',
-          // Scale ("hover") only the clicked / selected node — cable peers
-          // stay related-highlighted without the zoom.
-          transform:
-            selectionTone === 'highlighted' &&
-            modelItem.icon !== SHAPE_2D_CABINET_ID
-              ? `translate(${repelOffset?.x ?? 0}px, ${repelOffset?.y ?? 0}px) scale(1.15)`
+          transform: isScaled
+            ? `translate(${repelOffset?.x ?? 0}px, ${repelOffset?.y ?? 0}px) scale(${activeScale})`
+            : repelOffset
+              ? `translate(${repelOffset.x}px, ${repelOffset.y}px)`
               : 'none',
           transformOrigin: '0 0',
-          transition: 'transform 0.15s ease'
+          transition: 'transform 0.18s ease'
         }}
         style={{
           left: position.x,
           top: position.y
         }}
       >
+        {/* Blue ring — cursor is over this device (no scale). */}
+        {hoverRingBox && showHoverRing && (
+          <Box
+            sx={{
+              position: 'absolute',
+              left: hoverRingBox.left,
+              top: hoverRingBox.top,
+              width: hoverRingBox.width,
+              height: hoverRingBox.height,
+              pointerEvents: 'none',
+              zIndex: 19,
+              borderRadius: '6px',
+              boxSizing: 'border-box',
+              boxShadow:
+                '0 0 0 2.5px rgba(37, 99, 235, 0.85), 0 0 0 5px rgba(37, 99, 235, 0.2)',
+              transition: 'box-shadow 0.12s ease'
+            }}
+          />
+        )}
+        {/* Header band accent — only while cursor is on the name header */}
+        {headerHitArea && (
+          <Box
+            sx={{
+              position: 'absolute',
+              left: headerHitArea.left,
+              top: headerHitArea.top,
+              width: headerHitArea.width,
+              height: headerHitArea.height,
+              pointerEvents: 'none',
+              zIndex: 20,
+              borderRadius: '6px 6px 0 0',
+              boxSizing: 'border-box',
+              background: isHeaderHovered
+                ? 'rgba(37, 99, 235, 0.28)'
+                : 'transparent',
+              boxShadow: isHeaderHovered
+                ? 'inset 0 -3px 0 rgba(37, 99, 235, 0.95), inset 0 0 0 1.5px rgba(37, 99, 235, 0.55)'
+                : 'none',
+              transition:
+                'background 0.12s ease, box-shadow 0.12s ease'
+            }}
+          />
+        )}
         {showFloatingLabel && (
           <Box
             sx={{ position: 'absolute' }}

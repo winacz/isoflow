@@ -4,6 +4,8 @@ import { useModelStoreApi } from 'src/stores/modelStore';
 import { useResizeObserver } from 'src/hooks/useResizeObserver';
 import {
   getShape2dPortAtPoint,
+  getShape2dHeaderAtPoint,
+  getShape2dBodyAtPoint,
   getScaledShape2dItemIds,
   screenToTile2dContinuous,
   isPlanProjection,
@@ -21,7 +23,9 @@ import type { Connector } from 'src/types';
 
 /** Keep hover briefly when cursor slips between adjacent ports. */
 const PORT_HOVER_CLEAR_DELAY_MS = 140;
-/** Must match Nodes.tsx / getShape2dPortAtPoint highlight scale. */
+/** Sticky device-under-cursor — avoids relation/ring flicker in port gaps. */
+const NODE_HOVER_CLEAR_DELAY_MS = 100;
+/** Must match Nodes.tsx / getShape2dPortAtPoint highlight scale (selection baseline). */
 const NODE_HIGHLIGHT_SCALE = 1.15;
 
 /**
@@ -40,6 +44,9 @@ export const Shape2dPortHoverController = () => {
   const rendererWidth = rendererSize.width;
   const rendererHeight = rendererSize.height;
   const clearTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const nodeHoverClearTimerRef = useRef<ReturnType<typeof setTimeout> | null>(
+    null
+  );
   const hoveredJacksRef = useRef<HTMLElement[]>([]);
 
   useEffect(() => {
@@ -98,8 +105,41 @@ export const Shape2dPortHoverController = () => {
     const runHitTest = () => {
       hitTestFrame = null;
       const uiState = uiStateStoreApi.getState();
-      const { setShape2dPortHover } = uiState.actions;
-      const { shape2dPortHover, shape2dPortHoverPinned } = uiState;
+      const {
+        setShape2dPortHover,
+        setShape2dHeaderHoverItemId,
+        setShape2dNodeHoverItemId
+      } = uiState.actions;
+      const {
+        shape2dPortHover,
+        shape2dPortHoverPinned,
+        shape2dHeaderHoverItemId,
+        shape2dEnlargedItemId
+      } = uiState;
+
+      const clearHeaderHover = () => {
+        if (shape2dHeaderHoverItemId) setShape2dHeaderHoverItemId(null);
+      };
+
+      const clearNodeHoverSoon = () => {
+        if (nodeHoverClearTimerRef.current) return;
+        nodeHoverClearTimerRef.current = setTimeout(() => {
+          uiStateStoreApi.getState().actions.setShape2dNodeHoverItemId(null);
+          nodeHoverClearTimerRef.current = null;
+        }, NODE_HOVER_CLEAR_DELAY_MS);
+      };
+
+      const setNodeHover = (itemId: string | null) => {
+        if (itemId) {
+          if (nodeHoverClearTimerRef.current) {
+            clearTimeout(nodeHoverClearTimerRef.current);
+            nodeHoverClearTimerRef.current = null;
+          }
+          setShape2dNodeHoverItemId(itemId);
+          return;
+        }
+        clearNodeHoverSoon();
+      };
 
       if (
         !isPlanProjection(uiState.projectionMode) ||
@@ -107,6 +147,12 @@ export const Shape2dPortHoverController = () => {
       ) {
         clearPending();
         if (shape2dPortHover) setShape2dPortHover(null);
+        clearHeaderHover();
+        if (nodeHoverClearTimerRef.current) {
+          clearTimeout(nodeHoverClearTimerRef.current);
+          nodeHoverClearTimerRef.current = null;
+        }
+        setShape2dNodeHoverItemId(null);
         clearHoverVisual();
         return;
       }
@@ -118,6 +164,12 @@ export const Shape2dPortHoverController = () => {
       ) {
         clearPending();
         if (shape2dPortHover) setShape2dPortHover(null);
+        clearHeaderHover();
+        if (nodeHoverClearTimerRef.current) {
+          clearTimeout(nodeHoverClearTimerRef.current);
+          nodeHoverClearTimerRef.current = null;
+        }
+        setShape2dNodeHoverItemId(null);
         clearHoverVisual();
         return;
       }
@@ -137,6 +189,12 @@ export const Shape2dPortHoverController = () => {
       if (!rendererWidth || !rendererHeight) {
         clearPending();
         if (shape2dPortHover) setShape2dPortHover(null);
+        clearHeaderHover();
+        if (nodeHoverClearTimerRef.current) {
+          clearTimeout(nodeHoverClearTimerRef.current);
+          nodeHoverClearTimerRef.current = null;
+        }
+        setShape2dNodeHoverItemId(null);
         clearHoverVisual();
         return;
       }
@@ -161,24 +219,14 @@ export const Shape2dPortHoverController = () => {
         items: viewItems
       } as any;
 
-      let peerId: string | null = null;
-      if (shape2dPortHover?.portId) {
-        const peer = resolvePortPipPeer({
-          connectors: viewConnectors,
-          modelItems: model.items,
-          itemId: shape2dPortHover.itemId,
-          portId: shape2dPortHover.portId
-        });
-        if (peer?.itemId && peer.itemId !== shape2dPortHover.itemId) {
-          peerId = peer.itemId;
-        }
-      }
-
       const scaledItemIds = getScaledShape2dItemIds({
         selectedItemIds: uiState.selectedItemIds,
         viewItems,
         modelItems: model.items,
-        extraScaledItemIds: peerId ? [peerId] : null,
+        extraScaledItemIds: [
+          // Only header-click enlarge CSS-scales — keep port hits aligned.
+          shape2dEnlargedItemId
+        ],
         // Loupe node must stay unscaled — hit-tests follow Nodes.tsx.
         excludeItemIds:
           uiState.showLoupe && shape2dPortHover
@@ -200,76 +248,98 @@ export const Shape2dPortHoverController = () => {
         if (shape2dPortHoverPinned && shape2dPortHover?.portId) {
           clearPending();
           syncHoverVisual(shape2dPortHover, viewConnectors, model.items);
-          return;
-        }
-
-        if (!shape2dPortHover) {
+          // Still allow header highlight on other devices while a port is pinned.
+        } else if (!shape2dPortHover) {
           // Selection/pin may have cleared the store while the DOM still
           // shows the last imperative blue ring.
           clearPending();
           clearHoverVisual();
-          return;
-        }
-
-        // Check if we are still on the body of the currently hovered device.
-        let isOnBody = false;
-        const viewItem = viewItems.find((item) => {
-          return item.id === shape2dPortHover.itemId;
-        });
-        const modelItem = model.items.find((item) => {
-          return item.id === shape2dPortHover.itemId;
-        });
-        if (viewItem && modelItem?.icon) {
-          const size =
-            getModelItemSize(modelItem) ?? getShape2dSize(modelItem.icon);
-          if (size) {
-            if (
-              scaledItemIds.has(viewItem.id) &&
-              modelItem.icon !== SHAPE_2D_CABINET_ID
-            ) {
-              // Body is CSS-scaled from the device centre — expand AABB.
-              const cx = viewItem.tile.x + size.width / 2;
-              const cy = viewItem.tile.y + size.height / 2;
-              const halfW = (size.width * NODE_HIGHLIGHT_SCALE) / 2;
-              const halfH = (size.height * NODE_HIGHLIGHT_SCALE) / 2;
-              isOnBody =
-                point.x >= cx - halfW &&
-                point.x < cx + halfW &&
-                point.y >= cy - halfH &&
-                point.y < cy + halfH;
-            } else {
-              isOnBody = isTileInShape2dBounds(point, viewItem.tile, size);
+        } else {
+          // Check if we are still on the body of the currently hovered device.
+          let isOnBody = false;
+          const viewItem = viewItems.find((item) => {
+            return item.id === shape2dPortHover.itemId;
+          });
+          const modelItem = model.items.find((item) => {
+            return item.id === shape2dPortHover.itemId;
+          });
+          if (viewItem && modelItem?.icon) {
+            const size =
+              getModelItemSize(modelItem) ?? getShape2dSize(modelItem.icon);
+            if (size) {
+              if (
+                scaledItemIds.has(viewItem.id) &&
+                modelItem.icon !== SHAPE_2D_CABINET_ID
+              ) {
+                // Body is CSS-scaled from the device centre — expand AABB.
+                const cx = viewItem.tile.x + size.width / 2;
+                const cy = viewItem.tile.y + size.height / 2;
+                const halfW = (size.width * NODE_HIGHLIGHT_SCALE) / 2;
+                const halfH = (size.height * NODE_HIGHLIGHT_SCALE) / 2;
+                isOnBody =
+                  point.x >= cx - halfW &&
+                  point.x < cx + halfW &&
+                  point.y >= cy - halfH &&
+                  point.y < cy + halfH;
+              } else {
+                isOnBody = isTileInShape2dBounds(point, viewItem.tile, size);
+              }
             }
           }
-        }
 
-        if (isOnBody) {
-          clearPending();
-          if (shape2dPortHover.portId !== null) {
-            setShape2dPortHover({
-              itemId: shape2dPortHover.itemId,
-              portId: null
-            });
-            clearHoverVisual();
+          if (isOnBody) {
+            clearPending();
+            if (shape2dPortHover.portId !== null) {
+              setShape2dPortHover({
+                itemId: shape2dPortHover.itemId,
+                portId: null
+              });
+              clearHoverVisual();
+            }
+          } else if (!clearTimerRef.current) {
+            clearTimerRef.current = setTimeout(() => {
+              uiStateStoreApi.getState().actions.setShape2dPortHover(null);
+              clearHoverVisual();
+              clearTimerRef.current = null;
+            }, PORT_HOVER_CLEAR_DELAY_MS);
           }
-          return;
         }
 
-        if (clearTimerRef.current) return;
-        clearTimerRef.current = setTimeout(() => {
-          uiStateStoreApi.getState().actions.setShape2dPortHover(null);
-          clearHoverVisual();
-          clearTimerRef.current = null;
-        }, PORT_HOVER_CLEAR_DELAY_MS);
+        // Header hover accent (only when not over a port jack) — no enlarge.
+        // Use real enlarge scale for hit-testing (hover must not pretend-scale).
+        const enlargeScale =
+          shape2dEnlargedItemId && scaledItemIds.has(shape2dEnlargedItemId)
+            ? Math.max(NODE_HIGHLIGHT_SCALE, 1.15)
+            : NODE_HIGHLIGHT_SCALE;
+        const headerItemId = getShape2dHeaderAtPoint({
+          point,
+          items: viewItems,
+          modelItems: model.items,
+          scaledItemIds: scaledItemIds.size > 0 ? scaledItemIds : null,
+          scale: enlargeScale
+        });
+        setShape2dHeaderHoverItemId(headerItemId);
+
+        // Whole-device hover → preview cable peers / blue ring (sticky clear).
+        const bodyItemId = getShape2dBodyAtPoint({
+          point,
+          items: viewItems,
+          modelItems: model.items,
+          scaledItemIds: scaledItemIds.size > 0 ? scaledItemIds : null,
+          scale: enlargeScale
+        });
+        setNodeHover(bodyItemId);
         return;
       }
 
       clearPending();
+      clearHeaderHover();
       const nextHover = {
         itemId: portHit.itemId,
         portId: portHit.portId
       };
       setShape2dPortHover(nextHover);
+      setNodeHover(portHit.itemId);
       syncHoverVisual(nextHover, viewConnectors, model.items);
     };
 
@@ -289,7 +359,12 @@ export const Shape2dPortHoverController = () => {
       unsubscribe();
       if (hitTestFrame != null) cancelAnimationFrame(hitTestFrame);
       if (clearTimerRef.current) clearTimeout(clearTimerRef.current);
+      if (nodeHoverClearTimerRef.current) {
+        clearTimeout(nodeHoverClearTimerRef.current);
+      }
       clearHoverVisual();
+      uiStateStoreApi.getState().actions.setShape2dHeaderHoverItemId(null);
+      uiStateStoreApi.getState().actions.setShape2dNodeHoverItemId(null);
     };
   }, [modelStore, rendererHeight, rendererWidth, uiStateStoreApi]);
 

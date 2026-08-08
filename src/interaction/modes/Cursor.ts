@@ -14,6 +14,7 @@ import {
   getShape2dItemAtTile,
   getShape2dPortAtTile,
   getScaledShape2dItemIds,
+  getShape2dHeaderAtPoint,
   hasMovedTile,
   getAnchorAtTile,
   getItemByIdOrThrow,
@@ -35,8 +36,7 @@ import {
   isPlanProjection,
   supportsConnectorTools,
   supportsDrawingConnections,
-  connectorModeForProjection,
-  resolvePortPipPeer
+  connectorModeForProjection
 } from 'src/utils';
 import { useScene } from 'src/hooks/useScene';
 import { isShape2dIcon, getShape2dSize } from 'src/config';
@@ -340,8 +340,8 @@ const isTileOnDeviceBody = (
 };
 
 /**
- * CSS-scaled nodes (selected / port-hover peer) — port hit-tests must use the
- * same scale as the canvas or clicks far from centre pick the neighbour jack.
+ * CSS-scaled nodes (header-click enlarge) — port hit-tests must use the same
+ * scale as the canvas or clicks far from centre miss.
  */
 const getHighlightedItemIdsForPortHit = ({
   uiState,
@@ -352,29 +352,17 @@ const getHighlightedItemIdsForPortHit = ({
     selectedItemIds: string[];
     showLoupe: boolean;
     shape2dPortHover: { itemId: string; portId: string | null } | null;
+    shape2dEnlargedItemId: string | null;
   };
   scene: { items: { id: string; parentId?: string }[]; currentView: { connectors?: ConnectorI[] } };
   modelItems: ModelItem[];
 }): Set<string> | null => {
-  let peerId: string | null = null;
   const hover = uiState.shape2dPortHover;
-  if (hover?.portId) {
-    const peer = resolvePortPipPeer({
-      connectors: scene.currentView.connectors,
-      modelItems,
-      itemId: hover.itemId,
-      portId: hover.portId
-    });
-    if (peer?.itemId && peer.itemId !== hover.itemId) {
-      peerId = peer.itemId;
-    }
-  }
-
   const ids = getScaledShape2dItemIds({
     selectedItemIds: uiState.selectedItemIds,
     viewItems: scene.items,
     modelItems,
-    extraScaledItemIds: peerId ? [peerId] : null,
+    extraScaledItemIds: [uiState.shape2dEnlargedItemId],
     excludeItemIds:
       uiState.showLoupe && hover ? [hover.itemId] : null
   });
@@ -1028,7 +1016,7 @@ export const Cursor: ModeActions = {
     }
   },
   mousedown,
-  mouseup: ({ uiState, scene, model, isRendererInteraction }) => {
+  mouseup: ({ uiState, scene, model, isRendererInteraction, rendererSize }) => {
     if (uiState.mode.type !== 'CURSOR' || !isRendererInteraction) return;
 
     if (
@@ -1065,6 +1053,7 @@ export const Cursor: ModeActions = {
         uiState.actions.setSelectedItemIds(ids);
       }
 
+      uiState.actions.setShape2dEnlargedItemId(null);
       uiState.actions.setMode(
         produce(uiState.mode, (draft) => {
           draft.mousedownItem = null;
@@ -1083,24 +1072,65 @@ export const Cursor: ModeActions = {
             id: uiState.mode.mousedownItem.id
           });
         }
+
+        // Header click (no drag) → enlarge; body / elsewhere → clear enlarge.
+        if (
+          isPlanProjection(uiState.projectionMode) &&
+          uiState.mouse.mousedown &&
+          !hasMovedTile(uiState.mouse)
+        ) {
+          const point = screenToTile2dContinuous({
+            mouse: uiState.mouse.mousedown.screen,
+            zoom: uiState.zoom,
+            scroll: uiState.scroll,
+            rendererSize
+          });
+          const scaledIds = getHighlightedItemIdsForPortHit({
+            uiState,
+            scene,
+            modelItems: model.items
+          });
+          const headerId = getShape2dHeaderAtPoint({
+            point,
+            items: scene.items,
+            modelItems: model.items,
+            scaledItemIds: scaledIds,
+            scale: 1.15
+          });
+          const clickedId = uiState.mode.mousedownItem.id;
+          if (headerId === clickedId) {
+            // Toggle enlarge on the same header; switch when another header.
+            uiState.actions.setShape2dEnlargedItemId(
+              uiState.shape2dEnlargedItemId === clickedId ? null : clickedId
+            );
+          } else {
+            uiState.actions.setShape2dEnlargedItemId(null);
+          }
+        }
       } else if (uiState.mode.mousedownItem.type === 'RECTANGLE') {
         uiState.actions.setItemControls({
           type: 'RECTANGLE',
           id: uiState.mode.mousedownItem.id
         });
+        uiState.actions.setShape2dEnlargedItemId(null);
       } else if (uiState.mode.mousedownItem.type === 'CONNECTOR') {
         uiState.actions.setItemControls({
           type: 'CONNECTOR',
           id: uiState.mode.mousedownItem.id
         });
+        uiState.actions.setShape2dEnlargedItemId(null);
       } else if (uiState.mode.mousedownItem.type === 'TEXTBOX') {
         uiState.actions.setItemControls({
           type: 'TEXTBOX',
           id: uiState.mode.mousedownItem.id
         });
+        uiState.actions.setShape2dEnlargedItemId(null);
       }
     } else if (!isPlanProjection(uiState.projectionMode)) {
       uiState.actions.setItemControls(null);
+    } else {
+      // Empty canvas click (no marquee items) — drop enlarge with selection.
+      uiState.actions.setShape2dEnlargedItemId(null);
     }
 
     uiState.actions.setMode(

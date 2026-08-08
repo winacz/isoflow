@@ -286,6 +286,21 @@ export interface UiState {
    * cursor moves to another port or port selection clears.
    */
   shape2dPortHoverPinned: boolean;
+  /**
+   * Plan 2D: node whose name-header is under the cursor (interaction-layer
+   * hit-test). Drives header accent only — enlarge requires a header click.
+   */
+  shape2dHeaderHoverItemId: string | null;
+  /**
+   * Plan 2D: device under the cursor (header, body, or port).
+   * Used to preview cable peers / relations without selecting.
+   */
+  shape2dNodeHoverItemId: string | null;
+  /**
+   * Plan 2D: node enlarged after a header click ("hover" / scale).
+   * Cleared when selecting elsewhere or clearing selection.
+   */
+  shape2dEnlargedItemId: string | null;
   sviHover: {
     vlan: number;
     ip?: string;
@@ -383,6 +398,9 @@ export interface UiStateActions {
   ) => void;
   /** Lock blue port hover after a canvas port click. */
   pinShape2dPortHover: (hover: { itemId: string; portId: string }) => void;
+  setShape2dHeaderHoverItemId: (itemId: string | null) => void;
+  setShape2dNodeHoverItemId: (itemId: string | null) => void;
+  setShape2dEnlargedItemId: (itemId: string | null) => void;
   setSviHover: (
     hover: UiState['sviHover']
   ) => void;

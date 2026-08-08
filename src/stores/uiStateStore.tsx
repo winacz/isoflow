@@ -59,6 +59,9 @@ const initialState = () => {
       portPipHover: null,
       shape2dPortHover: null,
       shape2dPortHoverPinned: false,
+      shape2dHeaderHoverItemId: null,
+      shape2dNodeHoverItemId: null,
+      shape2dEnlargedItemId: null,
       sviHover: null,
       showGrid: INITIAL_UI_STATE.showGrid,
       showLoupe: INITIAL_UI_STATE.showLoupe,
@@ -98,6 +101,9 @@ const initialState = () => {
             portAttention: null,
             shape2dPortHover: null,
             shape2dPortHoverPinned: false,
+            shape2dHeaderHoverItemId: null,
+            shape2dNodeHoverItemId: null,
+            shape2dEnlargedItemId: null,
             zoom: 1,
             viewTransformByMode: INITIAL_UI_STATE.viewTransformByMode
           });
@@ -116,7 +122,10 @@ const initialState = () => {
             selectedItemIds: [],
             focusedPortIds: [],
             shape2dPortHover: null,
-            shape2dPortHoverPinned: false
+            shape2dPortHoverPinned: false,
+            shape2dHeaderHoverItemId: null,
+            shape2dNodeHoverItemId: null,
+            shape2dEnlargedItemId: null
           });
         },
         incrementZoom: () => {
@@ -228,12 +237,16 @@ const initialState = () => {
         },
         setSelectedItemIds: (ids) => {
           const unique = [...new Set(ids.filter(Boolean))];
+          const enlargedId = get().shape2dEnlargedItemId;
+          const clearEnlarge =
+            enlargedId != null && !unique.includes(enlargedId);
 
           if (unique.length === 1) {
             set({
               selectedItemIds: unique,
               selectedWaypointIds: [],
-              itemControls: { type: 'ITEM', id: unique[0] }
+              itemControls: { type: 'ITEM', id: unique[0] },
+              ...(clearEnlarge ? { shape2dEnlargedItemId: null } : null)
             });
             return;
           }
@@ -248,7 +261,8 @@ const initialState = () => {
                 focusedPortIds: [],
                 isRightSidebarOpen: true,
                 shape2dPortHover: null,
-                shape2dPortHoverPinned: false
+                shape2dPortHoverPinned: false,
+                ...(clearEnlarge ? { shape2dEnlargedItemId: null } : null)
               });
               return;
             }
@@ -258,7 +272,8 @@ const initialState = () => {
               // Keep primary item controls — no connection-layout algorithms UI.
               itemControls: { type: 'ITEM', id: unique[0] },
               focusedPortIds: [],
-              isRightSidebarOpen: true
+              isRightSidebarOpen: true,
+              ...(clearEnlarge ? { shape2dEnlargedItemId: null } : null)
             });
             return;
           }
@@ -269,7 +284,8 @@ const initialState = () => {
               itemControls: null,
               focusedPortIds: [],
               shape2dPortHover: null,
-              shape2dPortHoverPinned: false
+              shape2dPortHoverPinned: false,
+              shape2dEnlargedItemId: null
             });
             return;
           }
@@ -277,7 +293,8 @@ const initialState = () => {
           set({
             selectedItemIds: [],
             itemControls: null,
-            focusedPortIds: []
+            focusedPortIds: [],
+            shape2dEnlargedItemId: null
           });
         },
         setSelectedWaypointIds: (ids) => {
@@ -388,6 +405,24 @@ const initialState = () => {
             shape2dPortHoverPinned: true
           });
         },
+        setShape2dHeaderHoverItemId: (shape2dHeaderHoverItemId) => {
+          if (get().shape2dHeaderHoverItemId === shape2dHeaderHoverItemId) {
+            return;
+          }
+          set({ shape2dHeaderHoverItemId });
+        },
+        setShape2dNodeHoverItemId: (shape2dNodeHoverItemId) => {
+          if (get().shape2dNodeHoverItemId === shape2dNodeHoverItemId) {
+            return;
+          }
+          set({ shape2dNodeHoverItemId });
+        },
+        setShape2dEnlargedItemId: (shape2dEnlargedItemId) => {
+          if (get().shape2dEnlargedItemId === shape2dEnlargedItemId) {
+            return;
+          }
+          set({ shape2dEnlargedItemId });
+        },
         setSviHover: (sviHover) => {
           set({ sviHover });
         },
@@ -428,7 +463,10 @@ const initialState = () => {
             scroll: restored.scroll,
             portPipHover: null,
             shape2dPortHover: null,
-            shape2dPortHoverPinned: false
+            shape2dPortHoverPinned: false,
+            shape2dHeaderHoverItemId: null,
+            shape2dNodeHoverItemId: null,
+            shape2dEnlargedItemId: null
           });
           smoothZoom.sync(restored.zoom);
         },

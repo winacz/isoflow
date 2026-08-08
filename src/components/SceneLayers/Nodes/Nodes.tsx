@@ -4,7 +4,7 @@ import { ViewItem } from 'src/types';
 import { useUiStateStore } from 'src/stores/uiStateStore';
 import { useModelStore } from 'src/stores/modelStore';
 import { useScene } from 'src/hooks/useScene';
-import { SHAPE_2D_CABINET_ID, TILE_SIZE_2D, getModelItemSize } from 'src/config';
+import { SHAPE_2D_CABINET_ID, TILE_SIZE_2D, getModelItemSize, SWITCH_2D_SIZE } from 'src/config';
 import {
   getPortPeerItemIds,
   isPatchPanelItem,
@@ -14,10 +14,46 @@ import {
 } from 'src/utils';
 import { Node } from './Node/Node';
 
-/** Visual scale applied to highlighted (selected / related) nodes. */
-const HIGHLIGHT_SCALE = 1.15;
+/** Fallback scale when node size is unknown (cabinets skip scale anyway). */
+const HIGHLIGHT_SCALE_BASE = 1;
 /** Extra gap (tiles) left between scaled AABBs after centroid expand. */
 const HIGHLIGHT_REPEL_GAP_TILES = 0.35;
+
+/**
+ * Reference area (tiles²) for size boost: switch-sized → no extra,
+ * smaller nodes get a bit more enlarge at low zoom.
+ */
+const SCALE_REF_AREA = SWITCH_2D_SIZE.width * SWITCH_2D_SIZE.height; // ~171
+
+/**
+ * Hover/selection enlarge scale:
+ *  - at ~10% zoom: clearly larger (≈1.7–2.0×, tiny nodes a bit more)
+ *  - at ~40% zoom and above: nearly invisible (≈1.02)
+ *  - smaller nodes get a modest extra boost
+ *
+ * @param areaTiles  node footprint in grid tiles (width × height)
+ * @param zoom       current viewport zoom (1 = 100 %, 0.1 = 10 %)
+ */
+const computeHighlightScale = (areaTiles: number, zoom: number): number => {
+  const sizeRatio = Math.min(1, SCALE_REF_AREA / Math.max(areaTiles, 1));
+  // Extra for tiny nodes vs switch-sized: 0 → ~0.25
+  const sizeBoost = 0.25 * sizeRatio;
+
+  // Full boost at 10%, none at 40%+. Quadratic falloff so 40% feels almost flat.
+  const ZOOM_FULL = 0.1;
+  const ZOOM_NONE = 0.4;
+  const t = Math.max(
+    0,
+    Math.min(1, (ZOOM_NONE - zoom) / (ZOOM_NONE - ZOOM_FULL))
+  );
+  const zoomT = t * t;
+  const extra = zoomT * (0.7 + sizeBoost); // 0.70–0.95 at 10%
+
+  if (extra < 0.02) {
+    return 1 + 0.02 * sizeRatio; // 1.00–1.02 above ~40%
+  }
+  return Math.min(2.2, 1 + extra);
+};
 
 interface Props {
   nodes: ViewItem[];
@@ -54,6 +90,13 @@ const CABINET_Z_BASE = -100000;
 const DEVICE_Z_BASE = 1000;
 
 export const Nodes = React.memo(({ nodes }: Props) => {
+  const zoom = useUiStateStore((state) => state.zoom);
+  const shape2dEnlargedItemId = useUiStateStore(
+    (state) => state.shape2dEnlargedItemId
+  );
+  const shape2dNodeHoverItemId = useUiStateStore(
+    (state) => state.shape2dNodeHoverItemId
+  );
   const itemControls = useUiStateStore((state) => {
     return state.itemControls;
   });
@@ -104,8 +147,20 @@ export const Nodes = React.memo(({ nodes }: Props) => {
 
     const ids = new Set<string>();
 
+    const addCablePeersForItem = (itemId: string) => {
+      connectors.forEach((connector) => {
+        const touches = connector.anchors.some((anchor) => {
+          return anchor.ref.item === itemId;
+        });
+        if (!touches) return;
+        getEndpointItemIds(connector).forEach((id) => {
+          ids.add(id);
+        });
+      });
+    };
+
     if (selectedItemIds.length > 0) {
-      selectedItemIds.forEach(id => ids.add(id));
+      selectedItemIds.forEach((id) => ids.add(id));
 
       // Selecting a cabinet: keep mounted gear highlighted (not dimmed),
       // otherwise cabinet tint shows through semi-transparent switches.
@@ -124,7 +179,9 @@ export const Nodes = React.memo(({ nodes }: Props) => {
         const directConnectorIds: string[] = [];
         connectors.forEach((connector) => {
           const usesFocused = focusedPortIds.some((portId) => {
-            return selectedItemIds.some((selectedId) => connectorUsesPort(connector, selectedId, portId));
+            return selectedItemIds.some((selectedId) =>
+              connectorUsesPort(connector, selectedId, portId)
+            );
           });
           if (!usesFocused) return;
           directConnectorIds.push(connector.id);
@@ -146,17 +203,7 @@ export const Nodes = React.memo(({ nodes }: Props) => {
           });
         });
       } else {
-        connectors.forEach((connector) => {
-          const touches = connector.anchors.some((anchor) => {
-            return anchor.ref.item && selectedItemIds.includes(anchor.ref.item);
-          });
-
-          if (!touches) return;
-
-          getEndpointItemIds(connector).forEach((id) => {
-            ids.add(id);
-          });
-        });
+        selectedItemIds.forEach((id) => addCablePeersForItem(id));
       }
     } else if (itemControls) {
       if (itemControls.type === 'CONNECTOR') {
@@ -184,9 +231,20 @@ export const Nodes = React.memo(({ nodes }: Props) => {
           const connector = connectors.find((con) => {
             return con.id === itemControls.id;
           });
-          getEndpointItemIds(connector).forEach(id => ids.add(id));
+          getEndpointItemIds(connector).forEach((id) => ids.add(id));
         }
       }
+    } else if (shape2dNodeHoverItemId) {
+      // Preview relations while hovering a device (no selection yet).
+      ids.add(shape2dNodeHoverItemId);
+      if (iconById.get(shape2dNodeHoverItemId) === SHAPE_2D_CABINET_ID) {
+        nodes.forEach((node) => {
+          if (node.parentId === shape2dNodeHoverItemId) {
+            ids.add(node.id);
+          }
+        });
+      }
+      addCablePeersForItem(shape2dNodeHoverItemId);
     }
 
     return ids.size > 0 ? ids : null;
@@ -198,7 +256,8 @@ export const Nodes = React.memo(({ nodes }: Props) => {
     focusedPortIds,
     modelItems,
     iconById,
-    nodes
+    nodes,
+    shape2dNodeHoverItemId
   ]);
 
   /**
@@ -251,12 +310,14 @@ export const Nodes = React.memo(({ nodes }: Props) => {
         return m.id === id;
       });
       const size = getModelItemSize(item ?? {}) ?? { width: 1, height: 1 };
+      const nodeArea = size.width * size.height;
+      const nodeScale = computeHighlightScale(nodeArea, zoom);
       entries.push({
         id,
         cx: node.tile.x + size.width / 2,
         cy: node.tile.y + size.height / 2,
-        halfW: (size.width * HIGHLIGHT_SCALE) / 2,
-        halfH: (size.height * HIGHLIGHT_SCALE) / 2,
+        halfW: (size.width * nodeScale) / 2,
+        halfH: (size.height * nodeScale) / 2,
         parentId: node.parentId
       });
     });
@@ -306,7 +367,7 @@ export const Nodes = React.memo(({ nodes }: Props) => {
     });
 
     return offsets;
-  }, [selectedItemIds, nodes, modelItems, iconById]);
+  }, [selectedItemIds, nodes, modelItems, iconById, zoom]);
 
   return (
     <>
@@ -316,31 +377,38 @@ export const Nodes = React.memo(({ nodes }: Props) => {
 
         if (highlightedNodeIds) {
           if (selectedItemIds.includes(node.id)) {
-            // Clicked / multi-selected — full hover-scale emphasis.
+            // Clicked / multi-selected — glow (enlarge is header-click only).
             selectionTone = 'highlighted';
           } else if (
             node.parentId &&
-            selectedItemIds.includes(node.parentId) &&
+            ((selectedItemIds.includes(node.parentId) &&
+              selectedItemIds.length > 0) ||
+              (shape2dNodeHoverItemId === node.parentId &&
+                selectedItemIds.length === 0)) &&
             highlightedNodeIds.has(node.id)
           ) {
-            // Gear mounted in a selected cabinet — keep scale with the cabinet.
+            // Gear mounted in a selected / hovered cabinet — keep glow.
             selectionTone = 'highlighted';
           } else if (highlightedNodeIds.has(node.id)) {
-            // Cable peers: glow only, no scale.
+            // Hovered device + cable peers: glow only, never scale.
             selectionTone = 'related';
           } else {
             selectionTone = 'dimmed';
           }
         }
 
-        // Port hover: make the far-side device stand out (scale + glow).
-        if (portHoverPeerId === node.id) {
-          selectionTone = 'highlighted';
+        // Port hover peer: emphasize with glow only (scale caused flicker while
+        // sliding across ports on the source device).
+        if (portHoverPeerId === node.id && selectionTone === 'normal') {
+          selectionTone = 'related';
+        } else if (portHoverPeerId === node.id && selectionTone === 'dimmed') {
+          selectionTone = 'related';
         }
 
-        // Loupe on this node: keep glow if selected, but never hover-scale —
-        // scale(1.15) shifts the chassis under the glass ("rozjeżdża się").
-        if (loupeItemId === node.id && selectionTone === 'highlighted') {
+        // Loupe on this node: keep glow if selected, but never enlarge —
+        // scale shifts the chassis under the glass ("rozjeżdża się").
+        const loupeBlocksEnlarge = loupeItemId === node.id;
+        if (loupeBlocksEnlarge && selectionTone === 'highlighted') {
           selectionTone = 'related';
         }
 
@@ -354,6 +422,27 @@ export const Nodes = React.memo(({ nodes }: Props) => {
             ? baseOrder + 10000
             : baseOrder;
 
+        // Compute per-node highlight scale (cabinet always stays 1 / none).
+        const item = modelItems.find((m) => m.id === node.id);
+        const size = isCabinet
+          ? null
+          : (getModelItemSize(item ?? {}) ?? null);
+        const highlightScale = size
+          ? computeHighlightScale(size.width * size.height, zoom)
+          : HIGHLIGHT_SCALE_BASE;
+
+        // Enlarge ONLY after an explicit header click — never on hover / port peer.
+        const shouldEnlarge =
+          !loupeBlocksEnlarge &&
+          !isCabinet &&
+          shape2dEnlargedItemId === node.id;
+
+        const showHoverRing =
+          !isCabinet &&
+          shape2dNodeHoverItemId === node.id &&
+          !selectedItemIds.includes(node.id) &&
+          shape2dEnlargedItemId !== node.id;
+
         return (
           <Node
             key={node.id}
@@ -362,6 +451,9 @@ export const Nodes = React.memo(({ nodes }: Props) => {
             selectionTone={selectionTone}
             dimmedOpacity={dimmedOpacity}
             repelOffset={repelOffsets.get(node.id)}
+            highlightScale={highlightScale}
+            shouldEnlarge={shouldEnlarge}
+            showHoverRing={showHoverRing}
           />
         );
       })}

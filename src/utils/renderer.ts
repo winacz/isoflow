@@ -17,7 +17,10 @@ import {
   getModelItemSize,
   getShape2dPorts,
   getModelItemPorts,
-  SHAPE_2D_CABINET_ID
+  SHAPE_2D_CABINET_ID,
+  SHAPE_2D_SWITCH_ID,
+  SHAPE_2D_BLANKING_ID,
+  SHAPE_2D_PATCH_PANEL_ID
 } from 'src/config';
 import {
   Coords,
@@ -210,6 +213,171 @@ export const isTileInShape2dBounds = (
     tile.y >= originTile.y &&
     tile.y < originTile.y + size.height
   );
+};
+
+/**
+ * Header band fraction of device height (matches DeviceShape2d / Node).
+ * PC-like nodes: 30%; switch / rack / templates: ~33%.
+ */
+export const getShape2dHeaderFraction = (icon: string | undefined): number => {
+  if (!icon) return 1 / 3;
+  const isPcLike =
+    icon !== SHAPE_2D_CABINET_ID &&
+    icon !== SHAPE_2D_SWITCH_ID &&
+    icon !== SHAPE_2D_BLANKING_ID &&
+    icon !== SHAPE_2D_PATCH_PANEL_ID &&
+    !icon.startsWith('tpl-');
+  return isPcLike ? 0.3 : 1 / 3;
+};
+
+/**
+ * Node whose name-header band contains `point` (tile space).
+ * Prefers smaller / mounted devices over cabinets (same ranking as body hits).
+ * `scaledItemIds` + `scale` expand the header AABB when the node is CSS-scaled.
+ */
+export const getShape2dHeaderAtPoint = ({
+  point,
+  items,
+  modelItems,
+  scaledItemIds,
+  scale = 1.15
+}: {
+  point: Coords;
+  items: { id: string; tile: Coords; parentId?: string }[];
+  modelItems: { id: string; icon?: string }[];
+  scaledItemIds?: Set<string> | null;
+  scale?: number;
+}): string | null => {
+  type Hit = {
+    id: string;
+    area: number;
+    isCabinet: boolean;
+    hasParent: boolean;
+  };
+
+  const hits: Hit[] = [];
+  const map = new Map(modelItems.map((i) => [i.id, i]));
+
+  items.forEach((viewItem) => {
+    const modelItem = map.get(viewItem.id);
+    if (!modelItem?.icon) return;
+    if (modelItem.icon === SHAPE_2D_CABINET_ID) return;
+
+    const size =
+      getModelItemSize(modelItem) ?? getShape2dSize(modelItem.icon);
+    if (!size) return;
+
+    const headerFrac = getShape2dHeaderFraction(modelItem.icon);
+    const isScaled = Boolean(scaledItemIds?.has(viewItem.id));
+    const s = isScaled ? scale : 1;
+
+    const cx = viewItem.tile.x + size.width / 2;
+    const cy = viewItem.tile.y + size.height / 2;
+    // Inverse of CSS scale-from-centre so hit matches the visual header.
+    const lx = (point.x - cx) / s;
+    const ly = (point.y - cy) / s;
+    const halfW = size.width / 2;
+    const halfH = size.height / 2;
+    const headerBottom = -halfH + size.height * headerFrac;
+
+    if (lx < -halfW || lx >= halfW || ly < -halfH || ly >= headerBottom) {
+      return;
+    }
+
+    hits.push({
+      id: viewItem.id,
+      area: size.width * size.height,
+      isCabinet: false,
+      hasParent: Boolean(viewItem.parentId)
+    });
+  });
+
+  if (hits.length === 0) return null;
+
+  hits.sort((a, b) => {
+    if (a.hasParent !== b.hasParent) {
+      return a.hasParent ? -1 : 1;
+    }
+    return a.area - b.area;
+  });
+
+  return hits[0].id;
+};
+
+/**
+ * Device body under `point` (full footprint, tile space).
+ * Same ranking as getShape2dItemAtTile (mounted / smaller over cabinets).
+ */
+export const getShape2dBodyAtPoint = ({
+  point,
+  items,
+  modelItems,
+  scaledItemIds,
+  scale = 1.15,
+  includeCabinets = false
+}: {
+  point: Coords;
+  items: { id: string; tile: Coords; parentId?: string }[];
+  modelItems: { id: string; icon?: string }[];
+  scaledItemIds?: Set<string> | null;
+  scale?: number;
+  includeCabinets?: boolean;
+}): string | null => {
+  type Hit = {
+    id: string;
+    area: number;
+    isCabinet: boolean;
+    hasParent: boolean;
+  };
+
+  const hits: Hit[] = [];
+  const map = new Map(modelItems.map((i) => [i.id, i]));
+
+  items.forEach((viewItem) => {
+    const modelItem = map.get(viewItem.id);
+    if (!modelItem?.icon) return;
+    const isCabinet = modelItem.icon === SHAPE_2D_CABINET_ID;
+    if (isCabinet && !includeCabinets) return;
+
+    const size =
+      getModelItemSize(modelItem) ?? getShape2dSize(modelItem.icon);
+    if (!size) return;
+
+    const isScaled =
+      Boolean(scaledItemIds?.has(viewItem.id)) && !isCabinet;
+    const s = isScaled ? scale : 1;
+    const cx = viewItem.tile.x + size.width / 2;
+    const cy = viewItem.tile.y + size.height / 2;
+    const lx = (point.x - cx) / s;
+    const ly = (point.y - cy) / s;
+    const halfW = size.width / 2;
+    const halfH = size.height / 2;
+
+    if (lx < -halfW || lx >= halfW || ly < -halfH || ly >= halfH) {
+      return;
+    }
+
+    hits.push({
+      id: viewItem.id,
+      area: size.width * size.height,
+      isCabinet,
+      hasParent: Boolean(viewItem.parentId)
+    });
+  });
+
+  if (hits.length === 0) return null;
+
+  hits.sort((a, b) => {
+    if (a.isCabinet !== b.isCabinet) {
+      return a.isCabinet ? 1 : -1;
+    }
+    if (a.hasParent !== b.hasParent) {
+      return a.hasParent ? -1 : 1;
+    }
+    return a.area - b.area;
+  });
+
+  return hits[0].id;
 };
 
 /** True when the tile sits on any 2D device footprint (body or port cell). */
@@ -1580,9 +1748,15 @@ export const isShape2dPortInUse = ({
  * `excludeItemIds`: e.g. the node under an active loupe — selection must not
  * scale it or port hit-tests / loupe framing drift apart.
  */
+/**
+ * Item ids currently CSS-scaled on the plan canvas.
+ * Selection alone no longer enlarges — pass header-click enlarge / port peers
+ * via `extraScaledItemIds`. `selectedItemIds` is kept for API compatibility
+ * (cabinet children of an enlarged parent can still be listed in extra).
+ */
 export const getScaledShape2dItemIds = ({
-  selectedItemIds,
-  viewItems,
+  selectedItemIds: _selectedItemIds,
+  viewItems: _viewItems,
   modelItems,
   extraScaledItemIds,
   excludeItemIds
@@ -1599,19 +1773,6 @@ export const getScaledShape2dItemIds = ({
       return [item.id, item.icon];
     })
   );
-  const selected = new Set(selectedItemIds);
-
-  selectedItemIds.forEach((id) => {
-    if (iconById.get(id) !== SHAPE_2D_CABINET_ID) {
-      ids.add(id);
-    }
-  });
-
-  viewItems.forEach((item) => {
-    if (item.parentId && selected.has(item.parentId)) {
-      ids.add(item.id);
-    }
-  });
 
   if (extraScaledItemIds) {
     for (const id of extraScaledItemIds) {

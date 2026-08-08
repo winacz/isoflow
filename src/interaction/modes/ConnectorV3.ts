@@ -35,7 +35,8 @@ const portUnderCursor = ({
   zoom,
   scroll,
   rendererSize,
-  selectedItemIds
+  selectedItemIds,
+  enlargedItemId
 }: {
   scene: Parameters<NonNullable<ModeActions['mousedown']>>[0]['scene'];
   model: Parameters<NonNullable<ModeActions['mousedown']>>[0]['model'];
@@ -45,6 +46,7 @@ const portUnderCursor = ({
   scroll: Parameters<NonNullable<ModeActions['mousedown']>>[0]['uiState']['scroll'];
   rendererSize: { width: number; height: number };
   selectedItemIds: string[];
+  enlargedItemId?: string | null;
 }) => {
   const point = screenToTile2dContinuous({
     mouse: screen,
@@ -56,7 +58,8 @@ const portUnderCursor = ({
   const scaled = getScaledShape2dItemIds({
     selectedItemIds,
     viewItems: scene.items,
-    modelItems: model.items
+    modelItems: model.items,
+    extraScaledItemIds: [enlargedItemId ?? null]
   });
 
   return getShape2dPortAtTile({
@@ -88,7 +91,8 @@ export const ConnectorV3: ModeActions = {
       zoom: uiState.zoom,
       scroll: uiState.scroll,
       rendererSize,
-      selectedItemIds: uiState.selectedItemIds
+      selectedItemIds: uiState.selectedItemIds,
+      enlargedItemId: uiState.shape2dEnlargedItemId
     });
 
     // Nothing to start from — stay armed rather than creating a stray cable.
@@ -171,7 +175,8 @@ export const ConnectorV3: ModeActions = {
       zoom: uiState.zoom,
       scroll: uiState.scroll,
       rendererSize,
-      selectedItemIds: uiState.selectedItemIds
+      selectedItemIds: uiState.selectedItemIds,
+      enlargedItemId: uiState.shape2dEnlargedItemId
     });
 
     const sameJack =

@@ -78,6 +78,9 @@ export const Connectors = ({ connectors }: Props) => {
   const shape2dPortHover = useUiStateStore((state) => {
     return state.shape2dPortHover;
   });
+  const shape2dNodeHoverItemId = useUiStateStore((state) => {
+    return state.shape2dNodeHoverItemId;
+  });
 
   const selectedConnectorId = useMemo(() => {
     if (mode.type === 'CONNECTOR') {
@@ -93,8 +96,18 @@ export const Connectors = ({ connectors }: Props) => {
   const selectedItemId =
     itemControls?.type === 'ITEM' ? itemControls.id : null;
 
+  /** Item whose cables should be emphasized (selection, else hover preview). */
+  const relationItemId =
+    selectedItemId ??
+    (selectedConnectorId ? null : shape2dNodeHoverItemId);
+
   const hasSelectionFocus = Boolean(
-    selectedConnectorId || (isPlan2dCanvas(projectionMode) && selectedItemId)
+    selectedConnectorId ||
+      (isPlan2dCanvas(projectionMode) && selectedItemId) ||
+      (isPlan2dCanvas(projectionMode) &&
+        !selectedItemId &&
+        !selectedConnectorId &&
+        shape2dNodeHoverItemId)
   );
   const softDim = mode.type === 'DRAG_ITEMS';
 
@@ -107,18 +120,18 @@ export const Connectors = ({ connectors }: Props) => {
       direct.add(selectedConnectorId);
     }
 
-    if (selectedItemId) {
+    if (relationItemId) {
       connectors.forEach((connector) => {
         const related =
-          focusedPortIds.length > 0
+          focusedPortIds.length > 0 && selectedItemId === relationItemId
             ? focusedPortIds.some((portId) => {
                 return connectorUsesPort(
                   connector,
-                  selectedItemId,
+                  relationItemId,
                   portId
                 );
               })
-            : connectorTouchesItem(connector, selectedItemId);
+            : connectorTouchesItem(connector, relationItemId);
         if (related) direct.add(connector.id);
       });
     }
@@ -133,6 +146,7 @@ export const Connectors = ({ connectors }: Props) => {
   }, [
     projectionMode,
     selectedConnectorId,
+    relationItemId,
     selectedItemId,
     focusedPortIds,
     connectors,

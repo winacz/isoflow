@@ -7,6 +7,7 @@ import { Grid } from 'src/components/Grid/Grid';
 import { Cursor } from 'src/components/Cursor/Cursor';
 import { Nodes } from 'src/components/SceneLayers/Nodes/Nodes';
 import { NodeDescriptionLabels } from 'src/components/SceneLayers/Nodes/NodeDescriptionLabels';
+import { MultiSelectMoveHandle } from 'src/components/SceneLayers/Nodes/MultiSelectMoveHandle';
 import { Rectangles } from 'src/components/SceneLayers/Rectangles/Rectangles';
 import { Connectors } from 'src/components/SceneLayers/Connectors/Connectors';
 import { ConnectorV3Preview } from 'src/components/SceneLayers/ConnectorV3Preview/ConnectorV3Preview';
@@ -279,16 +280,23 @@ export const Renderer = ({ showGrid, backgroundColor }: RendererProps) => {
           <NodeDescriptionLabels nodes={visibleNodes} />
         </SceneLayer>
       )}
-      {/* Above interaction overlay so badge / rectangle handles work */}
+      {/* Above interaction overlay so badge / rectangle / multi-move handles work */}
       {isClassic2d && (
         <SceneLayer order={11} sx={{ pointerEvents: 'none' }}>
           <ConnectorStackBadges />
+          <MultiSelectMoveHandle />
           <TransformControlsManager />
         </SceneLayer>
       )}
       {isTwoDV2 && (
         <SceneLayer order={11} sx={{ pointerEvents: 'none' }}>
+          <MultiSelectMoveHandle />
           <TransformControlsManager />
+        </SceneLayer>
+      )}
+      {isTwoDV3 && (
+        <SceneLayer order={11} sx={{ pointerEvents: 'none' }}>
+          <MultiSelectMoveHandle />
         </SceneLayer>
       )}
     </Box>
