@@ -12,6 +12,11 @@ import {
   normalizeVlanKey
 } from 'src/utils/vlanColors';
 import { collectEffectiveAccessVlans } from 'src/utils/vlanIpHint';
+import {
+  densityCirclePadForMemberCount,
+  type DensityGroup,
+  type DensityGroupBounds
+} from './densityGroups';
 
 /** Gap between different VLAN clusters (tiles) — above density-group merge threshold. */
 const VLAN_CLUSTER_GAP = 4;
@@ -22,6 +27,16 @@ export type ClusterItemsByVlanResult = {
   targets: Record<string, Coords>;
   vlanGroupCount: number;
   movedNodes: number;
+};
+
+/** One movable VLAN block (optionally scoped to a hub switch). */
+export type VlanMemberGroup = {
+  /** Stable key: `vlan` or `switchId::vlan`. */
+  key: string;
+  vlan: string;
+  /** Dominant / uplink switch when known. */
+  switchId: string | null;
+  memberIds: string[];
 };
 
 const footprintOf = (
@@ -68,6 +83,36 @@ export const primaryVlanKeyForItem = ({
   return normalizeVlanKey(vlans[0]) || '1';
 };
 
+/**
+ * First switch-like peer of a leaf (uplink hub). Used to scope VLAN packs
+ * per switch so SW-A's VLAN10 does not merge with SW-B's VLAN10.
+ */
+export const hubSwitchIdForLeaf = ({
+  itemId,
+  modelItems,
+  connectors
+}: {
+  itemId: string;
+  modelItems: ModelItem[];
+  connectors: Connector[];
+}): string | null => {
+  const iconById = new Map(
+    modelItems.map((item) => [item.id, item.icon] as const)
+  );
+  for (const connector of connectors) {
+    const ends = connector.anchors.filter((anchor) => {
+      return Boolean(anchor.ref.item);
+    });
+    if (ends.length < 2) continue;
+    const first = ends[0].ref.item!;
+    const last = ends[ends.length - 1].ref.item!;
+    if (first !== itemId && last !== itemId) continue;
+    const other = first === itemId ? last : first;
+    if (isSwitchLikeIcon(iconById.get(other))) return other;
+  }
+  return null;
+};
+
 const compareVlanKeys = (a: string, b: string) => {
   const na = Number.parseInt(a, 10);
   const nb = Number.parseInt(b, 10);
@@ -78,25 +123,26 @@ const compareVlanKeys = (a: string, b: string) => {
 };
 
 /**
- * Pack leaf nodes that share a VLAN into compact clusters, then leave hubs
- * (switches / cabinets) in place. Clusters are separated so density-group
- * "Test" treats each VLAN as its own group.
+ * Build explicit VLAN membership groups for layout.
+ * When `perHub` is true (2v), groups are scoped to `(switch, vlan)` so each
+ * hub gets its own VLAN blocks. Scene-wide (`perHub: false`) matches 1v.
  */
-export const clusterItemsByVlan = ({
+export const buildVlanMemberGroups = ({
   items,
   modelItems,
   connectors,
-  gridStep = { x: 1, y: 1 }
+  perHub = false
 }: {
   items: ViewItem[];
   modelItems: ModelItem[];
   connectors: Connector[];
-  gridStep?: { x: number; y: number };
-}): ClusterItemsByVlanResult => {
-  const modelById = new Map(modelItems.map((item) => [item.id, item]));
-  const byVlan = new Map<string, string[]>();
+  perHub?: boolean;
+}): VlanMemberGroup[] => {
+  const modelById = new Map(modelItems.map((item) => [item.id, item] as const));
+  const buckets = new Map<string, VlanMemberGroup>();
 
   items.forEach((viewItem) => {
+    if (viewItem.parentId) return;
     const modelItem = modelById.get(viewItem.id);
     const vlan = primaryVlanKeyForItem({
       itemId: viewItem.id,
@@ -105,28 +151,117 @@ export const clusterItemsByVlan = ({
       connectors
     });
     if (!vlan) return;
-    const list = byVlan.get(vlan) ?? [];
-    list.push(viewItem.id);
-    byVlan.set(vlan, list);
+
+    const switchId = perHub
+      ? hubSwitchIdForLeaf({
+          itemId: viewItem.id,
+          modelItems,
+          connectors
+        })
+      : null;
+    const key = switchId ? `${switchId}::${vlan}` : vlan;
+    const existing = buckets.get(key);
+    if (existing) {
+      existing.memberIds.push(viewItem.id);
+    } else {
+      buckets.set(key, { key, vlan, switchId, memberIds: [viewItem.id] });
+    }
   });
 
-  const vlanKeys = Array.from(byVlan.keys()).sort(compareVlanKeys);
-  // Only clusters with 2+ members need packing; singles stay put.
-  const clusters = vlanKeys
-    .map((vlan) => {
-      return { vlan, ids: byVlan.get(vlan) ?? [] };
+  return Array.from(buckets.values())
+    .filter((group) => {
+      return group.memberIds.length >= 2;
     })
-    .filter((cluster) => {
-      return cluster.ids.length >= 2;
+    .sort((a, b) => {
+      if (a.switchId !== b.switchId) {
+        return (a.switchId ?? '').localeCompare(b.switchId ?? '');
+      }
+      return compareVlanKeys(a.vlan, b.vlan);
     });
+};
 
-  if (clusters.length === 0) {
-    return { targets: {}, vlanGroupCount: 0, movedNodes: 0 };
-  }
+/** Bounds + circumcircle for an explicit member set (current tile positions). */
+export const densityGroupFromMemberIds = ({
+  id,
+  memberIds,
+  items,
+  modelItems
+}: {
+  id: string;
+  memberIds: string[];
+  items: Array<Pick<ViewItem, 'id' | 'tile'>>;
+  modelItems: ModelItem[];
+}): DensityGroup | null => {
+  if (memberIds.length === 0) return null;
+  const modelById = new Map(modelItems.map((item) => [item.id, item] as const));
+  const itemById = new Map(items.map((item) => [item.id, item] as const));
 
+  const fps: DensityGroupBounds[] = [];
+  memberIds.forEach((mid) => {
+    const item = itemById.get(mid);
+    if (!item) return;
+    const size = footprintOf(mid, modelById);
+    fps.push({ x: item.tile.x, y: item.tile.y, w: size.width, h: size.height });
+  });
+  if (fps.length === 0) return null;
+
+  const x = Math.min(...fps.map((fp) => fp.x));
+  const y = Math.min(...fps.map((fp) => fp.y));
+  const right = Math.max(...fps.map((fp) => fp.x + fp.w));
+  const bottom = Math.max(...fps.map((fp) => fp.y + fp.h));
+  const w = right - x;
+  const h = bottom - y;
+  const cx = x + w / 2;
+  const cy = y + h / 2;
+  const pad = densityCirclePadForMemberCount(fps.length);
+  const r = Math.sqrt((w / 2) ** 2 + (h / 2) ** 2) + pad;
+
+  return {
+    id,
+    memberIds: [...memberIds],
+    bounds: { x, y, w, h },
+    circle: { cx, cy, r }
+  };
+};
+
+export const densityGroupsFromVlanMembers = ({
+  vlanGroups,
+  items,
+  modelItems
+}: {
+  vlanGroups: VlanMemberGroup[];
+  items: Array<Pick<ViewItem, 'id' | 'tile'>>;
+  modelItems: ModelItem[];
+}): DensityGroup[] => {
+  const groups: DensityGroup[] = [];
+  vlanGroups.forEach((vg, index) => {
+    const group = densityGroupFromMemberIds({
+      id: `vlan-group-${index}`,
+      memberIds: vg.memberIds,
+      items,
+      modelItems
+    });
+    if (group) groups.push(group);
+  });
+  return groups;
+};
+
+const packMemberClusters = ({
+  clusters,
+  items,
+  modelItems,
+  gridStep
+}: {
+  clusters: Array<{ ids: string[] }>;
+  items: ViewItem[];
+  modelItems: ModelItem[];
+  gridStep: { x: number; y: number };
+}): Record<string, Coords> => {
+  if (clusters.length === 0) return {};
+
+  const modelById = new Map(modelItems.map((item) => [item.id, item]));
   const itemById = new Map(items.map((item) => [item.id, item]));
 
-  // Scene origin for packing — top-left of current leaf bounding box.
   let minX = Infinity;
   let minY = Infinity;
   clusters.forEach((cluster) => {
@@ -146,7 +281,6 @@ export const clusterItemsByVlan = ({
   let rowMaxH = 0;
 
   clusters.forEach((cluster, clusterIndex) => {
-    // Preserve relative left→right order within a VLAN.
     const ordered = [...cluster.ids].sort((a, b) => {
       const ta = itemById.get(a)?.tile;
       const tb = itemById.get(b)?.tile;
@@ -161,7 +295,6 @@ export const clusterItemsByVlan = ({
       return { id, w: size.width, h: size.height };
     });
 
-    // Pack into one or more rows for this VLAN.
     const rows: Cell[][] = [];
     let row: Cell[] = [];
     let rowW = 0;
@@ -185,7 +318,6 @@ export const clusterItemsByVlan = ({
       packH += h;
     });
 
-    // New scene row of clusters when this pack would stretch too far.
     if (clusterIndex > 0 && cursorX + packW - minX > MAX_CLUSTER_ROW_TILES * 1.5) {
       cursorX = minX;
       cursorY += rowMaxH + VLAN_CLUSTER_GAP;
@@ -214,9 +346,54 @@ export const clusterItemsByVlan = ({
     rowMaxH = Math.max(rowMaxH, packH);
   });
 
+  return targets;
+};
+
+/**
+ * Pack leaf nodes that share a VLAN into compact clusters, then leave hubs
+ * (switches / cabinets) in place. Clusters are separated so density-group
+ * "Test" treats each VLAN as its own group.
+ *
+ * When `perHub` is true, packs are scoped to `(switch, vlan)` — required for
+ * 2v so different VLANs on the same switch become separate rigid blocks.
+ */
+export const clusterItemsByVlan = ({
+  items,
+  modelItems,
+  connectors,
+  gridStep = { x: 1, y: 1 },
+  perHub = false
+}: {
+  items: ViewItem[];
+  modelItems: ModelItem[];
+  connectors: Connector[];
+  gridStep?: { x: number; y: number };
+  perHub?: boolean;
+}): ClusterItemsByVlanResult => {
+  const vlanGroups = buildVlanMemberGroups({
+    items,
+    modelItems,
+    connectors,
+    perHub
+  });
+
+  if (vlanGroups.length === 0) {
+    return { targets: {}, vlanGroupCount: 0, movedNodes: 0 };
+  }
+
+  // One strip of packs: each `(switch, vlan)` (or scene-wide vlan) is a
+  // contiguous block separated by VLAN_CLUSTER_GAP so proximity grouping
+  // cannot merge different VLANs before arrange seats them.
+  const targets = packMemberClusters({
+    clusters: vlanGroups.map((g) => ({ ids: g.memberIds })),
+    items,
+    modelItems,
+    gridStep
+  });
+
   return {
     targets,
-    vlanGroupCount: clusters.length,
+    vlanGroupCount: vlanGroups.length,
     movedNodes: Object.keys(targets).length
   };
 };

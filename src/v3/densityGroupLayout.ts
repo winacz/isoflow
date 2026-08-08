@@ -930,13 +930,18 @@ export const findClearSpokeDistance = ({
  * - Members translate rigidly with the group centre.
  * - Runs internal passes until positions stabilize so one click converges
  *   (re-click is a no-op).
+ *
+ * When `groupMemberIds` is set, membership is fixed across passes (bounds are
+ * refreshed from current tiles). Used by VLAN 2v so proximity cannot merge
+ * different VLANs between arrange passes.
  */
 export const arrangeDensityGroups = ({
   items,
   modelItems,
   connectors,
   gridStep = { x: 1, y: 1 },
-  mode = 'default'
+  mode = 'default',
+  groupMemberIds
 }: {
   items: ViewItem[];
   modelItems: ModelItem[];
@@ -945,6 +950,8 @@ export const arrangeDensityGroups = ({
   gridStep?: { x: number; y: number };
   /** `magistrala` = wider gaps, thick bus corridors, largest-first, fewer crossings. */
   mode?: ArrangeDensityMode;
+  /** Explicit group membership (skips proximity `computeDensityGroups`). */
+  groupMemberIds?: string[][];
 }): ArrangeDensityGroupsResult => {
   const profile = arrangeProfileForMode(mode);
   const originalTiles = new Map(
@@ -963,7 +970,8 @@ export const arrangeDensityGroups = ({
       modelItems,
       connectors,
       gridStep,
-      profile
+      profile,
+      groupMemberIds
     });
     groupCount = passResult.groupCount;
     if (passResult.movedNodes === 0) break;
@@ -996,23 +1004,74 @@ export const arrangeDensityGroups = ({
 /** How many converge passes one button click may run. */
 const MAX_ARRANGE_PASSES = 6;
 
+const groupsFromExplicitMembers = ({
+  groupMemberIds,
+  items,
+  modelItems
+}: {
+  groupMemberIds: string[][];
+  items: ViewItem[];
+  modelItems: ModelItem[];
+}): DensityGroup[] => {
+  const iconById = new Map(
+    modelItems.map((item) => [item.id, item.icon] as const)
+  );
+  const itemById = new Map(items.map((item) => [item.id, item] as const));
+  const groups: DensityGroup[] = [];
+
+  groupMemberIds.forEach((memberIds, index) => {
+    const members = memberIds
+      .map((id) => itemById.get(id))
+      .filter((item): item is ViewItem => {
+        return Boolean(item) && !item!.parentId;
+      });
+    if (members.length === 0) return;
+
+    const boundsList = members.map((item) => itemFootprint(item, iconById));
+    const x = Math.min(...boundsList.map((b) => b.x));
+    const y = Math.min(...boundsList.map((b) => b.y));
+    const right = Math.max(...boundsList.map((b) => b.x + b.w));
+    const bottom = Math.max(...boundsList.map((b) => b.y + b.h));
+    const w = right - x;
+    const h = bottom - y;
+    const cx = x + w / 2;
+    const cy = y + h / 2;
+    const pad = densityCirclePadForMemberCount(members.length);
+    const r = Math.sqrt((w / 2) ** 2 + (h / 2) ** 2) + pad;
+
+    groups.push({
+      id: `density-group-${index}`,
+      memberIds: members.map((m) => m.id),
+      bounds: { x, y, w, h },
+      circle: { cx, cy, r }
+    });
+  });
+
+  return groups;
+};
+
 const arrangeDensityGroupsPass = ({
   items,
   modelItems,
   connectors,
   gridStep = { x: 1, y: 1 },
-  profile = ARRANGE_PROFILE_DEFAULT
+  profile = ARRANGE_PROFILE_DEFAULT,
+  groupMemberIds
 }: {
   items: ViewItem[];
   modelItems: ModelItem[];
   connectors: LayoutConnector[];
   gridStep?: { x: number; y: number };
   profile?: ArrangeDensityProfile;
+  groupMemberIds?: string[][];
 }): ArrangeDensityGroupsResult => {
-  const groups = computeDensityGroups({
-    items,
-    modelItems
-  });
+  const groups =
+    groupMemberIds && groupMemberIds.length > 0
+      ? groupsFromExplicitMembers({ groupMemberIds, items, modelItems })
+      : computeDensityGroups({
+          items,
+          modelItems
+        });
   if (groups.length === 0) {
     return { targets: {}, groupCount: 0, movedNodes: 0 };
   }

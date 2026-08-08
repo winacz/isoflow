@@ -28,7 +28,7 @@ import { arrangeDensityGroups } from 'src/v3/densityGroupLayout';
 import { computeDensityGroups } from 'src/v3/densityGroups';
 import {
   clusterItemsByVlan,
-  primaryVlanKeyForItem
+  buildVlanMemberGroups
 } from 'src/v3/vlanSortLayout';
 import { isSwitchLikeIcon } from 'src/utils/shape2dLayout';
 import {
@@ -1098,9 +1098,10 @@ export const useScene = () => {
   ]);
 
   /**
-   * 2D v3 "Układanie VLAN (2v)": pack leaves into per-VLAN density groups,
-   * tidy each VLAN group to minimise cable crossings, seat groups (Ułóż
-   * grupy), then the same Test tidy + diagonal-fan as 1v.
+   * 2D v3 "Układanie VLAN (2v)": pack leaves into per-(switch, VLAN) density
+   * groups, tidy each group to minimise cable crossings, seat those explicit
+   * groups (Ułóż grupy — membership fixed, not re-derived from proximity),
+   * then Test tidy + diagonal-fan still scoped to the same VLAN member sets.
    */
   const runLayoutByVlanGroupsV2 = useCallback(() => {
     const state = getState();
@@ -1112,32 +1113,20 @@ export const useScene = () => {
 
     const gridStep = getGridSnapStep(gridStyle);
     const connectors = view.connectors ?? [];
+    const vlanGroups = buildVlanMemberGroups({
+      items: viewItems,
+      modelItems: state.model.items,
+      connectors,
+      perHub: true
+    });
+    const groupMemberIds = vlanGroups.map((g) => g.memberIds);
+
     const clustered = clusterItemsByVlan({
       items: viewItems,
       modelItems: state.model.items,
       connectors,
-      gridStep
-    });
-
-    // Explicit VLAN membership (same keys as clusterItemsByVlan).
-    const modelById = new Map(
-      state.model.items.map((item) => [item.id, item] as const)
-    );
-    const byVlan = new Map<string, string[]>();
-    viewItems.forEach((viewItem) => {
-      const vlan = primaryVlanKeyForItem({
-        itemId: viewItem.id,
-        modelItem: modelById.get(viewItem.id),
-        modelItems: state.model.items,
-        connectors
-      });
-      if (!vlan) return;
-      const list = byVlan.get(vlan) ?? [];
-      list.push(viewItem.id);
-      byVlan.set(vlan, list);
-    });
-    const vlanGroups = Array.from(byVlan.values()).filter((ids) => {
-      return ids.length >= 2;
+      gridStep,
+      perHub: true
     });
 
     beginHistoryTransaction();
@@ -1153,8 +1142,8 @@ export const useScene = () => {
       });
     }
 
-    // Within each VLAN group: port-order tidy, then crossings 2-opt.
-    vlanGroups.forEach((ids) => {
+    // Within each VLAN block: port-order tidy, then crossings 2-opt.
+    groupMemberIds.forEach((ids) => {
       const latest = getState();
       const latestView = getItemByIdOrThrow(
         latest.model.views,
@@ -1209,7 +1198,7 @@ export const useScene = () => {
       });
     });
 
-    // Seat VLAN density groups around their switches (same as "Ułóż grupy").
+    // Seat explicit VLAN blocks around their switches (membership fixed).
     const afterIntra = getState();
     const afterIntraView = getItemByIdOrThrow(
       afterIntra.model.views,
@@ -1219,7 +1208,8 @@ export const useScene = () => {
       items: afterIntraView.items ?? [],
       modelItems: afterIntra.model.items,
       connectors: afterIntraView.connectors ?? [],
-      gridStep
+      gridStep,
+      groupMemberIds
     });
 
     if (arranged.movedNodes > 0) {
@@ -1233,16 +1223,9 @@ export const useScene = () => {
       });
     }
 
-    // Test: tidy each density group + diagonal-fan untangle.
-    const live = getState();
-    const liveView = getItemByIdOrThrow(live.model.views, currentViewId).value;
-    const groups = computeDensityGroups({
-      items: liveView.items ?? [],
-      modelItems: live.model.items
-    });
-
-    groups.forEach((group) => {
-      const ids = group.memberIds;
+    // Test tidy: still per VLAN member set — never recomputeDensityGroups,
+    // which would merge adjacent VLAN blocks and port-order-interleave them.
+    groupMemberIds.forEach((ids) => {
       if (ids.length < 2) return;
 
       const latest = getState();
@@ -1272,13 +1255,15 @@ export const useScene = () => {
       });
     });
 
+    // Fan uses proximity groups; packs stay VLAN-separated so this won't
+    // interleave nodes (fan only writes connector routes).
     routeTestFanForDensityGroups({ skipHistory: true });
     endHistoryTransaction();
 
     return {
       vlanGroupCount: Math.max(clustered.vlanGroupCount, vlanGroups.length),
       movedNodes: clustered.movedNodes + arranged.movedNodes,
-      groupCount: groups.length
+      groupCount: vlanGroups.length
     };
   }, [
     beginHistoryTransaction,
