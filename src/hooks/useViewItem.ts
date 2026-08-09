@@ -1,13 +1,16 @@
 import { useMemo } from 'react';
-import { getItemByIdOrThrow } from 'src/utils';
 import { useScene } from 'src/hooks/useScene';
+import type { ViewItem } from 'src/types';
 
-export const useViewItem = (id: string) => {
+/**
+ * Current-view placement for a model item id.
+ * Returns `null` when the id is not on the active plan (e.g. stale selection
+ * after switching views) — never throws.
+ */
+export const useViewItem = (id: string): ViewItem | null => {
   const { items } = useScene();
 
-  const viewItem = useMemo(() => {
-    return getItemByIdOrThrow(items, id).value;
+  return useMemo(() => {
+    return items.find((item) => item.id === id) ?? null;
   }, [items, id]);
-
-  return viewItem;
 };

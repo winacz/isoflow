@@ -41,6 +41,10 @@ export const NodeControls = ({ id }: Props) => {
     setMode(newMode);
   }, []);
 
+  if (!viewItem) {
+    return null;
+  }
+
   return (
     <ControlsContainer>
       <Box

@@ -485,6 +485,15 @@ const PortRow = memo(
 PortRow.displayName = 'PortRow';
 
 export const NodeControls2d = ({ id }: Props) => {
+  const viewItem = useViewItem(id);
+  if (!viewItem) return null;
+  return <NodeControls2dLoaded id={id} viewItem={viewItem} />;
+};
+
+const NodeControls2dLoaded = ({
+  id,
+  viewItem
+}: Props & { viewItem: NonNullable<ReturnType<typeof useViewItem>> }) => {
   const {
     updateModelItem,
     updateViewItem,
@@ -508,7 +517,6 @@ export const NodeControls2d = ({ id }: Props) => {
   });
   // 2D v3 keeps nodes + ports only — no cable routing tools.
   const hasConnectorTools = supportsConnectorTools(projectionMode);
-  const viewItem = useViewItem(id);
   const modelItem = useModelItem(id);
   const modelItems = useModelStore((state) => {
     return state.items;

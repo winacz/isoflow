@@ -115,7 +115,29 @@ const initialState = () => {
       isRightSidebarOpen: INITIAL_UI_STATE.isRightSidebarOpen,
       actions: {
         setView: (view) => {
-          set({ view });
+          const prev = get().view;
+          if (prev === view) {
+            set({ view });
+            return;
+          }
+          // Drop selection tied to the previous plan — sidecars / IPAM jumps
+          // otherwise remount NodeControls with a view-item id that is gone.
+          set({
+            view,
+            itemControls: null,
+            selectedItemIds: [],
+            selectedWaypointIds: [],
+            focusedPortIds: [],
+            portAttention: null,
+            shape2dPortHover: null,
+            shape2dPortHoverPinned: false,
+            shape2dHeaderHoverItemId: null,
+            shape2dNodeHoverItemId: null,
+            shape2dEnlargedItemId: null,
+            nodeDescriptionDialogItemId: null,
+            contextMenu: null,
+            sviHover: null
+          });
         },
         setMainMenuOptions: (mainMenuOptions) => {
           set({ mainMenuOptions });

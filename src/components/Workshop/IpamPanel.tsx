@@ -1130,6 +1130,9 @@ export const IpamPanel = () => {
       const model = modelApi.getState();
       const mode = projectionModeForKind(activeTab.kind);
       uiStateActions.setWorkshopOpen(false);
+      // Clear before view swap so NodeControls never mounts with a foreign id.
+      uiStateActions.clearSelectedItemIds();
+      uiStateActions.setItemControls(null);
       changeView(activePlan.id, model);
       uiStateActions.setProjectionMode(mode);
       uiStateActions.setMode({

@@ -1,7 +1,8 @@
 import React, { useMemo } from 'react';
 import { Box, Typography } from '@mui/material';
 import { useUiStateStore } from 'src/stores/uiStateStore';
-import { useModelItem } from 'src/hooks/useModelItem';
+import { useModelStore } from 'src/stores/modelStore';
+import { useScene } from 'src/hooks/useScene';
 import { isShape2dIcon } from 'src/config';
 import { IconSelectionControls } from 'src/components/ItemControls/IconSelectionControls/IconSelectionControls';
 import { ShapeSelectionControls } from 'src/components/ItemControls/ShapeSelectionControls/ShapeSelectionControls';
@@ -24,7 +25,17 @@ const NodeControlsSwitcher = ({
   id: string;
   prefer2d: boolean;
 }) => {
-  const modelItem = useModelItem(id);
+  const { items } = useScene();
+  const modelItems = useModelStore((state) => state.items);
+  const onView = items.some((item) => item.id === id);
+  const modelItem = useMemo(() => {
+    return modelItems.find((item) => item.id === id) ?? null;
+  }, [modelItems, id]);
+
+  // Stale selection after plan switch — wait for a local item focus.
+  if (!onView || !modelItem) {
+    return prefer2d ? <EmptyPlanControls /> : null;
+  }
 
   if (prefer2d && isShape2dIcon(modelItem.icon)) {
     return <NodeControls2d id={id} />;
