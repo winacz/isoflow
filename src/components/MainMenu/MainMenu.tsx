@@ -25,9 +25,11 @@ import {
   exportAsJSON,
   buildProjectSnapshot,
   generateProjectFilename,
+  getProjectTabs,
   isPlanProjection,
   isPlan2dCanvas,
-  projectionPrefsKey
+  projectionPrefsKey,
+  ViewKindEnum
 } from 'src/utils';
 // Direct import: exportAsPdf renders React, so it is deliberately kept out of
 // the `src/utils` barrel to stop non-UI modules pulling in the whole app.
@@ -38,16 +40,22 @@ import { useScene } from 'src/hooks/useScene';
 import { MenuItem } from './MenuItem';
 
 type Props = {
-  /** Active 2D project name — shown next to the hamburger in one chip. */
-  planLabel?: string | null;
+  /**
+   * Compact trigger for the top ViewModeTabs bar (no floating chip).
+   * Default: floating tool-menu style chip.
+   */
+  embedded?: boolean;
 };
 
-export const MainMenu = ({ planLabel }: Props) => {
+export const MainMenu = ({ embedded = false }: Props) => {
   const [anchorEl, setAnchorEl] = useState<null | HTMLElement>(null);
   const [colorLabOpen, setColorLabOpen] = useState(false);
   const modelStoreApi = useModelStoreApi();
   const projectTitle = useModelStore((state) => {
     return state.title;
+  });
+  const views = useModelStore((state) => {
+    return state.views;
   });
   const modelActions = useModelStore((state) => {
     return state.actions;
@@ -64,6 +72,9 @@ export const MainMenu = ({ planLabel }: Props) => {
   const activeViewId = useUiStateStore((state) => {
     return state.view;
   });
+  const isWorkshopOpen = useUiStateStore((state) => {
+    return state.isWorkshopOpen;
+  });
   const uiStateActions = useUiStateStore((state) => {
     return state.actions;
   });
@@ -79,6 +90,18 @@ export const MainMenu = ({ planLabel }: Props) => {
   const showIsoflowVersion =
     !isPlanProjection(projectionMode) &&
     mainMenuOptions.includes('VERSION');
+
+  const planLabel = useMemo(() => {
+    if (isWorkshopOpen) return null;
+    const tabs = getProjectTabs(views, projectTitle);
+    const plan = tabs.find(
+      (tab) =>
+        tab.viewId === activeViewId &&
+        (tab.kind === ViewKindEnum.PLAN_2D ||
+          tab.kind === ViewKindEnum.PLAN_2D_V3)
+    );
+    return plan?.label ?? null;
+  }, [views, projectTitle, activeViewId, isWorkshopOpen]);
 
   const onToggleMenu = useCallback(
     (event: React.MouseEvent<HTMLButtonElement>) => {
@@ -257,6 +280,58 @@ export const MainMenu = ({ planLabel }: Props) => {
     return null;
   }
 
+  const trigger = (
+    <Box
+      sx={{
+        display: 'flex',
+        alignItems: 'center',
+        minHeight: embedded
+          ? 44
+          : (theme) => theme.customVars.toolMenu.height
+      }}
+    >
+      <IconButton
+        Icon={<MenuIcon />}
+        name="Main menu"
+        onClick={onToggleMenu}
+        isActive={isMainMenuOpen}
+      />
+      {!embedded && planLabel ? (
+        <>
+          <Box
+            aria-hidden
+            sx={{
+              alignSelf: 'stretch',
+              width: '1px',
+              bgcolor: 'divider',
+              my: 1
+            }}
+          />
+          <Typography
+            component="span"
+            title={planLabel}
+            sx={{
+              px: 1.5,
+              pr: 1.75,
+              fontSize: 13,
+              fontWeight: 600,
+              color: 'text.primary',
+              letterSpacing: 0.01,
+              maxWidth: 220,
+              overflow: 'hidden',
+              whiteSpace: 'nowrap',
+              textOverflow: 'ellipsis',
+              userSelect: 'none',
+              lineHeight: 1.2
+            }}
+          >
+            {planLabel}
+          </Typography>
+        </>
+      ) : null}
+    </Box>
+  );
+
   return (
     <Box
       sx={{
@@ -266,53 +341,7 @@ export const MainMenu = ({ planLabel }: Props) => {
         gap: 1
       }}
     >
-      <UiElement>
-        <Box
-          sx={{
-            display: 'flex',
-            alignItems: 'center',
-            minHeight: (theme) => theme.customVars.toolMenu.height
-          }}
-        >
-          <IconButton
-            Icon={<MenuIcon />}
-            name="Main menu"
-            onClick={onToggleMenu}
-          />
-          {planLabel ? (
-            <>
-              <Box
-                aria-hidden
-                sx={{
-                  alignSelf: 'stretch',
-                  width: '1px',
-                  bgcolor: 'divider',
-                  my: 1
-                }}
-              />
-              <Typography
-                component="span"
-                title={planLabel}
-                sx={{
-                  px: 1.5,
-                  pr: 1.75,
-                  fontSize: 13,
-                  fontWeight: 600,
-                  color: 'text.primary',
-                  letterSpacing: 0.01,
-                  maxWidth: 220,
-                  overflow: 'hidden',
-                  whiteSpace: 'nowrap',
-                  textOverflow: 'ellipsis',
-                  userSelect: 'none',
-                  lineHeight: 1.2
-                }}
-              >
-                {planLabel}
-              </Typography>
-            </>
-          ) : null}
-        </Box>
+      {embedded ? trigger : <UiElement>{trigger}</UiElement>}
 
         <Menu
           anchorEl={anchorEl}
@@ -322,7 +351,7 @@ export const MainMenu = ({ planLabel }: Props) => {
           }}
           elevation={0}
           sx={{
-            mt: 2
+            mt: embedded ? 0.5 : 2
           }}
           MenuListProps={{
             sx: {
@@ -443,7 +472,6 @@ export const MainMenu = ({ planLabel }: Props) => {
             )}
           </Card>
         </Menu>
-      </UiElement>
 
       <BackgroundColorLab
         open={colorLabOpen}

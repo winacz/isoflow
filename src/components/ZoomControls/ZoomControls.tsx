@@ -7,7 +7,9 @@ import {
   GridOffOutlined as GridOffIcon,
   SearchOutlined as LoupeOnIcon,
   SearchOffOutlined as LoupeOffIcon,
-  BubbleChartOutlined as DensityGroupsIcon
+  BubbleChartOutlined as DensityGroupsIcon,
+  StickyNote2Outlined as DescriptionLabelsIcon,
+  StickyNote2 as DescriptionLabelsOnIcon
 } from '@mui/icons-material';
 import { Stack, Box, Typography, Divider } from '@mui/material';
 import { toPx } from 'src/utils';
@@ -33,6 +35,9 @@ export const ZoomControls = () => {
   const showLoupe = useUiStateStore((state) => {
     return state.showLoupe;
   });
+  const showDescriptionLabels = useUiStateStore((state) => {
+    return state.showDescriptionLabels;
+  });
   const animateConnectors = useUiStateStore((state) => {
     return state.animateConnectors;
   });
@@ -47,6 +52,7 @@ export const ZoomControls = () => {
   });
   const { fitToView } = useDiagramUtils();
   const minZoom = isPlanProjection(projectionMode) ? MIN_ZOOM_2D : MIN_ZOOM;
+  const isPlan = isPlanProjection(projectionMode);
   const isTwoDV3 = projectionMode === 'TWO_D_V3';
 
   return (
@@ -114,6 +120,26 @@ export const ZoomControls = () => {
             }
             onClick={toggleDensity}
             isActive={densityVisible}
+          />
+        </UiElement>
+      )}
+      {isPlan && (
+        <UiElement>
+          <IconButton
+            name={
+              showDescriptionLabels
+                ? 'Ukryj plakietki'
+                : 'Pokaż plakietki'
+            }
+            Icon={
+              showDescriptionLabels ? (
+                <DescriptionLabelsOnIcon />
+              ) : (
+                <DescriptionLabelsIcon sx={{ opacity: 0.55 }} />
+              )
+            }
+            onClick={uiStateStoreActions.toggleShowDescriptionLabels}
+            isActive={showDescriptionLabels}
           />
         </UiElement>
       )}

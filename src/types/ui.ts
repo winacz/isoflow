@@ -15,6 +15,11 @@ interface AlgorithmsControls {
   type: 'ALGORITHMS';
 }
 
+/** Sidebar: plan-wide PoE warnings list. */
+interface PoeWarningsControls {
+  type: 'POE_WARNINGS';
+}
+
 /** Sidebar: edit a custom switch template (from device selection). */
 interface EditDeviceTemplateControls {
   type: 'EDIT_DEVICE_TEMPLATE';
@@ -27,6 +32,7 @@ export type ItemControls =
   | ItemReference
   | AddItemControls
   | AlgorithmsControls
+  | PoeWarningsControls
   | EditDeviceTemplateControls;
 
 export interface Mouse {
@@ -301,6 +307,11 @@ export interface UiState {
    * Cleared when selecting elsewhere or clearing selection.
    */
   shape2dEnlargedItemId: string | null;
+  /**
+   * Plan 2D: open the node description / notes dialog for this item id.
+   * Set from the header “(i)” control (DOM or interaction-layer hit-test).
+   */
+  nodeDescriptionDialogItemId: string | null;
   sviHover: {
     vlan: number;
     ip?: string;
@@ -316,6 +327,8 @@ export interface UiState {
   /** Whether the background grid is drawn (logical snap grid is always active). */
   showGrid: boolean;
   showLoupe: boolean;
+  /** Global toggle for Plan 2D plakietki (per-node opt-in still required). */
+  showDescriptionLabels: boolean;
   animateConnectors: boolean;
   /** Plan device chassis look (ZoomControls popover). */
   nodeVisualStyle: import('src/styles/nodeVisualStyles').NodeVisualStyleId;
@@ -354,8 +367,12 @@ export interface UiState {
   routingStyle: 'ORTHOGONAL' | 'DIAGONAL' | 'BUS' | 'STRAIGHT';
   /** Whether the Workshop view is currently active. */
   isWorkshopOpen: boolean;
+  /** Full-screen plan gallery (tiles) instead of jumping into a plan. */
+  isPlanPickerOpen: boolean;
   /** Active workshop sub-section (templates creator vs IPAM). */
   workshopSection: 'templates' | 'ipam';
+  /** Active sub-tab inside Workshop IPAM (devices / vlans / changelog). */
+  workshopIpamTab: 'devices' | 'vlans' | 'changelog';
   /**
    * Plan (2D): right item-controls dock is visible.
    * When false, only a reopen chevron is shown on the right edge.
@@ -405,6 +422,7 @@ export interface UiStateActions {
   setShape2dHeaderHoverItemId: (itemId: string | null) => void;
   setShape2dNodeHoverItemId: (itemId: string | null) => void;
   setShape2dEnlargedItemId: (itemId: string | null) => void;
+  setNodeDescriptionDialogItemId: (itemId: string | null) => void;
   setSviHover: (
     hover: UiState['sviHover']
   ) => void;
@@ -416,8 +434,10 @@ export interface UiStateActions {
   setProjectionMode: (projectionMode: ProjectionMode) => void;
   setShowGrid: (showGrid: boolean) => void;
   setShowLoupe: (showLoupe: boolean) => void;
+  setShowDescriptionLabels: (show: boolean) => void;
   toggleShowGrid: () => void;
   toggleShowLoupe: () => void;
+  toggleShowDescriptionLabels: () => void;
   toggleAnimateConnectors: () => void;
   setNodeVisualStyle: (
     style: import('src/styles/nodeVisualStyles').NodeVisualStyleId
@@ -437,7 +457,9 @@ export interface UiStateActions {
   toggleSimplePaths: () => void;
   setRoutingStyle: (style: UiState['routingStyle']) => void;
   setWorkshopOpen: (isWorkshopOpen: boolean) => void;
+  setPlanPickerOpen: (isPlanPickerOpen: boolean) => void;
   setWorkshopSection: (section: UiState['workshopSection']) => void;
+  setWorkshopIpamTab: (tab: UiState['workshopIpamTab']) => void;
   setRightSidebarOpen: (isOpen: boolean) => void;
   toggleRightSidebar: () => void;
 }

@@ -11,3 +11,8 @@ export {
   getShape2dHeaderAtPoint,
   getShape2dBodyAtPoint
 } from './renderer';
+export {
+  getShape2dInfoButtonAtPoint,
+  getShape2dInfoSlotMetrics,
+  isLocalPointInShape2dInfoSlot
+} from './shape2dInfoSlot';

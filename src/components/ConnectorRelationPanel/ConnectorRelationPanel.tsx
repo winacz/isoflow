@@ -79,6 +79,10 @@ export const ConnectorRelationPanel = ({
 
   const isMismatchLink = linkSummary.linkMode === 'mismatch';
   const isTrunkLink = linkSummary.linkMode === 'trunk';
+  // Same VLAN on both ends → only the footer summary. Differing access VLANs
+  // (or mismatch) → show per endpoint. Trunk → allowed list in the footer.
+  const showEndpointVlan =
+    isMismatchLink || linkSummary.vlansDiffer;
 
   return (
     <UiElement
@@ -232,31 +236,33 @@ export const ConnectorRelationPanel = ({
                     )}
                   </Box>
                   
-                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.75 }}>
-                    <Typography sx={{ fontSize: 10, color: 'text.secondary', fontWeight: 600, width: 30, letterSpacing: 0.5 }}>
-                      VLAN
-                    </Typography>
-                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
-                      {endpoint.vlanColor && (
-                        <Box sx={{ width: 6, height: 6, borderRadius: '50%', bgcolor: endpoint.vlanColor }} />
-                      )}
-                      <Typography
-                        sx={{
-                          fontSize: 11,
-                          fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
-                          color: 'text.primary',
-                          fontWeight: 500
-                        }}
-                      >
-                        {endpoint.vlan}
-                        {endpoint.isNonVlanAware && (
-                          <Box component="span" sx={{ fontSize: 9, color: 'text.secondary', ml: 0.5, fontWeight: 600 }}>
-                            (VLAN unaware)
-                          </Box>
-                        )}
+                  {showEndpointVlan && (
+                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.75 }}>
+                      <Typography sx={{ fontSize: 10, color: 'text.secondary', fontWeight: 600, width: 30, letterSpacing: 0.5 }}>
+                        VLAN
                       </Typography>
+                      <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+                        {endpoint.vlanColor && (
+                          <Box sx={{ width: 6, height: 6, borderRadius: '50%', bgcolor: endpoint.vlanColor }} />
+                        )}
+                        <Typography
+                          sx={{
+                            fontSize: 11,
+                            fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
+                            color: 'text.primary',
+                            fontWeight: 500
+                          }}
+                        >
+                          {endpoint.vlan}
+                          {endpoint.isNonVlanAware && (
+                            <Box component="span" sx={{ fontSize: 9, color: 'text.secondary', ml: 0.5, fontWeight: 600 }}>
+                              (VLAN unaware)
+                            </Box>
+                          )}
+                        </Typography>
+                      </Box>
                     </Box>
-                  </Box>
+                  )}
                   
                   {endpoint.ip && (
                     <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.75 }}>
@@ -307,7 +313,7 @@ export const ConnectorRelationPanel = ({
           borderTop: '1px solid',
           borderColor: 'divider',
           display: 'flex',
-          alignItems: 'center',
+          alignItems: 'flex-start',
           gap: 1
         }}
       >
@@ -317,6 +323,7 @@ export const ConnectorRelationPanel = ({
             height: 12,
             borderRadius: '50%',
             flexShrink: 0,
+            mt: '2px',
             bgcolor: isTrunkLink
               ? undefined
               : linkSummary.vlanColor ??
@@ -325,7 +332,7 @@ export const ConnectorRelationPanel = ({
             border: '1px solid rgba(0,0,0,0.12)'
           }}
         />
-        <Typography sx={{ fontSize: 12, fontWeight: 600 }}>
+        <Typography sx={{ fontSize: 12, fontWeight: 600, lineHeight: 1.35 }}>
           {linkSummary.vlanLabel}
         </Typography>
       </Box>

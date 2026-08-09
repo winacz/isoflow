@@ -9,6 +9,8 @@ interface Props {
   onClick: (e: React.MouseEvent<HTMLButtonElement>) => void;
   tooltipPosition?: TooltipProps['placement'];
   disabled?: boolean;
+  /** Allow wider content (e.g. icon + count). */
+  autoWidth?: boolean;
 }
 
 export const IconButton = ({
@@ -17,7 +19,8 @@ export const IconButton = ({
   onClick,
   isActive = false,
   disabled = false,
-  tooltipPosition = 'bottom'
+  tooltipPosition = 'bottom',
+  autoWidth = false
 }: Props) => {
   const theme = useTheme();
   const iconColor = useMemo(() => {
@@ -48,12 +51,14 @@ export const IconButton = ({
         sx={{
           borderRadius: 0,
           height: theme.customVars.toolMenu.height,
-          width: theme.customVars.toolMenu.height,
+          width: autoWidth ? 'auto' : theme.customVars.toolMenu.height,
+          minWidth: theme.customVars.toolMenu.height,
           maxWidth: '100%',
-          minWidth: 'auto',
           bgcolor: isActive ? 'primary.light' : undefined,
           p: 0,
-          m: 0
+          px: autoWidth ? 0.75 : 0,
+          m: 0,
+          overflow: 'visible'
         }}
       >
         <Box

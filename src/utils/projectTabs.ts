@@ -79,7 +79,10 @@ export const defaultLabelForKind = (
     case ViewKindEnum.PLAN_2D:
       return name === PLAN_2D_VIEW_NAME ? '2D' : name;
     case ViewKindEnum.PLAN_2D_V3: {
-      // Menu under the "2D" tab — show project name, not "2D …".
+      // Custom diagram name (e.g. "Szafa - Schowek"); fall back to project title.
+      if (name && name !== PLAN_2D_V3_VIEW_NAME) {
+        return name;
+      }
       return truncateProjectLabel(projectTitle?.trim() || 'Untitled');
     }
     default:

@@ -25,6 +25,8 @@ export const sviSchema = z.object({
   vlan: z.string().max(32),
   /** IPv4/IPv6 address, optionally with prefix (e.g. 10.0.0.1/24). */
   ip: z.string().max(64).optional(),
+  /** When true, SVI gets address via DHCP — `ip` is ignored / UI disabled. */
+  dhcp: z.boolean().optional(),
   vlanColor: z.string().max(32).optional()
 });
 

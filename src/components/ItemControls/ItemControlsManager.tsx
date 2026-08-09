@@ -8,6 +8,7 @@ import { ShapeSelectionControls } from 'src/components/ItemControls/ShapeSelecti
 import { DeviceTemplateEditorControls } from 'src/components/ItemControls/DeviceCreator/DeviceTemplateEditorControls';
 import { MultiNodeControls } from 'src/components/ItemControls/MultiNodeControls/MultiNodeControls';
 import { StressV3TestButton } from 'src/components/StressV3TestButton/StressV3TestButton';
+import { PoeWarningsPanel } from 'src/components/PoeWarnings/PoeWarningsSidebarControl';
 import { isPlanProjection } from 'src/utils';
 import { NodeControls } from './NodeControls/NodeControls';
 import { NodeControls2d } from './NodeControls/NodeControls2d';
@@ -32,7 +33,7 @@ const NodeControlsSwitcher = ({
   return <NodeControls id={id} />;
 };
 
-/** 2D plan with an empty selection: hint only (layout tools live in RMB menu). */
+/** 2D plan with an empty selection: placement hint. */
 const EmptyPlanControls = () => {
   const projectionMode = useUiStateStore((state) => {
     return state.projectionMode;
@@ -130,6 +131,8 @@ export const ItemControlsManager = () => {
         ) : (
           <IconSelectionControls />
         );
+      case 'POE_WARNINGS':
+        return <PoeWarningsPanel />;
       case 'EDIT_DEVICE_TEMPLATE':
         return (
           <DeviceTemplateEditorControls

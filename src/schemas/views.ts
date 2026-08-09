@@ -19,8 +19,10 @@ export const viewItemSchema = z.object({
   /** Relative size of the floating description card (1 = default). */
   labelScale: z.number().positive().optional(),
   /**
-   * 2D description callout tip offset from the node anchor (world px).
+   * 2D description callout tip (card) offset from the node centre (world px).
+   * Free placement; stem attaches to the nearest chassis edge.
    * x right, y down (negative = above the device).
+   * Legacy: may be a perimeter attach point when paired with `labelHeight`.
    */
   labelOffset: coords.optional(),
   /**

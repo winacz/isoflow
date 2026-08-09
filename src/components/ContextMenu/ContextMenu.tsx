@@ -1,5 +1,12 @@
 import React, { useCallback, useLayoutEffect, useMemo, useState } from 'react';
-import { Divider, ListSubheader, Menu, MenuItem } from '@mui/material';
+import {
+  Box,
+  Divider,
+  ListItemIcon,
+  ListSubheader,
+  Menu,
+  MenuItem
+} from '@mui/material';
 import { Coords } from 'src/types';
 
 export interface ContextMenuEntry {
@@ -9,6 +16,8 @@ export interface ContextMenuEntry {
   /** Non-clickable section title. */
   isHeader?: boolean;
   dividerBefore?: boolean;
+  /** Optional leading pictogram (e.g. PoE warning triangle). */
+  icon?: React.ReactNode;
 }
 
 interface Props {
@@ -124,6 +133,9 @@ export const ContextMenu = ({
             letterSpacing: 0.5,
             textTransform: 'uppercase',
             color: 'text.secondary'
+          },
+          '& .MuiListItemIcon-root': {
+            minWidth: 28
           }
         }
       }}
@@ -142,6 +154,21 @@ export const ContextMenu = ({
                   item.onClick?.();
                 }}
               >
+                {item.icon ? (
+                  <ListItemIcon>
+                    <Box
+                      sx={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        width: 18,
+                        height: 18
+                      }}
+                    >
+                      {item.icon}
+                    </Box>
+                  </ListItemIcon>
+                ) : null}
                 {item.label}
               </MenuItem>
             )}

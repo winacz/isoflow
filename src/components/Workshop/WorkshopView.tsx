@@ -3,6 +3,7 @@ import { Box, Stack, ToggleButton, ToggleButtonGroup } from '@mui/material';
 import { DeviceCreatorPanel } from 'src/components/ItemControls/DeviceCreator/DeviceCreatorPanel';
 import { ConnectionMatrixCreatorPanel } from 'src/components/ConnectionMatrixTopology/ConnectionMatrixCreatorPanel';
 import { IpamPanel } from 'src/components/Workshop/IpamPanel';
+import { VIEW_MODE_TABS_BAR_HEIGHT } from 'src/components/ViewModeTabs/ViewModeTabs';
 import { useModelStore, useModelStoreApi } from 'src/stores/modelStore';
 import { useUiStateStore } from 'src/stores/uiStateStore';
 
@@ -37,7 +38,9 @@ export const WorkshopView = () => {
         bgcolor: '#f1f5f9',
         zIndex: 10,
         display: 'flex',
-        flexDirection: 'column'
+        flexDirection: 'column',
+        pt: `${VIEW_MODE_TABS_BAR_HEIGHT}px`,
+        boxSizing: 'border-box'
       }}
     >
       {section === 'templates' && (
@@ -47,7 +50,7 @@ export const WorkshopView = () => {
           alignItems="center"
           sx={{
             position: 'absolute',
-            top: 16,
+            top: VIEW_MODE_TABS_BAR_HEIGHT + 16,
             right: 24,
             zIndex: 100
           }}
@@ -66,21 +69,23 @@ export const WorkshopView = () => {
         </Stack>
       )}
 
-      {section === 'ipam' ? (
-        <IpamPanel />
-      ) : (
-        <>
-          {creatorType === 'SWITCH' && (
-            <DeviceCreatorPanel
-              isWorkshopMode
-              onSave={handleSaveDevice}
-              onCancel={() => {}}
-            />
-          )}
+      <Box sx={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
+        {section === 'ipam' ? (
+          <IpamPanel />
+        ) : (
+          <>
+            {creatorType === 'SWITCH' && (
+              <DeviceCreatorPanel
+                isWorkshopMode
+                onSave={handleSaveDevice}
+                onCancel={() => {}}
+              />
+            )}
 
-          {creatorType === 'MATRIX' && <ConnectionMatrixCreatorPanel />}
-        </>
-      )}
+            {creatorType === 'MATRIX' && <ConnectionMatrixCreatorPanel />}
+          </>
+        )}
+      </Box>
     </Box>
   );
 };

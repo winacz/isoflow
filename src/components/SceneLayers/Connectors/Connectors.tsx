@@ -13,9 +13,10 @@ import {
   getStackFanOffsetsPx,
   expandConnectorIdsThroughPatchPanels,
   isPlan2dCanvas,
+  isSwitchLikeIcon,
   type ConnectorJump
 } from 'src/utils';
-import { TILE_SIZE_2D } from 'src/config';
+import { getModelItemPorts, TILE_SIZE_2D } from 'src/config';
 import { Connector } from './Connector';
 import { Connector2d } from './Connector2d';
 
@@ -117,14 +118,6 @@ export const Connectors = ({ connectors }: Props) => {
     selectedItemId ??
     (selectedConnectorId ? null : shape2dNodeHoverItemId);
 
-  const hasSelectionFocus = Boolean(
-    selectedConnectorId ||
-      (isPlan2dCanvas(projectionMode) && selectedItemId) ||
-      (isPlan2dCanvas(projectionMode) &&
-        !selectedItemId &&
-        !selectedConnectorId &&
-        shape2dNodeHoverItemId)
-  );
   const softDim = mode.type === 'DRAG_ITEMS';
 
   /** Directly related cables + their patch-panel bridge siblings (both segments). */
@@ -137,17 +130,22 @@ export const Connectors = ({ connectors }: Props) => {
     }
 
     if (relationItemId) {
+      const modelItem = modelItems.find((item) => item.id === relationItemId);
+      const portCount = modelItem ? getModelItemPorts(modelItem).length : 0;
+      // Whole-node highlight only for simple endpoints (1 port, not a switch).
+      // Switches / multi-port devices: only when a specific port is focused.
+      const showAllItemCables =
+        !isSwitchLikeIcon(modelItem?.icon) && portCount === 1;
+
       connectors.forEach((connector) => {
-        const related =
-          focusedPortIds.length > 0 && selectedItemId === relationItemId
-            ? focusedPortIds.some((portId) => {
-                return connectorUsesPort(
-                  connector,
-                  relationItemId,
-                  portId
-                );
-              })
-            : connectorTouchesItem(connector, relationItemId);
+        let related = false;
+        if (focusedPortIds.length > 0 && selectedItemId === relationItemId) {
+          related = focusedPortIds.some((portId) => {
+            return connectorUsesPort(connector, relationItemId, portId);
+          });
+        } else if (showAllItemCables) {
+          related = connectorTouchesItem(connector, relationItemId);
+        }
         if (related) direct.add(connector.id);
       });
     }
@@ -194,6 +192,13 @@ export const Connectors = ({ connectors }: Props) => {
       modelItems
     });
   }, [projectionMode, shape2dPortHover, connectors, modelItems]);
+
+  // Dim unrelated cables only when something is actually emphasized.
+  const hasSelectionFocus = Boolean(
+    (focusedConnectorIds && focusedConnectorIds.size > 0) ||
+      (portHoverConnectorIds && portHoverConnectorIds.size > 0) ||
+      highlightedConnectorId
+  );
 
   const pathInputs = useMemo(() => {
     if (!isPlan2dCanvas(projectionMode)) return [];

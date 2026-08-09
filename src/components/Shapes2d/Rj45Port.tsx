@@ -31,6 +31,8 @@ interface Props {
   poe?: 'IN' | 'OUT' | null;
   /** Endpoint powered by PoE — green bolt next to port number. */
   poweredByPoe?: boolean;
+  /** poweredByPoe but peer is not a PoE-out switch — warning beside the bolt. */
+  poePowerWarning?: boolean;
   /**
    * Where the port number sits relative to the jack.
    * Bottom-row ports should use `above` so labels stay inside the chassis.
@@ -59,6 +61,7 @@ export const Rj45Port = ({
   hideStatusBar = false,
   poe = null,
   poweredByPoe = false,
+  poePowerWarning = false,
   labelPosition = 'above',
   isHovered = false
 }: Props) => {
@@ -429,23 +432,91 @@ export const Rj45Port = ({
         </Typography>
         {(poe || poweredByPoe) && (
           <Box
-            component="svg"
-            viewBox="0 0 12 16"
-            aria-hidden
+            title={
+              poweredByPoe && poePowerWarning
+                ? 'PoE: po drugiej stronie nie ma switcha / portu PoE Out'
+                : poweredByPoe && !poe
+                  ? 'Urządzenie zasilane PoE'
+                  : undefined
+            }
             sx={{
-              width: Math.max(7, Math.round(numberSize * 0.95)),
-              height: Math.max(9, Math.round(numberSize * 1.2)),
-              display: 'block',
-              flexShrink: 0
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: '2px',
+              flexShrink: 0,
+              pointerEvents: poePowerWarning ? 'auto' : 'none'
             }}
           >
-            <path
-              d="M7.2 0.5L2.1 8.2h3.1L3.4 15.5 10.2 6.4H6.8L7.2 0.5z"
-              fill={poweredByPoe && !poe ? '#22c55e' : '#facc15'}
-              stroke={poweredByPoe && !poe ? '#15803d' : '#ca8a04'}
-              strokeWidth={0.4}
-              strokeLinejoin="round"
-            />
+            {(() => {
+              const boltW = Math.max(11, Math.round(numberSize * 1.35));
+              const boltH = Math.max(14, Math.round(numberSize * 1.7));
+              return (
+                <>
+                  <Box
+                    component="svg"
+                    viewBox="0 0 12 16"
+                    aria-hidden
+                    sx={{
+                      width: boltW,
+                      height: boltH,
+                      display: 'block',
+                      flexShrink: 0,
+                      filter:
+                        poweredByPoe && !poe
+                          ? 'drop-shadow(0 0 2px rgba(34, 197, 94, 0.55))'
+                          : undefined
+                    }}
+                  >
+                    <path
+                      d="M7.2 0.5L2.1 8.2h3.1L3.4 15.5 10.2 6.4H6.8L7.2 0.5z"
+                      fill={poweredByPoe && !poe ? '#22c55e' : '#facc15'}
+                      stroke={poweredByPoe && !poe ? '#15803d' : '#ca8a04'}
+                      strokeWidth={0.55}
+                      strokeLinejoin="round"
+                    />
+                  </Box>
+                  {poweredByPoe && poePowerWarning && (
+                    <Box
+                      title="PoE: po drugiej stronie nie ma switcha / portu PoE Out"
+                      sx={{
+                        width: boltW,
+                        height: boltH,
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        cursor: 'help',
+                        flexShrink: 0
+                      }}
+                    >
+                      <Box
+                        component="svg"
+                        viewBox="0 0 16 14"
+                        sx={{
+                          width: '100%',
+                          height: '100%',
+                          display: 'block'
+                        }}
+                      >
+                        <path
+                          d="M8 1.2L14.8 13H1.2L8 1.2z"
+                          fill="#facc15"
+                          stroke="#ca8a04"
+                          strokeWidth={0.9}
+                          strokeLinejoin="round"
+                        />
+                        <path
+                          d="M8 5v4.2"
+                          stroke="#78350f"
+                          strokeWidth={1.3}
+                          strokeLinecap="round"
+                        />
+                        <circle cx={8} cy={11} r={0.7} fill="#78350f" />
+                      </Box>
+                    </Box>
+                  )}
+                </>
+              );
+            })()}
           </Box>
         )}
       </Box>

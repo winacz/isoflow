@@ -15,6 +15,7 @@ import { IconButton } from 'src/components/IconButton/IconButton';
 import { UiElement } from 'src/components/UiElement/UiElement';
 import { useScene } from 'src/hooks/useScene';
 import { TEXTBOX_DEFAULTS } from 'src/config';
+import { PoeWarningsToolButton } from 'src/components/PoeWarnings/PoeWarningsSidebarControl';
 import {
   generateId,
   removeMidWaypointsByIds,
@@ -227,9 +228,14 @@ export const ToolMenu = ({
         name={isTwoD ? 'Add shape' : 'Add item'}
         Icon={<AddIcon />}
         onClick={openAddMenu}
-        isActive={mode.type === 'PLACE_ICON'}
+        isActive={
+          mode.type === 'PLACE_ICON' ||
+          (isTwoD &&
+            (mode.type === 'TEXTBOX' || mode.type === 'RECTANGLE.DRAW'))
+        }
       />
-      {canDrawConnections && (
+      {/* Plan 2D: connector & text live in Add panel — keep classic tools on isometric. */}
+      {!isTwoD && canDrawConnections && (
         <IconButton
           name="Connector"
           Icon={<ConnectorIcon />}
@@ -265,12 +271,15 @@ export const ToolMenu = ({
           isActive={mode.type === 'RECTANGLE.DRAW'}
         />
       )}
-      <IconButton
-        name="Text"
-        Icon={<TitleIcon />}
-        onClick={createTextBoxProxy}
-        isActive={mode.type === 'TEXTBOX'}
-      />
+      {!isTwoD && (
+        <IconButton
+          name="Text"
+          Icon={<TitleIcon />}
+          onClick={createTextBoxProxy}
+          isActive={mode.type === 'TEXTBOX'}
+        />
+      )}
+      {isTwoD && <PoeWarningsToolButton />}
     </Stack>
   );
 

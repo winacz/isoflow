@@ -8,6 +8,12 @@ import { iconsSchema } from './icons';
 import { colorsSchema } from './colors';
 import { deviceTemplatesSchema } from './deviceTemplates';
 
+/**
+ * Project-wide VLAN display names (key = VLAN id, e.g. "10" → "Biuro").
+ * Colour always comes from `getVlanColor` / VLAN id.
+ */
+export const vlanNamesSchema = z.record(z.string().max(100)).optional();
+
 export const modelSchema = z
   .object({
     version: z.string().max(10).optional(),
@@ -17,7 +23,8 @@ export const modelSchema = z
     views: viewsSchema,
     icons: iconsSchema,
     colors: colorsSchema,
-    deviceTemplates: deviceTemplatesSchema.optional()
+    deviceTemplates: deviceTemplatesSchema.optional(),
+    vlanNames: vlanNamesSchema
   })
   .superRefine((model, ctx) => {
     const issues = validateModel({ ...INITIAL_DATA, ...model });

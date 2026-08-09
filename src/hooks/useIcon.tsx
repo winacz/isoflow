@@ -238,6 +238,7 @@ export const useIcon = (
           svis={svis}
           ip={itemIp}
           nodeIcon={itemNodeIcon}
+          // Visual reserved square; clicks handled by NodeDescriptionLabels overlay.
           hasDescription={itemHasDescription}
           connectedPortIds={connectedPortIds}
           mismatchPortIds={mismatchPortIds}

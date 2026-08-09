@@ -15,6 +15,9 @@ import {
   getShape2dPortAtTile,
   getScaledShape2dItemIds,
   getShape2dHeaderAtPoint,
+  getShape2dInfoButtonAtPoint,
+  getModelItemSize,
+  computeHighlightScale,
   hasMovedTile,
   getAnchorAtTile,
   getItemByIdOrThrow,
@@ -512,6 +515,49 @@ const mousedown: ModeActionsAction = ({
   let clickedPortId: string | null = null;
 
   if (isPlanProjection(uiState.projectionMode)) {
+    // “(i)” wins over header enlarge / port / cable — open description now.
+    const scaledIds = getHighlightedItemIdsForPortHit({
+      uiState,
+      scene,
+      modelItems: model.items
+    });
+    let enlargeScale = 1.15;
+    if (uiState.shape2dEnlargedItemId) {
+      const enlModel = model.items.find(
+        (m) => m.id === uiState.shape2dEnlargedItemId
+      );
+      const enlSize = enlModel
+        ? getModelItemSize(enlModel) ??
+          (enlModel.icon ? getShape2dSize(enlModel.icon) : null)
+        : null;
+      if (enlSize) {
+        enlargeScale = computeHighlightScale(
+          enlSize.width * enlSize.height,
+          uiState.zoom
+        );
+      }
+    }
+    const infoId = getShape2dInfoButtonAtPoint({
+      point: tilePoint,
+      items: scene.items,
+      modelItems: model.items,
+      scaledItemIds: scaledIds,
+      scale: enlargeScale
+    });
+    if (infoId) {
+      uiState.actions.setShape2dEnlargedItemId(null);
+      uiState.actions.setSelectedItemIds([infoId]);
+      uiState.actions.setItemControls({ type: 'ITEM', id: infoId });
+      uiState.actions.setNodeDescriptionDialogItemId(infoId);
+      uiState.actions.setMode(
+        produce(uiState.mode, (draft) => {
+          draft.mousedownItem = null;
+          draft.marquee = null;
+        })
+      );
+      return;
+    }
+
     const selectedConnectorId =
       uiState.itemControls?.type === 'CONNECTOR'
         ? uiState.itemControls.id
@@ -1180,21 +1226,50 @@ export const Cursor: ModeActions = {
             scene,
             modelItems: model.items
           });
-          const headerId = getShape2dHeaderAtPoint({
+          const clickedId = uiState.mode.mousedownItem.id;
+          let enlargeScale = 1.15;
+          if (uiState.shape2dEnlargedItemId === clickedId) {
+            const enlModel = model.items.find((m) => m.id === clickedId);
+            const enlSize = enlModel
+              ? getModelItemSize(enlModel) ??
+                (enlModel.icon ? getShape2dSize(enlModel.icon) : null)
+              : null;
+            if (enlSize) {
+              enlargeScale = computeHighlightScale(
+                enlSize.width * enlSize.height,
+                uiState.zoom
+              );
+            }
+          }
+          const infoId = getShape2dInfoButtonAtPoint({
             point,
             items: scene.items,
             modelItems: model.items,
             scaledItemIds: scaledIds,
-            scale: 1.15
+            scale: enlargeScale
           });
-          const clickedId = uiState.mode.mousedownItem.id;
-          if (headerId === clickedId) {
-            // Toggle enlarge on the same header; switch when another header.
-            uiState.actions.setShape2dEnlargedItemId(
-              uiState.shape2dEnlargedItemId === clickedId ? null : clickedId
-            );
-          } else {
+          if (infoId === clickedId) {
+            // “(i)” corner — open description dialog; never treat as header enlarge.
             uiState.actions.setShape2dEnlargedItemId(null);
+            uiState.actions.setSelectedItemIds([clickedId]);
+            uiState.actions.setItemControls({ type: 'ITEM', id: clickedId });
+            uiState.actions.setNodeDescriptionDialogItemId(clickedId);
+          } else {
+            const headerId = getShape2dHeaderAtPoint({
+              point,
+              items: scene.items,
+              modelItems: model.items,
+              scaledItemIds: scaledIds,
+              scale: enlargeScale
+            });
+            if (headerId === clickedId) {
+              // Toggle enlarge on the same header; switch when another header.
+              uiState.actions.setShape2dEnlargedItemId(
+                uiState.shape2dEnlargedItemId === clickedId ? null : clickedId
+              );
+            } else {
+              uiState.actions.setShape2dEnlargedItemId(null);
+            }
           }
         }
       } else if (uiState.mode.mousedownItem.type === 'RECTANGLE') {

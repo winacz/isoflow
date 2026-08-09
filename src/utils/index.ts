@@ -38,6 +38,7 @@ export * from './htmlExportHover';
 export * from './cloneModelItem';
 export * from './clonePlanView';
 export * from './vlanIpHint';
+export * from './ipamDraft';
 export * from './portHoverDom';
 export * from './viewportCulling';
 export * from './domRectCache';
@@ -49,6 +50,7 @@ export * from './loupeRevealLock';
 export * from './loupePortHit';
 export * from './nodeHighlightScale';
 export * from './nodeDescription';
+export * from './shape2dInfoSlot';
 export * from './connectorBodyCrossingCache';
 
 // NOT re-exported here on purpose: offscreenPlanRenderer, exportAsHtml and

@@ -62,7 +62,8 @@ export const modelFromModelStore = (modelStore: ModelStore): Model => {
     icons: modelStore.icons,
     items: modelStore.items,
     views: modelStore.views,
-    deviceTemplates: modelStore.deviceTemplates ?? []
+    deviceTemplates: modelStore.deviceTemplates ?? [],
+    vlanNames: modelStore.vlanNames
   };
 };
 

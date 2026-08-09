@@ -309,6 +309,69 @@ export const SHAPES_2D: Icon[] = [
     isIsometric: false
   },
   {
+    id: SHAPE_2D_VOIP_ID,
+    name: 'VoIP',
+    url: '',
+    collection: 'Stacje',
+    isIsometric: false
+  },
+  {
+    id: SHAPE_2D_PRINTER_ID,
+    name: 'Drukarka',
+    url: '',
+    collection: 'Stacje',
+    isIsometric: false
+  },
+  {
+    id: SHAPE_2D_CAMERA_V2_ID,
+    name: 'Kamera',
+    url: '',
+    collection: 'Stacje',
+    isIsometric: false
+  },
+  {
+    id: SHAPE_2D_CAMERA_ID,
+    name: 'Kamera (kompakt)',
+    url: '',
+    collection: 'Stacje',
+    isIsometric: false
+  },
+  {
+    id: SHAPE_2D_AP_ID,
+    name: 'Access Point',
+    url: '',
+    collection: 'Stacje',
+    isIsometric: false
+  },
+  {
+    id: SHAPE_2D_SMARTPHONE_ID,
+    name: 'Smartfon',
+    url: '',
+    collection: 'Stacje',
+    isIsometric: false
+  },
+  {
+    id: SHAPE_2D_TABLET_ID,
+    name: 'Tablet',
+    url: '',
+    collection: 'Stacje',
+    isIsometric: false
+  },
+  {
+    id: SHAPE_2D_IOT_ID,
+    name: 'IoT',
+    url: '',
+    collection: 'Stacje',
+    isIsometric: false
+  },
+  {
+    id: SHAPE_2D_NAS_ID,
+    name: 'NAS',
+    url: '',
+    collection: 'Stacje',
+    isIsometric: false
+  },
+  {
     id: SHAPE_2D_BLANKING_ID,
     name: 'Zaślepka',
     url: '',
@@ -579,10 +642,13 @@ export const INITIAL_UI_STATE = {
   },
   projectionMode: 'ISOMETRIC' as const,
   isWorkshopOpen: false,
+  isPlanPickerOpen: false,
   workshopSection: 'templates' as const,
+  workshopIpamTab: 'devices' as const,
   isRightSidebarOpen: true,
   showGrid: true,
   showLoupe: true,
+  showDescriptionLabels: true,
   animateConnectors: false,
   nodeVisualStyle: 'default' as const,
   gridStyle: 'rack' as const,

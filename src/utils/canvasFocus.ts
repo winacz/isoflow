@@ -2,7 +2,7 @@ import type { Coords, ModelItem, Size, ViewItem } from 'src/types';
 import {
   MIN_ZOOM_2D,
   MAX_ZOOM,
-  getShape2dPorts,
+  getModelItemPorts,
   getModelItemSize
 } from 'src/config';
 import {
@@ -68,7 +68,9 @@ export const getPortCenterPx = ({
     return getShape2dCenterPosition(viewItem.tile, size);
   }
 
-  const port = getShape2dPorts(modelItem?.icon ?? '').find((candidate) => {
+  const port = (
+    modelItem ? getModelItemPorts(modelItem) : []
+  ).find((candidate) => {
     return candidate.id === portId;
   });
 

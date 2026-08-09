@@ -15,7 +15,8 @@ export const ControlsContainer = ({ header, children }: Props) => {
         width: '100%',
         display: 'flex',
         flexDirection: 'column',
-        pb: 2
+        pb: 2,
+        bgcolor: 'transparent'
       }}
     >
       {header && (
@@ -24,12 +25,13 @@ export const ControlsContainer = ({ header, children }: Props) => {
             width: '100%',
             zIndex: 1,
             position: 'sticky',
-            bgcolor: 'background.paper',
+            bgcolor: 'rgba(255,255,255,0.55)',
+            backdropFilter: 'blur(6px)',
             top: 0
           }}
         >
           {header}
-          <Divider />
+          <Divider sx={{ borderColor: 'rgba(148, 163, 184, 0.35)' }} />
         </Box>
       )}
       <Box

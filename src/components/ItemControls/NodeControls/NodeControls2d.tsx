@@ -17,8 +17,6 @@ import {
   Slider,
   Stack,
   Switch,
-  Tab,
-  Tabs,
   TextField,
   Typography,
   IconButton
@@ -61,10 +59,8 @@ import {
   type Shape2dPort
 } from 'src/config';
 import {
-  findSharedVlanColor,
   getPortStatusColor,
   isVlan1,
-  VLAN_1_COLOR,
   TRUNK_RAINBOW_CSS,
   PORT_SPEED_OPTIONS,
   parseDeviceColor,
@@ -79,6 +75,8 @@ import {
   collectOccupiedRackUnits,
   isFullWidthRackItem,
   getVlanIpHint,
+  findSwitchAccessUplinkForPort,
+  type SwitchAccessUplink,
   supportsConnectorTools,
   DESCRIPTION_SUMMARY_MAX,
   clampDescriptionSummary,
@@ -99,9 +97,12 @@ import { useModelStore } from 'src/stores/modelStore';
 import { useModelItem } from 'src/hooks/useModelItem';
 import type { ModelItem } from 'src/types';
 import { ColorPicker } from 'src/components/ColorSelector/ColorPicker';
+import { VlanCatalogPicker } from 'src/components/VlanCatalogPicker/VlanCatalogPicker';
 import { MarkdownEditor } from 'src/components/MarkdownEditor/MarkdownEditor';
 import { ControlsContainer } from '../components/ControlsContainer';
 import { DeleteButton } from '../components/DeleteButton';
+
+type SidebarSection = 'personalizacja' | 'ustawienia' | 'opis';
 
 interface Props {
   id: string;
@@ -179,6 +180,8 @@ type PortRowProps = {
   config: PortConfig;
   vlanColor: string;
   isTrunk: boolean;
+  /** For endpoint nodes: VLAN inherited from peer switch access port. */
+  accessUplink: SwitchAccessUplink | null;
   onToggle: (portId: string, expanded: boolean, additive: boolean) => void;
   onUpdatePort: (portId: string, patch: Partial<PortConfig>) => void;
   onApplyVlanNumber: (portId: string, vlan: string) => void;
@@ -197,6 +200,7 @@ const PortRow = memo(
     config,
     vlanColor,
     isTrunk,
+    accessUplink,
     onToggle,
     onUpdatePort,
     onApplyVlanNumber,
@@ -204,13 +208,71 @@ const PortRow = memo(
     setPortRef
   }: PortRowProps) => {
     const iface = portIface(port, index);
-    const subtitle = [
-      config.label || null,
-      isPc ? 'VLAN 1' : config.vlan ? `VLAN ${config.vlan}` : null,
-      config.type === 'trunk' ? 'trunk' : null
-    ]
-      .filter(Boolean)
-      .join(' · ');
+    const subtitle = (() => {
+      if (isPc) {
+        // Access / VLAN shown once in the summary card below — not as a second line.
+        return config.label?.trim() || '';
+      }
+      const parts: string[] = [];
+      if (config.label) parts.push(config.label);
+      if (config.vlan) parts.push(`VLAN ${config.vlan}`);
+      if (config.type === 'trunk') parts.push('trunk');
+      return parts.join(' · ');
+    })();
+
+    const accessSummary = isPc ? (
+      <Box
+        sx={{
+          px: 1,
+          py: 0.55,
+          borderRadius: 1,
+          border: '1px solid',
+          borderColor: 'divider',
+          bgcolor: 'action.hover',
+          minWidth: 0,
+          flex: 1
+        }}
+      >
+        <Typography
+          sx={{
+            fontSize: 12,
+            fontWeight: 700,
+            lineHeight: 1.25
+          }}
+        >
+          {accessUplink?.isTrunk
+            ? 'Access · port switcha jest trunk'
+            : accessUplink
+              ? `Access · VLAN ${accessUplink.vlan}`
+              : 'Access · brak połączenia ze switchem'}
+        </Typography>
+        {accessUplink ? (
+          <Typography
+            sx={{
+              fontSize: 11,
+              color: 'text.secondary',
+              lineHeight: 1.25,
+              whiteSpace: 'nowrap',
+              overflow: 'hidden',
+              textOverflow: 'ellipsis'
+            }}
+            title={`${accessUplink.switchName} · port ${accessUplink.switchPortLabel}`}
+          >
+            {accessUplink.switchName} · port {accessUplink.switchPortLabel}
+          </Typography>
+        ) : (
+          <Typography
+            sx={{
+              fontSize: 11,
+              color: 'text.secondary',
+              lineHeight: 1.25
+            }}
+          >
+            VLAN dziedziczony z portu access switcha
+          </Typography>
+        )}
+      </Box>
+    ) : null;
 
     return (
       <Accordion
@@ -267,32 +329,50 @@ const PortRow = memo(
               border: '1px solid rgba(0,0,0,0.12)'
             }}
           />
-          <Box sx={{ minWidth: 0, flex: 1 }}>
-            <Typography
-              sx={{
-                fontSize: 12,
-                fontWeight: 700,
-                fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
-                lineHeight: 1.2
-              }}
-            >
-              {iface}
-            </Typography>
-            {subtitle && (
+          {isPc ? (
+            <>
               <Typography
                 sx={{
-                  fontSize: 10,
-                  color: 'text.secondary',
+                  fontSize: 12,
+                  fontWeight: 700,
+                  fontFamily:
+                    'ui-monospace, SFMono-Regular, Menlo, monospace',
                   lineHeight: 1.2,
-                  whiteSpace: 'nowrap',
-                  overflow: 'hidden',
-                  textOverflow: 'ellipsis'
+                  flexShrink: 0
                 }}
               >
-                {subtitle}
+                {iface}
               </Typography>
-            )}
-          </Box>
+              {accessSummary}
+            </>
+          ) : (
+            <Box sx={{ minWidth: 0, flex: 1 }}>
+              <Typography
+                sx={{
+                  fontSize: 12,
+                  fontWeight: 700,
+                  fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
+                  lineHeight: 1.2
+                }}
+              >
+                {iface}
+              </Typography>
+              {subtitle && (
+                <Typography
+                  sx={{
+                    fontSize: 10,
+                    color: 'text.secondary',
+                    lineHeight: 1.2,
+                    whiteSpace: 'nowrap',
+                    overflow: 'hidden',
+                    textOverflow: 'ellipsis'
+                  }}
+                >
+                  {subtitle}
+                </Typography>
+              )}
+            </Box>
+          )}
         </AccordionSummary>
         {isExpanded && (
           <AccordionDetails sx={{ px: 1, pt: 0, pb: 1 }}>
@@ -318,43 +398,14 @@ const PortRow = memo(
                   onUpdatePort(port.id, { name: e.target.value });
                 }}
               />
-              <Stack direction="row" spacing={0.75} alignItems="center">
-                {isPc ? (
-                  <TextField
-                    label="VLAN"
-                    size="small"
-                    fullWidth
-                    sx={fieldSx}
-                    value="1"
-                    disabled
-                    helperText="PC nie taguje VLAN — zawsze VLAN 1"
-                  />
-                ) : (
-                  <TextField
-                    label="VLAN"
-                    size="small"
-                    fullWidth
-                    sx={fieldSx}
+              {!isPc && (
+                <Stack direction="row" spacing={0.75} alignItems="flex-start">
+                  <VlanCatalogPicker
                     value={config.vlan ?? ''}
-                    onChange={(e) => {
-                      onApplyVlanNumber(port.id, e.target.value);
+                    onChange={(vlan) => {
+                      onApplyVlanNumber(port.id, vlan);
                     }}
                   />
-                )}
-                {isPc ? (
-                  <Box
-                    title="VLAN 1 (PC)"
-                    sx={{
-                      width: 28,
-                      height: 28,
-                      borderRadius: '4px',
-                      flexShrink: 0,
-                      bgcolor: VLAN_1_COLOR,
-                      border: '1px solid',
-                      borderColor: 'divider'
-                    }}
-                  />
-                ) : (
                   <Box
                     title={
                       config.vlan
@@ -363,6 +414,7 @@ const PortRow = memo(
                     }
                     sx={{
                       flexShrink: 0,
+                      mt: 0.5,
                       display: 'flex',
                       alignItems: 'center',
                       '& .MuiFormControl-root': {
@@ -377,30 +429,31 @@ const PortRow = memo(
                       }}
                     />
                   </Box>
-                )}
-              </Stack>
+                </Stack>
+              )}
               <Stack direction="row" spacing={0.75}>
-                <FormControl
-                  size="small"
-                  fullWidth
-                  sx={fieldSx}
-                  disabled={isPc}
-                >
-                  <InputLabel id={`port-type-${port.id}`}>Typ</InputLabel>
-                  <Select
-                    labelId={`port-type-${port.id}`}
-                    label="Typ"
-                    value={isPc ? 'access' : config.type ?? 'access'}
-                    onChange={(e) => {
-                      onUpdatePort(port.id, {
-                        type: e.target.value as 'access' | 'trunk'
-                      });
-                    }}
+                {!isPc && (
+                  <FormControl
+                    size="small"
+                    fullWidth
+                    sx={fieldSx}
                   >
-                    <MenuItem value="access">Access</MenuItem>
-                    {!isPc && <MenuItem value="trunk">Trunk</MenuItem>}
-                  </Select>
-                </FormControl>
+                    <InputLabel id={`port-type-${port.id}`}>Typ</InputLabel>
+                    <Select
+                      labelId={`port-type-${port.id}`}
+                      label="Typ"
+                      value={config.type ?? 'access'}
+                      onChange={(e) => {
+                        onUpdatePort(port.id, {
+                          type: e.target.value as 'access' | 'trunk'
+                        });
+                      }}
+                    >
+                      <MenuItem value="access">Access</MenuItem>
+                      <MenuItem value="trunk">Trunk</MenuItem>
+                    </Select>
+                  </FormControl>
+                )}
                 <FormControl size="small" fullWidth sx={fieldSx}>
                   <InputLabel id={`port-speed-${port.id}`}>Speed</InputLabel>
                   <Select
@@ -460,7 +513,6 @@ export const NodeControls2d = ({ id }: Props) => {
   const modelItems = useModelStore((state) => {
     return state.items;
   });
-  const [personalizacjaOpen, setPersonalizacjaOpen] = useState(false);
   const [expandedPortId, setExpandedPortId] = useState<string | null>(
     focusedPortIds.length === 1 ? focusedPortIds[0] : null
   );
@@ -590,10 +642,14 @@ export const NodeControls2d = ({ id }: Props) => {
   /** Management IP — DIN switches + endpoint / server nodes. */
   const showIpField = isPc || isDinSwitch || isServerTemplate;
   const deviceColor = parseDeviceColor(modelItem.color);
-  const [sidebarTab, setSidebarTab] = useState<
-    'ports' | 'svi' | 'opis' | null
-  >(null);
+  const [sidebarTab, setSidebarTab] = useState<SidebarSection | null>(
+    'personalizacja'
+  );
   const [notesDialogOpen, setNotesDialogOpen] = useState(false);
+  const showPortsSection = !isCabinet && !isBlanking && !isPatchPanel;
+  const showVlanySection = isSwitch;
+  const showUstawieniaSection =
+    isPc || showIpField || showPortsSection || showVlanySection;
   const svis = modelItem.svis ?? [];
   const rackUnits = isBlanking
     ? modelItem.rackUnits ?? BLANKING_DEFAULT_UNITS
@@ -621,16 +677,39 @@ export const NodeControls2d = ({ id }: Props) => {
         ...defaultPortConfig(),
         ...(modelItem.ports?.[port.id] ?? {})
       };
+      const accessUplink = isPc
+        ? findSwitchAccessUplinkForPort({
+            itemId: viewItem.id,
+            portId: port.id,
+            connectors,
+            modelItems
+          })
+        : null;
       const isTrunk = !isPc && config.type === 'trunk';
-      const vlanColor = getPortStatusColor(config.vlan, index, {
-        isPc,
-        customColor: config.vlanColor,
+      const displayVlan = isPc
+        ? accessUplink && !accessUplink.isTrunk
+          ? accessUplink.vlan
+          : undefined
+        : config.vlan;
+      const vlanColor = getPortStatusColor(displayVlan, index, {
+        isPc: isPc && !(accessUplink && !accessUplink.isTrunk),
+        customColor: isPc
+          ? accessUplink?.vlanColorCustom
+          : config.vlanColor,
         modelItems,
-        portType: isTrunk ? 'trunk' : 'access'
+        portType:
+          isTrunk || accessUplink?.isTrunk ? 'trunk' : 'access'
       });
-      return { port, index, config, vlanColor, isTrunk };
+      return { port, index, config, vlanColor, isTrunk, accessUplink };
     });
-  }, [shapePorts, modelItem.ports, isPc, modelItems]);
+  }, [
+    shapePorts,
+    modelItem.ports,
+    isPc,
+    modelItems,
+    connectors,
+    viewItem.id
+  ]);
 
   const multiPortDraft = useMemo(() => {
     if (!multiPort) {
@@ -677,17 +756,17 @@ export const NodeControls2d = ({ id }: Props) => {
     };
   }, [multiPort, focusedPortIds, modelItem.ports]);
 
-  // Collapse tabs / personalizacja when switching to another device.
+  // Reset section when switching to another device.
   useEffect(() => {
-    setSidebarTab(null);
-    setPersonalizacjaOpen(false);
+    setSidebarTab('personalizacja');
     setExpandedSviId(null);
   }, [viewItem.id]);
 
   useEffect(() => {
     if (focusedPortIds.length === 0) return;
+    if (!showPortsSection) return;
 
-    setSidebarTab('ports');
+    setSidebarTab('ustawienia');
 
     if (focusedPortIds.length === 1) {
       const portId = focusedPortIds[0];
@@ -709,21 +788,14 @@ export const NodeControls2d = ({ id }: Props) => {
     return () => {
       window.clearTimeout(timer);
     };
-  }, [focusedPortIds]);
+  }, [focusedPortIds, showPortsSection]);
 
-  // Collapse invalid tabs when device type has no Porty/SVI.
+  // Keep ustawienia available even when some sub-blocks are missing.
   useEffect(() => {
-    if (
-      (isCabinet || isBlanking) &&
-      (sidebarTab === 'ports' || sidebarTab === 'svi')
-    ) {
-      setSidebarTab(null);
-      return;
+    if (sidebarTab === 'ustawienia' && !showUstawieniaSection) {
+      setSidebarTab('personalizacja');
     }
-    if (!isSwitch && sidebarTab === 'svi') {
-      setSidebarTab(null);
-    }
-  }, [isCabinet, isBlanking, isSwitch, sidebarTab]);
+  }, [showUstawieniaSection, sidebarTab]);
 
   const updatePort = useCallback(
     (portId: string, patch: Partial<PortConfig>) => {
@@ -768,52 +840,30 @@ export const NodeControls2d = ({ id }: Props) => {
 
   const applyVlanNumber = useCallback(
     (portId: string, vlan: string) => {
-      const current = modelItem.ports?.[portId] ?? defaultPortConfig();
-      const shared = findSharedVlanColor(vlan, modelItems);
-      const local = current.vlanColor?.trim() || '';
-      const nextColor = isVlan1(vlan) ? '' : shared || local;
-
       beginHistoryTransaction();
+      // Color is derived from VLAN id globally — do not persist per-port overrides.
       updatePort(portId, {
         vlan,
-        vlanColor: nextColor
+        vlanColor: ''
       });
-      if (nextColor && !isVlan1(vlan)) {
-        setVlanColorAcrossModel(vlan, nextColor);
-      }
       endHistoryTransaction();
     },
-    [
-      beginHistoryTransaction,
-      endHistoryTransaction,
-      modelItem.ports,
-      modelItems,
-      setVlanColorAcrossModel,
-      updatePort
-    ]
+    [beginHistoryTransaction, endHistoryTransaction, updatePort]
   );
 
   const applyVlanNumberMulti = useCallback(
     (vlan: string) => {
-      const shared = findSharedVlanColor(vlan, modelItems);
-      const nextColor = isVlan1(vlan) ? '' : shared || '';
-
       beginHistoryTransaction();
       updatePorts(focusedPortIds, {
         vlan,
-        vlanColor: nextColor
+        vlanColor: ''
       });
-      if (nextColor && !isVlan1(vlan)) {
-        setVlanColorAcrossModel(vlan, nextColor);
-      }
       endHistoryTransaction();
     },
     [
       beginHistoryTransaction,
       endHistoryTransaction,
       focusedPortIds,
-      modelItems,
-      setVlanColorAcrossModel,
       updatePorts
     ]
   );
@@ -858,7 +908,7 @@ export const NodeControls2d = ({ id }: Props) => {
     ];
     const newId = next[next.length - 1]?.id ?? null;
     updateModelItem(viewItem.id, { svis: next });
-    setSidebarTab('svi');
+    setSidebarTab('ustawienia');
     setExpandedSviId(newId);
   }, [modelItem.svis, updateModelItem, viewItem.id]);
 
@@ -875,66 +925,91 @@ export const NodeControls2d = ({ id }: Props) => {
 
   const applySviVlan = useCallback(
     (sviId: string, vlan: string) => {
-      const current = (modelItem.svis ?? []).find((svi) => {
-        return svi.id === sviId;
-      });
-      const shared = findSharedVlanColor(vlan, modelItems);
-      const local = current?.vlanColor?.trim() || '';
-      const nextColor = isVlan1(vlan) ? '' : shared || local;
-
       beginHistoryTransaction();
-      updateSvi(sviId, { vlan, vlanColor: nextColor });
-      if (nextColor && !isVlan1(vlan)) {
-        setVlanColorAcrossModel(vlan, nextColor);
-      }
+      updateSvi(sviId, { vlan, vlanColor: '' });
       endHistoryTransaction();
     },
-    [
-      beginHistoryTransaction,
-      endHistoryTransaction,
-      modelItem.svis,
-      modelItems,
-      setVlanColorAcrossModel,
-      updateSvi
-    ]
+    [beginHistoryTransaction, endHistoryTransaction, updateSvi]
   );
+
+  const toggleSection = useCallback((section: SidebarSection) => {
+    setSidebarTab((prev) => (prev === section ? null : section));
+  }, []);
+
+  const sectionTabs: { id: SidebarSection; label: string; show: boolean }[] = [
+    { id: 'personalizacja', label: 'Personalizacja', show: true },
+    {
+      id: 'ustawienia',
+      label: 'Ustawienia',
+      show: showUstawieniaSection
+    },
+    {
+      id: 'opis',
+      label: hasDescription ? 'Opis' : 'Opis (pusty)',
+      show: true
+    }
+  ];
 
   return (
     <ControlsContainer>
-      <Box sx={{ px: 1.5, pt: 1.25, pb: 0.5 }}>
-        <Accordion
-          disableGutters
-          elevation={0}
-          expanded={personalizacjaOpen}
-          onChange={(_, expanded) => {
-            setPersonalizacjaOpen(expanded);
-          }}
-          sx={{
-            bgcolor: 'transparent',
-            '&:before': { display: 'none' }
-          }}
-        >
-          <AccordionSummary
-            expandIcon={<ExpandMoreIcon sx={{ fontSize: 18 }} />}
-            sx={{
-              px: 0,
-              minHeight: 28,
-              '& .MuiAccordionSummary-content': { my: 0.25 }
-            }}
-          >
-            <Typography
-              sx={{
-                fontSize: 10,
-                fontWeight: 700,
-                letterSpacing: 0.5,
-                color: 'text.secondary',
-                textTransform: 'uppercase'
-              }}
-            >
-              Personalizacja
-            </Typography>
-          </AccordionSummary>
-          <AccordionDetails sx={{ px: 0, pt: 0.5, pb: 0.5 }}>
+      <Box
+        data-item-controls-sticky
+        sx={{
+          position: 'sticky',
+          top: 0,
+          zIndex: 2,
+          display: 'flex',
+          flexWrap: 'wrap',
+          gap: 0,
+          px: 0.75,
+          pt: 0.5,
+          bgcolor: 'rgba(255,255,255,0.55)',
+          backdropFilter: 'blur(8px)',
+          borderBottom: '1px solid',
+          borderColor: 'rgba(148, 163, 184, 0.28)'
+        }}
+      >
+        {sectionTabs
+          .filter((tab) => tab.show)
+          .map((tab) => {
+            const active = sidebarTab === tab.id;
+            return (
+              <Button
+                key={tab.id}
+                size="small"
+                disableElevation
+                onClick={() => toggleSection(tab.id)}
+                sx={{
+                  flex: '0 1 auto',
+                  minWidth: 0,
+                  textTransform: 'none',
+                  fontWeight: active ? 700 : 550,
+                  fontSize: 12.5,
+                  letterSpacing: 0.01,
+                  px: 1.35,
+                  py: 0.85,
+                  borderRadius: 0,
+                  color: active ? 'primary.main' : 'text.secondary',
+                  bgcolor: 'transparent',
+                  boxShadow: 'none',
+                  borderBottom: '2px solid',
+                  borderColor: active ? 'primary.main' : 'transparent',
+                  mb: '-1px',
+                  '&:hover': {
+                    bgcolor: 'rgba(15, 23, 42, 0.04)',
+                    color: active ? 'primary.main' : 'text.primary'
+                  }
+                }}
+              >
+                {tab.label}
+              </Button>
+            );
+          })}
+      </Box>
+
+      <Box sx={{ px: 1.5, pt: 1, pb: 0.5 }}>
+        {sidebarTab === 'personalizacja' && (
+          <Stack spacing={1.25}>
             <Stack
               direction="row"
               spacing={1}
@@ -1062,32 +1137,9 @@ export const NodeControls2d = ({ id }: Props) => {
                 />
               </Box>
             )}
-          </AccordionDetails>
-        </Accordion>
 
         {isPc && (
-          <FormControlLabel
-            sx={{ mt: 1, ml: 0, mr: 0 }}
-            control={
-              <Switch
-                size="small"
-                checked={Boolean(modelItem.poweredByPoe)}
-                onChange={(e) => {
-                  updateModelItem(viewItem.id, {
-                    poweredByPoe: e.target.checked
-                  });
-                }}
-              />
-            }
-            label={
-              <Typography sx={{ fontSize: 12.5, color: 'text.secondary' }}>
-                Urządzenie zasilane PoE
-              </Typography>
-            }
-          />
-        )}
-        {isPc && (
-          <Box sx={{ mt: 1.25 }}>
+          <Box>
             <Typography
               sx={{
                 fontSize: 10,
@@ -1157,87 +1209,13 @@ export const NodeControls2d = ({ id }: Props) => {
             </Box>
           </Box>
         )}
-        {showIpField && (
-          <Box sx={{ mt: 1.25 }}>
-            <Stack
-              direction="row"
-              alignItems="center"
-              justifyContent="space-between"
-              sx={{ mb: 0.5 }}
-            >
-              <Typography
-                sx={{
-                  fontSize: 10,
-                  fontWeight: 600,
-                  letterSpacing: 0.6,
-                  color: 'text.secondary',
-                  textTransform: 'uppercase'
-                }}
-              >
-                IP
-              </Typography>
-              <FormControlLabel
-                sx={{ m: 0, ml: 1 }}
-                control={
-                  <Switch
-                    size="small"
-                    checked={Boolean(modelItem.dhcp)}
-                    onChange={(e) => {
-                      updateModelItem(viewItem.id, {
-                        dhcp: e.target.checked || undefined
-                      });
-                    }}
-                  />
-                }
-                label={
-                  <Typography sx={{ fontSize: 12, color: 'text.secondary' }}>
-                    DHCP
-                  </Typography>
-                }
-              />
-            </Stack>
-            <TextField
-              fullWidth
-              size="small"
-              sx={fieldSx}
-              placeholder={
-                vlanIpHint.kind === 'suggestion'
-                  ? vlanIpHint.placeholder
-                  : 'np. 192.168.1.10/24'
-              }
-              value={modelItem.ip ?? ''}
-              disabled={Boolean(modelItem.dhcp)}
-              onChange={(e) => {
-                const text = e.target.value;
-                updateModelItem(viewItem.id, {
-                  ip: text.trim() ? text : undefined
-                });
-              }}
-              helperText={
-                modelItem.dhcp
-                  ? undefined
-                  : vlanIpHint.kind === 'suggestion'
-                    ? `Podpowiedź z VLAN: ${vlanIpHint.placeholder}`
-                    : vlanIpHint.kind === 'ambiguous'
-                      ? 'Nie jasna konfiguracja IP'
-                      : undefined
-              }
-              FormHelperTextProps={{
-                sx:
-                  vlanIpHint.kind === 'ambiguous'
-                    ? { color: 'warning.main', fontWeight: 600 }
-                    : undefined
-              }}
-            />
-          </Box>
-        )}
         {isPatchPanel && !isPatchPanelActive && (
-          <Alert severity="info" sx={{ mt: 1.25, py: 0, fontSize: 12 }}>
+          <Alert severity="info" sx={{ py: 0, fontSize: 12 }}>
             Umieść patch panel w szafie, aby włączyć porty i połączenia.
           </Alert>
         )}
         {isCabinet && (
-          <Box sx={{ mt: 1.25 }}>
+          <Box>
             <Typography
               sx={{
                 fontSize: 10,
@@ -1303,7 +1281,7 @@ export const NodeControls2d = ({ id }: Props) => {
           </Box>
         )}
         {isBlanking && (
-          <Box sx={{ mt: 1.25 }}>
+          <Box>
             <Typography
               sx={{
                 fontSize: 10,
@@ -1364,7 +1342,7 @@ export const NodeControls2d = ({ id }: Props) => {
           </Box>
         )}
         {isPatchPanel && (
-          <Box sx={{ mt: 1.25 }}>
+          <Box>
             <Typography
               sx={{
                 fontSize: 10,
@@ -1435,60 +1413,151 @@ export const NodeControls2d = ({ id }: Props) => {
             </Typography>
           </Box>
         )}
-      </Box>
+          </Stack>
+        )}
 
-      {!isPatchPanel && (
-      <Box sx={{ px: 1.5, pt: 0.5, pb: 1 }}>
-        <Box
-          data-item-controls-sticky
-          sx={{
-            position: 'sticky',
-            top: 0,
-            zIndex: 2,
-            bgcolor: 'background.paper',
-            borderBottom: '1px solid',
-            borderColor: 'divider',
-            mb: 0.5
-          }}
-        >
-          <Tabs
-            value={sidebarTab ?? false}
-            onChange={(_, value: 'ports' | 'svi' | 'opis') => {
-              setSidebarTab((prev) => {
-                return prev === value ? null : value;
-              });
-            }}
-            sx={{
-              minHeight: 32,
-              '& .MuiTab-root': {
-                minHeight: 32,
-                py: 0,
-                px: 1,
-                fontSize: 11,
-                fontWeight: 700,
-                letterSpacing: 0.4,
-                textTransform: 'uppercase'
-              }
-            }}
-          >
-            {!isCabinet && !isBlanking && (
-              <Tab value="ports" label={`Porty (${shapePorts.length})`} />
+        {sidebarTab === 'ustawienia' && showUstawieniaSection && (
+          <Stack spacing={1.75}>
+            {isPc && (
+              <Box>
+              <Typography
+                sx={{
+                  fontSize: 10,
+                  fontWeight: 700,
+                  letterSpacing: 0.55,
+                  color: 'text.secondary',
+                  textTransform: 'uppercase',
+                  mb: 0.75
+                }}
+              >
+                PoE
+              </Typography>
+                <FormControlLabel
+                  sx={{ m: 0 }}
+                  control={
+                    <Switch
+                      size="small"
+                      checked={Boolean(modelItem.poweredByPoe)}
+                      onChange={(e) => {
+                        updateModelItem(viewItem.id, {
+                          poweredByPoe: e.target.checked
+                        });
+                      }}
+                    />
+                  }
+                  label={
+                    <Typography sx={{ fontSize: 12.5, color: 'text.secondary' }}>
+                      Urządzenie zasilane PoE
+                    </Typography>
+                  }
+                />
+              </Box>
             )}
-            {isSwitch && (
-              <Tab value="svi" label={`SVI (${svis.length})`} />
+
+            {showIpField && (
+              <Box>
+              <Typography
+                sx={{
+                  fontSize: 10,
+                  fontWeight: 700,
+                  letterSpacing: 0.55,
+                  color: 'text.secondary',
+                  textTransform: 'uppercase',
+                  mb: 0.75
+                }}
+              >
+                Adresacja
+              </Typography>
+                <Stack
+                  direction="row"
+                  alignItems="center"
+                  justifyContent="space-between"
+                  sx={{ mb: 0.5 }}
+                >
+                  <Typography
+                    sx={{
+                      fontSize: 10,
+                      fontWeight: 600,
+                      letterSpacing: 0.6,
+                      color: 'text.secondary',
+                      textTransform: 'uppercase'
+                    }}
+                  >
+                    IP
+                  </Typography>
+                  <FormControlLabel
+                    sx={{ m: 0, ml: 1 }}
+                    control={
+                      <Switch
+                        size="small"
+                        checked={Boolean(modelItem.dhcp)}
+                        onChange={(e) => {
+                          updateModelItem(viewItem.id, {
+                            dhcp: e.target.checked || undefined
+                          });
+                        }}
+                      />
+                    }
+                    label={
+                      <Typography sx={{ fontSize: 12, color: 'text.secondary' }}>
+                        DHCP
+                      </Typography>
+                    }
+                  />
+                </Stack>
+                <TextField
+                  fullWidth
+                  size="small"
+                  sx={fieldSx}
+                  placeholder={
+                    vlanIpHint.kind === 'suggestion'
+                      ? vlanIpHint.placeholder
+                      : 'np. 192.168.1.10/24'
+                  }
+                  value={modelItem.ip ?? ''}
+                  disabled={Boolean(modelItem.dhcp)}
+                  onChange={(e) => {
+                    const next = e.target.value;
+                    updateModelItem(viewItem.id, {
+                      ip: next.trim() ? next : undefined
+                    });
+                  }}
+                  helperText={
+                    modelItem.dhcp
+                      ? undefined
+                      : modelItem.ip?.trim()
+                        ? undefined
+                        : vlanIpHint.kind === 'suggestion'
+                          ? `Podpowiedź z VLAN: ${vlanIpHint.placeholder}`
+                          : vlanIpHint.kind === 'ambiguous'
+                            ? 'W tym VLAN są różne sieci IP — brak jednoznacznej podpowiedzi'
+                            : undefined
+                  }
+                  FormHelperTextProps={{
+                    sx:
+                      !modelItem.ip?.trim() && vlanIpHint.kind === 'ambiguous'
+                        ? { color: 'warning.main', fontWeight: 600 }
+                        : undefined
+                  }}
+                />
+              </Box>
             )}
-            <Tab
-              value="opis"
-              label={hasDescription ? 'Opis' : 'Opis (pusty)'}
-            />
-          </Tabs>
-        </Box>
 
-        {isSwitch ? (
-          <>
-
-            {sidebarTab === 'ports' && (
-              <>
+            {showPortsSection && (
+              <Box>
+              <Typography
+                sx={{
+                  fontSize: 10,
+                  fontWeight: 700,
+                  letterSpacing: 0.55,
+                  color: 'text.secondary',
+                  textTransform: 'uppercase',
+                  mb: 0.75
+                }}
+              >
+                Porty
+              </Typography>
+                <>
                 {multiPort && (
                   <Box
                     ref={multiPanelRef}
@@ -1538,19 +1607,10 @@ export const NodeControls2d = ({ id }: Props) => {
                         }}
                       />
                       {!isPc && (
-                        <TextField
-                          label="VLAN"
-                          size="small"
-                          fullWidth
-                          sx={fieldSx}
-                          placeholder={
-                            multiPortDraft.mixedVlan
-                              ? '(różne wartości)'
-                              : undefined
-                          }
+                        <VlanCatalogPicker
                           value={multiPortDraft.vlan}
-                          onChange={(e) => {
-                            applyVlanNumberMulti(e.target.value);
+                          onChange={(vlan) => {
+                            applyVlanNumberMulti(vlan);
                           }}
                         />
                       )}
@@ -1589,7 +1649,14 @@ export const NodeControls2d = ({ id }: Props) => {
                 )}
               <Stack spacing={0.4}>
                     {portSummaries.map(
-                      ({ port, index, config, vlanColor, isTrunk }) => {
+                      ({
+                        port,
+                        index,
+                        config,
+                        vlanColor,
+                        isTrunk,
+                        accessUplink
+                      }) => {
                         return (
                           <PortRow
                             key={port.id}
@@ -1603,6 +1670,7 @@ export const NodeControls2d = ({ id }: Props) => {
                             config={config}
                             vlanColor={vlanColor}
                             isTrunk={isTrunk}
+                            accessUplink={accessUplink}
                             onToggle={onTogglePort}
                             onUpdatePort={updatePort}
                             onApplyVlanNumber={applyVlanNumber}
@@ -1614,10 +1682,24 @@ export const NodeControls2d = ({ id }: Props) => {
                     )}
                   </Stack>
               </>
+              </Box>
             )}
 
-            {sidebarTab === 'svi' && (
-              <Stack spacing={0.75}>
+            {showVlanySection && (
+              <Box>
+              <Typography
+                sx={{
+                  fontSize: 10,
+                  fontWeight: 700,
+                  letterSpacing: 0.55,
+                  color: 'text.secondary',
+                  textTransform: 'uppercase',
+                  mb: 0.75
+                }}
+              >
+                Vlany / SVI
+              </Typography>
+                <Stack spacing={0.75}>
                 <Button
                   size="small"
                   variant="outlined"
@@ -1703,7 +1785,9 @@ export const NodeControls2d = ({ id }: Props) => {
                                 textOverflow: 'ellipsis'
                               }}
                             >
-                              {svi.ip?.trim() || 'brak IP'}
+                              {svi.dhcp
+                                ? 'DHCP'
+                                : svi.ip?.trim() || 'brak IP'}
                             </Typography>
                           </Box>
                         </AccordionSummary>
@@ -1713,16 +1797,12 @@ export const NodeControls2d = ({ id }: Props) => {
                               <Stack
                                 direction="row"
                                 spacing={0.75}
-                                alignItems="center"
+                                alignItems="flex-start"
                               >
-                                <TextField
-                                  label="VLAN"
-                                  size="small"
-                                  fullWidth
-                                  sx={fieldSx}
+                                <VlanCatalogPicker
                                   value={svi.vlan ?? ''}
-                                  onChange={(e) => {
-                                    applySviVlan(svi.id, e.target.value);
+                                  onChange={(vlan) => {
+                                    applySviVlan(svi.id, vlan);
                                   }}
                                 />
                                 <Box
@@ -1733,6 +1813,7 @@ export const NodeControls2d = ({ id }: Props) => {
                                   }
                                   sx={{
                                     flexShrink: 0,
+                                    mt: 0.5,
                                     display: 'flex',
                                     alignItems: 'center',
                                     '& .MuiFormControl-root': { m: 0 }
@@ -1759,10 +1840,30 @@ export const NodeControls2d = ({ id }: Props) => {
                                 fullWidth
                                 sx={fieldSx}
                                 placeholder="10.0.0.1/24"
-                                value={svi.ip ?? ''}
+                                value={svi.dhcp ? '' : svi.ip ?? ''}
+                                disabled={Boolean(svi.dhcp)}
                                 onChange={(e) => {
                                   updateSvi(svi.id, { ip: e.target.value });
                                 }}
+                              />
+                              <FormControlLabel
+                                sx={{ m: 0, ml: 0.25 }}
+                                control={
+                                  <Switch
+                                    size="small"
+                                    checked={Boolean(svi.dhcp)}
+                                    onChange={(e) => {
+                                      updateSvi(svi.id, {
+                                        dhcp: e.target.checked || undefined
+                                      });
+                                    }}
+                                  />
+                                }
+                                label={
+                                  <Typography sx={{ fontSize: 12 }}>
+                                    DHCP
+                                  </Typography>
+                                }
                               />
                               <Button
                                 size="small"
@@ -1786,116 +1887,14 @@ export const NodeControls2d = ({ id }: Props) => {
                   })
                 )}
               </Stack>
+              </Box>
             )}
-          </>
-        ) : (
-          sidebarTab === 'ports' && (
-            <>
-              {multiPort && (
-                <Box
-                  ref={multiPanelRef}
-                  sx={{
-                    mb: 0.75,
-                    p: 1,
-                    borderRadius: 1,
-                    border: '1px solid',
-                    borderColor: 'primary.main',
-                    bgcolor: 'action.hover'
-                  }}
-                >
-                  <Typography sx={{ fontSize: 11, fontWeight: 700, mb: 0.75 }}>
-                    Zaznaczono {focusedPortIds.length} portów
-                  </Typography>
-                  <Stack spacing={1}>
-                    <TextField
-                      label="Nazwa"
-                      size="small"
-                      fullWidth
-                      sx={fieldSx}
-                      placeholder={
-                        multiPortDraft.mixedName
-                          ? '(różne wartości)'
-                          : undefined
-                      }
-                      value={multiPortDraft.name}
-                      onChange={(e) => {
-                        updatePorts(focusedPortIds, { name: e.target.value });
-                      }}
-                    />
-                    {!isPc && (
-                      <TextField
-                        label="VLAN"
-                        size="small"
-                        fullWidth
-                        sx={fieldSx}
-                        placeholder={
-                          multiPortDraft.mixedVlan
-                            ? '(różne wartości)'
-                            : undefined
-                        }
-                        value={multiPortDraft.vlan}
-                        onChange={(e) => {
-                          applyVlanNumberMulti(e.target.value);
-                        }}
-                      />
-                    )}
-                    {!isPc && (
-                      <FormControl size="small" fullWidth sx={fieldSx}>
-                        <InputLabel id="multi-port-type-simple">Typ</InputLabel>
-                        <Select
-                          labelId="multi-port-type-simple"
-                          label="Typ"
-                          value={
-                            multiPortDraft.mixedType ? '' : multiPortDraft.type
-                          }
-                          displayEmpty={multiPortDraft.mixedType}
-                          onChange={(e) => {
-                            const next = e.target.value as 'access' | 'trunk';
-                            if (!next) return;
-                            updatePorts(focusedPortIds, { type: next });
-                          }}
-                        >
-                          {multiPortDraft.mixedType && (
-                            <MenuItem value="" disabled>
-                              (różne wartości)
-                            </MenuItem>
-                          )}
-                          <MenuItem value="access">Access</MenuItem>
-                          <MenuItem value="trunk">Trunk</MenuItem>
-                        </Select>
-                      </FormControl>
-                    )}
-                  </Stack>
-                </Box>
-              )}
-              <Stack spacing={0.4}>
-                {portSummaries.map(
-                  ({ port, index, config, vlanColor, isTrunk }) => {
-                    return (
-                      <PortRow
-                        key={port.id}
-                        port={port}
-                        index={index}
-                        isExpanded={!multiPort && expandedPortId === port.id}
-                        isSelected={focusedPortIds.includes(port.id)}
-                        isPc={isPc}
-                        config={config}
-                        vlanColor={vlanColor}
-                        isTrunk={isTrunk}
-                        onToggle={onTogglePort}
-                        onUpdatePort={updatePort}
-                        onApplyVlanNumber={applyVlanNumber}
-                        onApplyVlanColor={applyVlanColor}
-                        setPortRef={setPortRef}
-                      />
-                    );
-                  }
-                )}
-              </Stack>
-            </>
-          )
+          </Stack>
         )}
 
+      </Box>
+
+      <Box sx={{ px: 1.5, pt: 0.5, pb: 1 }}>
         {sidebarTab === 'opis' && (
           <Box sx={{ pt: 0.5 }}>
             <Stack spacing={1.25}>
@@ -1949,19 +1948,20 @@ export const NodeControls2d = ({ id }: Props) => {
                   lineHeight: 1.35
                 }}
               >
-                Na plakietce: tytuł + skrót. Strzałka rozwija pełny opis.
+                Na plakietce: tytuł + skrót. Strzałka rozwija pełny opis na karcie.
               </Typography>
               <FormControlLabel
                 sx={{ mt: 0, ml: 0, mr: 0 }}
                 control={
                   <Switch
                     size="small"
-                    checked={viewItem.showDescriptionLabel !== false}
+                    checked={viewItem.showDescriptionLabel === true}
                     onChange={(e) => {
                       updateViewItem(viewItem.id, {
                         showDescriptionLabel: e.target.checked
                       });
                     }}
+                    disabled={!hasBadge}
                   />
                 }
                 label={
@@ -1970,7 +1970,18 @@ export const NodeControls2d = ({ id }: Props) => {
                   </Typography>
                 }
               />
-              {hasBadge && (
+              <Typography
+                sx={{
+                  fontSize: 11,
+                  color: 'text.secondary',
+                  lineHeight: 1.35,
+                  mt: -0.5
+                }}
+              >
+                Domyślnie opis otwierasz przyciskiem (i) na urządzeniu. Włącz
+                plakietkę tylko dla ważniejszych notatek.
+              </Typography>
+              {hasBadge && viewItem.showDescriptionLabel === true && (
                 <Box>
                   <Typography
                     sx={{
@@ -2016,13 +2027,12 @@ export const NodeControls2d = ({ id }: Props) => {
                     marks
                     step={20}
                     min={60}
-                    max={320}
+                    max={480}
                     value={viewItem.labelHeight ?? 140}
                     onChange={(_, value) => {
                       const labelHeight = Array.isArray(value) ? value[0] : value;
                       updateViewItem(viewItem.id, {
-                        labelHeight,
-                        labelOffset: undefined
+                        labelHeight
                       });
                     }}
                     valueLabelDisplay="auto"
@@ -2071,7 +2081,6 @@ export const NodeControls2d = ({ id }: Props) => {
           </Box>
         )}
       </Box>
-      )}
 
       <Box sx={{ px: 1.5, pb: 1.5 }}>
         <Stack spacing={0.75}>

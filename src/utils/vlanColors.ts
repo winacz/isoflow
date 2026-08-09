@@ -65,67 +65,71 @@ export const parseVlanNumber = (
   return n;
 };
 
-const clampByte = (value: number) => {
-  return Math.max(0, Math.min(255, Math.round(value)));
-};
-
-const hslToHex = (h: number, s: number, l: number): string => {
-  const sat = Math.max(0, Math.min(100, s)) / 100;
-  const lit = Math.max(0, Math.min(100, l)) / 100;
-  const hue = ((h % 360) + 360) % 360;
-  const c = (1 - Math.abs(2 * lit - 1)) * sat;
-  const x = c * (1 - Math.abs(((hue / 60) % 2) - 1));
-  const m = lit - c / 2;
-  let r = 0;
-  let g = 0;
-  let b = 0;
-
-  if (hue < 60) {
-    r = c;
-    g = x;
-  } else if (hue < 120) {
-    r = x;
-    g = c;
-  } else if (hue < 180) {
-    g = c;
-    b = x;
-  } else if (hue < 240) {
-    g = x;
-    b = c;
-  } else if (hue < 300) {
-    r = x;
-    b = c;
-  } else {
-    r = c;
-    b = x;
-  }
-
-  const toHex = (channel: number) => {
-    return clampByte((channel + m) * 255)
-      .toString(16)
-      .padStart(2, '0');
-  };
-
-  return `#${toHex(r)}${toHex(g)}${toHex(b)}`;
+/**
+ * Scramble a VLAN id so nearby numbers land on unrelated palette slots.
+ * SplitMix32-style — stable across JS engines / platforms.
+ */
+const mixVlanId = (vlanNumber: number): number => {
+  let z =
+    (Math.imul(vlanNumber, 0x9e3779b9) + 0x243f6a88) >>> 0;
+  z = Math.imul(z ^ (z >>> 16), 0x85ebca6b) >>> 0;
+  z = Math.imul(z ^ (z >>> 13), 0xc2b2ae35) >>> 0;
+  return (z ^ (z >>> 16)) >>> 0;
 };
 
 /**
- * Golden angle (°) — successive VLAN numbers land ~137° apart on the hue
- * wheel, so neighbors never look alike (and the first 25 are all unique).
+ * Fixed categorical palette — one clear colour per family so badges never
+ * land on “two greens”. Same VLAN id → same hex everywhere (every project).
+ * Indexed by `mixVlanId(id) % length`.
  */
-const VLAN_HUE_STEP = 137.508;
+export const VLAN_DISTINCT_PALETTE = [
+  '#e11d48', // rose
+  '#ea580c', // orange
+  '#ca8a04', // amber
+  '#4d7c0f', // olive
+  '#0f766e', // teal
+  '#0369a1', // sky
+  '#1d4ed8', // blue
+  '#4f46e5', // indigo
+  '#7c3aed', // violet
+  '#a21caf', // fuchsia
+  '#be185d', // pink
+  '#9f1239', // crimson
+  '#c2410c', // burnt orange
+  '#a16207', // mustard
+  '#166534', // forest
+  '#155e75', // cyan dark
+  '#1e3a8a', // navy
+  '#5b21b6', // purple deep
+  '#86198f', // magenta deep
+  '#9a3412', // rust
+  '#365314', // moss
+  '#134e4a', // pine
+  '#0c4a6e', // steel blue
+  '#312e81', // twilight
+  '#f43f5e', // rose bright
+  '#f97316', // orange bright
+  '#eab308', // yellow
+  '#22c55e', // green
+  '#14b8a6', // teal bright
+  '#0ea5e9', // sky bright
+  '#6366f1', // indigo bright
+  '#d946ef', // fuchsia bright
+  '#fb7185', // pink soft
+  '#fdba74', // peach
+  '#84cc16', // lime
+  '#2dd4bf' // aqua
+] as const;
 
 /**
  * Stable auto color from a numeric VLAN id.
- * Same id → same color; different ids → clearly separated hues.
+ * Pure function of the id — VLAN 20 / 333 / … is the same hex in every
+ * project. Palette entries are mutually distinct (no near-duplicate greens).
  */
 export const colorFromVlanNumber = (vlanNumber: number): string => {
   const n = Math.abs(Math.trunc(vlanNumber));
-  const hue = (n * VLAN_HUE_STEP) % 360;
-  // Mild S/L jitter so even far wrap-arounds stay distinguishable.
-  const sat = 72 - (n % 3) * 5;
-  const lit = 48 + (n % 4) * 3;
-  return hslToHex(hue, sat, lit);
+  const mixed = mixVlanId(n === 0 ? 1 : n);
+  return VLAN_DISTINCT_PALETTE[mixed % VLAN_DISTINCT_PALETTE.length];
 };
 
 /**
@@ -225,6 +229,7 @@ type SviVlanFields = {
   vlan?: string | null;
   vlanColor?: string | null;
   ip?: string | null;
+  dhcp?: boolean;
 };
 
 type ModelItemVlanFields = {
@@ -282,6 +287,7 @@ export const findSharedVlanColor = (
 /**
  * Auto color for a VLAN id (from its number). Returns null for empty / VLAN 1
  * (VLAN 1 must not tint cables or invent a brand color).
+ * Same id → same color everywhere (no project-specific palette).
  */
 export const getVlanColor = (
   vlan: string | undefined | null
@@ -299,12 +305,16 @@ export const getVlanColor = (
 };
 
 /** Port jack color. VLAN 1 → gray. Trunk → first rainbow stop (use CSS gradient for full rainbow).
- * Hosts should use `getHostPortVlanColor` (peer switch VLAN) instead of `isPc`. */
+ * Hosts should use `getHostPortVlanColor` (peer switch VLAN) instead of `isPc`.
+ * Colors come from the VLAN id only (`getVlanColor`) so the same id matches
+ * across projects; stored `vlanColor` / shared overrides are ignored.
+ */
 export const getPortStatusColor = (
   vlan: string | undefined | null,
   _fallbackIndex = 0,
   options?: {
     isPc?: boolean;
+    /** @deprecated Ignored — color is derived from VLAN id for global consistency. */
     customColor?: string | null;
     modelItems?: ModelItemVlanFields[];
     portType?: 'access' | 'trunk';
@@ -318,15 +328,6 @@ export const getPortStatusColor = (
     return TRUNK_RAINBOW_COLORS[0];
   }
 
-  const custom =
-    normalizeHexColor(options?.customColor) ??
-    (options?.modelItems
-      ? findSharedVlanColor(vlan, options.modelItems)
-      : null);
-  if (custom) {
-    return custom;
-  }
-
   return getVlanColor(vlan) ?? VLAN_1_COLOR;
 };
 
@@ -334,7 +335,7 @@ export const getPortStatusColor = (
  * Cable tint from VLAN-aware **access** ports only.
  * - Hosts don't understand VLANs — never use them for cable tint.
  * - VLAN 1 never tints the cable (lowest priority).
- * - Prefer first non–VLAN-1 access color (manual `vlanColor` or auto hash).
+ * - Prefer first non–VLAN-1 access color (from VLAN id via `getVlanColor`).
  * - Trunk↔trunk uses rainbow (see `linkMode`).
  */
 export const getConnectorVlanColor = ({
@@ -458,6 +459,13 @@ export type ConnectorRelationSummary = {
    * - `access` — normal VLAN coloring
    */
   linkMode: ConnectorLinkMode;
+  /**
+   * Access endpoints carry different VLANs (e.g. switch↔switch).
+   * Relation UI should show VLAN per endpoint instead of repeating the same id.
+   */
+  vlansDiffer: boolean;
+  /** Tagged VLANs carried on a trunk link (explicit allowed list or switch defaults). */
+  allowedVlans: string[];
 };
 
 /**
@@ -579,11 +587,8 @@ export const getConnectorRelationSummary = ({
     // Hosts never expose trunk — treat as access even if misconfigured.
     const portType =
       isNonVlanAware || port?.type !== 'trunk' ? 'access' : 'trunk';
-    const custom =
-      normalizeHexColor(port?.vlanColor) ??
-      findSharedVlanColor(vlan, modelItems);
     const vlanColor =
-      isNonVlanAware || isVlan1(vlan) ? null : custom ?? getVlanColor(vlan);
+      isNonVlanAware || isVlan1(vlan) ? null : getVlanColor(vlan);
 
     endpoints.push({
       itemId: modelItem.id ?? itemId,
@@ -632,21 +637,39 @@ export const getConnectorRelationSummary = ({
     pushEndpoint(anchor.ref.item, portId);
   });
 
-  // Cable VLAN: first non–VLAN-1 access port on a VLAN-aware device
-  let vlanLabel = 'VLAN 1';
-  let vlanColor: string | null = null;
-
+  // Cable VLAN: unique access VLANs on VLAN-aware devices
+  const accessVlanEntries: { vlan: string; color: string | null }[] = [];
+  const seenAccessKeys = new Set<string>();
   for (const endpoint of endpoints) {
     if (endpoint.isNonVlanAware) continue;
     if (endpoint.type !== 'access') continue;
-    if (isVlan1(endpoint.vlan)) continue;
+    const key = normalizeVlanKey(endpoint.vlan) || '1';
+    if (seenAccessKeys.has(key)) continue;
+    seenAccessKeys.add(key);
+    accessVlanEntries.push({
+      vlan: endpoint.vlan.trim() || '1',
+      color: endpoint.vlanColor
+    });
+  }
 
-    vlanLabel = `VLAN ${endpoint.vlan}`;
-    vlanColor = endpoint.vlanColor;
-    break;
+  let vlanLabel = 'VLAN 1';
+  let vlanColor: string | null = null;
+
+  if (accessVlanEntries.length === 1) {
+    const only = accessVlanEntries[0];
+    vlanLabel = `VLAN ${only.vlan}`;
+    vlanColor = isVlan1(only.vlan) ? null : only.color;
+  } else if (accessVlanEntries.length > 1) {
+    vlanLabel = accessVlanEntries
+      .map((entry) => {
+        return `VLAN ${entry.vlan}`;
+      })
+      .join(' / ');
+    vlanColor = null;
   }
 
   let linkMode: ConnectorLinkMode = 'access';
+  let allowedVlans: string[] = [];
 
   if (endpoints.length >= 2) {
     const trunkCount = endpoints.filter((endpoint) => {
@@ -661,13 +684,64 @@ export const getConnectorRelationSummary = ({
       linkMode = 'mismatch';
     } else if (trunkCount >= 2) {
       linkMode = 'trunk';
-      vlanLabel = 'Trunk';
       vlanColor = null;
     }
   } else if (endpoints.length === 1 && endpoints[0].type === 'trunk') {
     linkMode = 'trunk';
-    vlanLabel = 'Trunk';
     vlanColor = null;
+  }
+
+  if (linkMode === 'trunk') {
+    const trunkEndpoints = endpoints.filter((endpoint) => {
+      return endpoint.type === 'trunk' && Boolean(endpoint.portId);
+    });
+
+    const explicit = trunkEndpoints
+      .map((endpoint) => {
+        const item = modelItems.find((candidate) => {
+          return candidate.id === endpoint.itemId;
+        });
+        return item?.ports?.[endpoint.portId]?.allowedVlans;
+      })
+      .find((list) => {
+        return Array.isArray(list);
+      });
+
+    if (explicit) {
+      allowedVlans = Array.from(
+        new Set(
+          explicit
+            .map((vlan) => {
+              return vlan.trim();
+            })
+            .filter(Boolean)
+        )
+      ).sort((a, b) => {
+        return a.localeCompare(b, undefined, { numeric: true });
+      });
+    } else {
+      const fromSwitches = new Set<string>();
+      trunkEndpoints.forEach((endpoint) => {
+        const item = modelItems.find((candidate) => {
+          return candidate.id === endpoint.itemId;
+        });
+        collectModelItemVlans(item).forEach((vlan) => {
+          fromSwitches.add(vlan);
+        });
+      });
+      allowedVlans = Array.from(fromSwitches).sort((a, b) => {
+        return a.localeCompare(b, undefined, { numeric: true });
+      });
+    }
+
+    vlanLabel =
+      allowedVlans.length > 0
+        ? `Trunk · ${allowedVlans
+            .map((vlan) => {
+              return `VLAN ${vlan}`;
+            })
+            .join(', ')}`
+        : 'Trunk';
   }
 
   /** Access VLAN carried by this link (for matching switch SVIs). */
@@ -680,53 +754,85 @@ export const getConnectorRelationSummary = ({
     return '1';
   })();
 
+  const linkAccessVlanColor = (() => {
+    if (isVlan1(linkAccessVlan)) return null;
+    if (vlanColor) return vlanColor;
+    return getVlanColor(linkAccessVlan);
+  })();
+
   const endpointsWithIp: ConnectorEndpointSummary[] = endpoints.map(
     (endpoint) => {
       const modelItem = modelItems.find((item) => {
         return item.id === endpoint.itemId;
       });
-      if (!modelItem) return { ...endpoint, ip: null };
+
+      // Hosts do not configure VLANs — show the peer switch access VLAN on the link.
+      const displayEndpoint =
+        endpoint.isNonVlanAware && linkMode === 'access'
+          ? {
+              ...endpoint,
+              vlan: linkAccessVlan,
+              vlanColor: linkAccessVlanColor
+            }
+          : endpoint;
+
+      if (!modelItem) return { ...displayEndpoint, ip: null };
 
       // Host / endpoint node → management IP (or DHCP)
-      if (endpoint.isNonVlanAware) {
+      if (displayEndpoint.isNonVlanAware) {
         if (modelItem.dhcp) {
-          return { ...endpoint, ip: 'DHCP' };
+          return { ...displayEndpoint, ip: 'DHCP' };
         }
         const hostIp = modelItem.ip?.trim();
-        return { ...endpoint, ip: hostIp || null };
+        return { ...displayEndpoint, ip: hostIp || null };
       }
 
       // Switch with SVIs → IP of SVI for the VLAN this link (node) is on
       if (modelItem.svis && modelItem.svis.length > 0) {
         const vlanForSvi =
-          endpoint.type === 'access' ? endpoint.vlan : linkAccessVlan;
+          displayEndpoint.type === 'access'
+            ? displayEndpoint.vlan
+            : linkAccessVlan;
         const svi = modelItem.svis.find((candidate) => {
           return vlansMatch(candidate.vlan, vlanForSvi);
         });
+        if (svi?.dhcp) {
+          return { ...displayEndpoint, ip: 'DHCP' };
+        }
         const sviIp = svi?.ip?.trim();
-        if (sviIp) return { ...endpoint, ip: sviIp };
+        if (sviIp) return { ...displayEndpoint, ip: sviIp };
         // Trunk without a matching access VLAN — optional management IP
         if (modelItem.dhcp) {
-          return { ...endpoint, ip: 'DHCP' };
+          return { ...displayEndpoint, ip: 'DHCP' };
         }
         const mgmt = modelItem.ip?.trim();
-        return { ...endpoint, ip: mgmt || null };
+        return { ...displayEndpoint, ip: mgmt || null };
       }
 
       // Servers / other nodes → management IP (or DHCP)
       if (modelItem.dhcp) {
-        return { ...endpoint, ip: 'DHCP' };
+        return { ...displayEndpoint, ip: 'DHCP' };
       }
       const mgmt = modelItem.ip?.trim();
-      return { ...endpoint, ip: mgmt || null };
+      return { ...displayEndpoint, ip: mgmt || null };
     }
   );
+
+  // After host VLAN inheritance, decide whether the relation UI should show
+  // VLAN per endpoint (only when access VLANs actually differ).
+  const displayedAccessKeys = new Set<string>();
+  endpointsWithIp.forEach((endpoint) => {
+    if (endpoint.type !== 'access') return;
+    displayedAccessKeys.add(normalizeVlanKey(endpoint.vlan) || '1');
+  });
 
   return {
     endpoints: endpointsWithIp,
     vlanLabel,
     vlanColor,
-    linkMode
+    linkMode,
+    vlansDiffer: linkMode === 'access' && displayedAccessKeys.size > 1,
+    allowedVlans
   };
 };
 

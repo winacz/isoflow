@@ -94,9 +94,11 @@ const initialState = () => {
       shape2dHeaderHoverItemId: null,
       shape2dNodeHoverItemId: null,
       shape2dEnlargedItemId: null,
+      nodeDescriptionDialogItemId: null,
       sviHover: null,
       showGrid: INITIAL_UI_STATE.showGrid,
       showLoupe: INITIAL_UI_STATE.showLoupe,
+      showDescriptionLabels: INITIAL_UI_STATE.showDescriptionLabels,
       animateConnectors: INITIAL_UI_STATE.animateConnectors,
       nodeVisualStyle: INITIAL_UI_STATE.nodeVisualStyle,
       gridStyle: INITIAL_UI_STATE.gridStyle,
@@ -107,7 +109,9 @@ const initialState = () => {
       simplePaths: INITIAL_UI_STATE.simplePaths,
       routingStyle: INITIAL_UI_STATE.routingStyle,
       isWorkshopOpen: INITIAL_UI_STATE.isWorkshopOpen,
+      isPlanPickerOpen: INITIAL_UI_STATE.isPlanPickerOpen,
       workshopSection: INITIAL_UI_STATE.workshopSection,
+      workshopIpamTab: INITIAL_UI_STATE.workshopIpamTab,
       isRightSidebarOpen: INITIAL_UI_STATE.isRightSidebarOpen,
       actions: {
         setView: (view) => {
@@ -138,6 +142,7 @@ const initialState = () => {
             shape2dHeaderHoverItemId: null,
             shape2dNodeHoverItemId: null,
             shape2dEnlargedItemId: null,
+            nodeDescriptionDialogItemId: null,
             zoom: 1,
             viewTransformByMode: INITIAL_UI_STATE.viewTransformByMode
           });
@@ -472,6 +477,12 @@ const initialState = () => {
           }
           set({ shape2dEnlargedItemId });
         },
+        setNodeDescriptionDialogItemId: (nodeDescriptionDialogItemId) => {
+          if (get().nodeDescriptionDialogItemId === nodeDescriptionDialogItemId) {
+            return;
+          }
+          set({ nodeDescriptionDialogItemId });
+        },
         setSviHover: (sviHover) => {
           const prev = get().sviHover;
           if (prev === sviHover) return;
@@ -539,11 +550,17 @@ const initialState = () => {
         setShowLoupe: (showLoupe) => {
           set({ showLoupe });
         },
+        setShowDescriptionLabels: (showDescriptionLabels) => {
+          set({ showDescriptionLabels });
+        },
         toggleShowGrid: () => {
           set({ showGrid: !get().showGrid });
         },
         toggleShowLoupe: () => {
           set({ showLoupe: !get().showLoupe });
+        },
+        toggleShowDescriptionLabels: () => {
+          set({ showDescriptionLabels: !get().showDescriptionLabels });
         },
         toggleAnimateConnectors: () => {
           set({ animateConnectors: !get().animateConnectors });
@@ -614,10 +631,22 @@ const initialState = () => {
           set({ routingStyle });
         },
         setWorkshopOpen: (isWorkshopOpen) => {
-          set({ isWorkshopOpen });
+          set({
+            isWorkshopOpen,
+            ...(isWorkshopOpen ? { isPlanPickerOpen: false } : {})
+          });
+        },
+        setPlanPickerOpen: (isPlanPickerOpen) => {
+          set({
+            isPlanPickerOpen,
+            ...(isPlanPickerOpen ? { isWorkshopOpen: false } : {})
+          });
         },
         setWorkshopSection: (workshopSection) => {
           set({ workshopSection });
+        },
+        setWorkshopIpamTab: (workshopIpamTab) => {
+          set({ workshopIpamTab });
         },
         setRightSidebarOpen: (isRightSidebarOpen) => {
           set({ isRightSidebarOpen });

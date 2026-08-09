@@ -12,6 +12,7 @@ import {
   unlockWaypointAtTile,
   stripToEndpointAnchors,
   isPlanProjection,
+  isPlan2dCanvas,
   cloneModelItemForDuplicate,
   supportsConnectorTools
 } from 'src/utils';
@@ -81,12 +82,15 @@ export const ContextMenuManager = ({ anchorEl }: Props) => {
   }, [uiStateActions]);
 
   const groupCount = useMemo(() => {
-    if (projectionMode !== 'TWO_D_V3') return 0;
+    if (!isPlan2dCanvas(projectionMode)) return 0;
     return computeDensityGroups({ items: scene.items, modelItems }).length;
   }, [projectionMode, scene.items, modelItems]);
 
   const buildAutoLayoutItems = useCallback((): ContextMenuEntry[] => {
+    // Plan canvases (incl. Karczma V3 plans) use the V3 density / VLAN menu —
+    // not the legacy Auto-Układ leftovers from classic 2D.
     if (!supportsConnectorTools(projectionMode)) return [];
+    if (isPlan2dCanvas(projectionMode)) return [];
 
     const style = routingStyle as RouteStyle;
     const count = selectedItemIds.length;
@@ -156,9 +160,9 @@ export const ContextMenuManager = ({ anchorEl }: Props) => {
     onClose
   ]);
 
-  /** Classic 2D "Test" (tidy + diagonal fan), applied per density group. */
+  /** Plan 2D / V3: tidy + VLAN layout (same menu on every plan tab). */
   const buildV3TestLayoutItems = useCallback((): ContextMenuEntry[] => {
-    if (projectionMode !== 'TWO_D_V3') return [];
+    if (!isPlan2dCanvas(projectionMode)) return [];
 
     return [
       {
@@ -223,7 +227,7 @@ export const ContextMenuManager = ({ anchorEl }: Props) => {
   ]);
 
   const buildDensityGroupItems = useCallback((): ContextMenuEntry[] => {
-    if (projectionMode !== 'TWO_D_V3') return [];
+    if (!isPlan2dCanvas(projectionMode)) return [];
 
     const runBus = (exitStyle: DensityBusExitStyle) => {
       void (async () => {

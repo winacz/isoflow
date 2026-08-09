@@ -51,6 +51,8 @@ import {
 import { isPlanProjection } from './projection';
 import { getCachedBoundingClientRect } from './domRectCache';
 import { computeHighlightScale } from './nodeHighlightScale';
+import { hasNodeDescription } from './nodeDescription';
+import { isLocalPointInShape2dInfoSlot } from './shape2dInfoSlot';
 import { useScene } from 'src/hooks/useScene';
 
 interface ScreenToIso {
@@ -246,7 +248,13 @@ export const getShape2dHeaderAtPoint = ({
 }: {
   point: Coords;
   items: { id: string; tile: Coords; parentId?: string }[];
-  modelItems: { id: string; icon?: string }[];
+  modelItems: {
+    id: string;
+    icon?: string;
+    description?: string;
+    descriptionTitle?: string;
+    descriptionSummary?: string;
+  }[];
   scaledItemIds?: Set<string> | null;
   scale?: number;
 }): string | null => {
@@ -283,6 +291,19 @@ export const getShape2dHeaderAtPoint = ({
     const headerBottom = -halfH + size.height * headerFrac;
 
     if (lx < -halfW || lx >= halfW || ly < -halfH || ly >= headerBottom) {
+      return;
+    }
+
+    // “(i)” owns this corner — do not treat as header enlarge / accent.
+    if (
+      hasNodeDescription(modelItem) &&
+      isLocalPointInShape2dInfoSlot({
+        lx,
+        ly,
+        size,
+        icon: modelItem.icon
+      })
+    ) {
       return;
     }
 

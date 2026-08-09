@@ -6,9 +6,6 @@ interface Props {
   form: React.ReactNode;
 }
 
-/** Space reserved for centered ViewModeTabs + workshop type toggles. */
-const PREVIEW_TOP_CHROME = 64;
-
 export const WorkshopLayout = ({ preview, form }: Props) => {
   const [previewHeightPercent, setPreviewHeightPercent] = useState(50);
   const isDragging = useRef(false);
@@ -65,9 +62,6 @@ export const WorkshopLayout = ({ preview, form }: Props) => {
           overflow: 'hidden'
         }}
       >
-        {/* Clear ViewModeTabs / workshop toggles — content starts below */}
-        <Box sx={{ flex: 'none', height: PREVIEW_TOP_CHROME }} />
-
         <Box
           sx={{
             flex: 1,
@@ -75,7 +69,8 @@ export const WorkshopLayout = ({ preview, form }: Props) => {
             position: 'relative',
             overflow: 'hidden',
             px: 3,
-            pb: 2
+            pb: 2,
+            pt: 2
           }}
         >
           {preview}

@@ -11,7 +11,8 @@ import {
   ExpandMore as ChevronDownIcon,
   ExpandLess as ChevronUpIcon,
   Add as AddIcon,
-  EditOutlined as EditIcon
+  EditOutlined as EditIcon,
+  Title as TitleIcon
 } from '@mui/icons-material';
 import { ControlsContainer } from 'src/components/ItemControls/components/ControlsContainer';
 import { Section } from 'src/components/ItemControls/components/Section';
@@ -19,10 +20,12 @@ import { DeviceCreatorPanel } from 'src/components/ItemControls/DeviceCreator/De
 import { VirtualServerCreatorPanel } from 'src/components/ItemControls/VirtualServerCreator/VirtualServerCreatorPanel';
 import { useUiStateStore } from 'src/stores/uiStateStore';
 import { useModelStore } from 'src/stores/modelStore';
+import { useScene } from 'src/hooks/useScene';
 import { DeviceTemplate, Icon } from 'src/types';
 import {
   SHAPES_2D,
   TILE_SIZE_2D,
+  TEXTBOX_DEFAULTS,
   getShape2dSize,
   getShape2dPorts,
   getBlankingSize,
@@ -57,7 +60,8 @@ import {
   ensureDeviceTemplateIcons,
   syncDeviceTemplateCache,
   isDeviceTemplateId,
-  supportsDrawingConnections
+  supportsDrawingConnections,
+  generateId
 } from 'src/utils';
 
 const CATEGORY_ORDER = [
@@ -442,6 +446,8 @@ export const ShapeSelectionControls = () => {
   const mode = useUiStateStore((state) => {
     return state.mode;
   });
+  const mouseTileX = useUiStateStore((state) => state.mouse.position.tile.x);
+  const mouseTileY = useUiStateStore((state) => state.mouse.position.tile.y);
   const icons = useModelStore((state) => {
     return state.icons;
   });
@@ -451,6 +457,7 @@ export const ShapeSelectionControls = () => {
   const modelActions = useModelStore((state) => {
     return state.actions;
   });
+  const { createTextBox } = useScene();
 
   // Restore library templates if the current model is missing any.
   useEffect(() => {
@@ -526,6 +533,20 @@ export const ShapeSelectionControls = () => {
     },
     [uiStateActions]
   );
+
+  const createTextBoxProxy = useCallback(() => {
+    const textBoxId = generateId();
+    createTextBox({
+      ...TEXTBOX_DEFAULTS,
+      id: textBoxId,
+      tile: { x: mouseTileX, y: mouseTileY }
+    });
+    uiStateActions.setMode({
+      type: 'TEXTBOX',
+      showCursor: false,
+      id: textBoxId
+    });
+  }, [createTextBox, mouseTileX, mouseTileY, uiStateActions]);
 
   const cabinetShape = useMemo(() => {
     return SHAPES_2D.find((shape) => {
@@ -638,7 +659,7 @@ export const ShapeSelectionControls = () => {
             <Alert severity="info">
               Wybierz urządzenie, potem kliknij na canvas.
               {supportsDrawingConnections(projectionMode)
-                ? ' Connector łączy porty RJ45.'
+                ? ' Połączenia ciągniesz między portami RJ45.'
                 : ''}
             </Alert>
           </Stack>
@@ -647,6 +668,37 @@ export const ShapeSelectionControls = () => {
     >
       <Section>
         <Stack spacing={1.5}>
+          <ShapeCategory
+            title="Adnotacje"
+            shapes={[]}
+            activeId={null}
+            onSelect={() => {}}
+            footer={
+              <Button
+                variant={mode.type === 'TEXTBOX' ? 'contained' : 'outlined'}
+                onClick={createTextBoxProxy}
+                sx={{
+                  justifyContent: 'flex-start',
+                  textTransform: 'none',
+                  py: 1.25,
+                  px: 1.25
+                }}
+              >
+                <Stack direction="row" spacing={1.25} alignItems="center">
+                  <TitleIcon sx={{ fontSize: 22 }} />
+                  <Box sx={{ textAlign: 'left' }}>
+                    <Typography fontWeight={600} fontSize={13}>
+                      Tekst
+                    </Typography>
+                    <Typography variant="caption" color="text.secondary">
+                      Pole tekstowe na planie
+                    </Typography>
+                  </Box>
+                </Stack>
+              </Button>
+            }
+          />
+
           {categories.map((category) => {
             const isSwitches = category.title === 'Switches';
             const isServers = category.title === 'Serwery';

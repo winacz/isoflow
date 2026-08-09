@@ -20,6 +20,7 @@ import {
   getPortStatusColor,
   getHostPortVlanColor,
   getDeviceTemplateLayout,
+  getShape2dInfoSlotMetrics,
   parseDeviceColor,
   toDeviceColorHex8,
   SHAPE_2D_PORT_VISUAL_SIZE_TILES,
@@ -105,30 +106,43 @@ interface Props {
   lodSimplified?: boolean;
 }
 
-/** Small (i) marker next to the device name when a description exists. */
-const DescriptionInfoDot = ({ size }: { size: number }) => {
-  const dim = Math.max(10, Math.round(size * 0.85));
+/** Reserved header circle (top-right) — visual only; clicks use overlay. */
+const DescriptionInfoSlot = ({
+  dim,
+  headerBandH,
+  padRight
+}: {
+  dim: number;
+  headerBandH: number;
+  padRight: number;
+}) => {
   return (
     <Box
       aria-hidden
       title="Ma opis"
       sx={{
-        flexShrink: 0,
+        position: 'absolute',
+        right: padRight,
+        top: Math.max(2, Math.round((headerBandH - dim) / 2)),
         width: dim,
         height: dim,
         borderRadius: '50%',
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'center',
-        bgcolor: 'rgba(37, 99, 235, 0.14)',
-        border: '1.5px solid rgba(37, 99, 235, 0.85)',
-        color: '#1d4ed8',
-        fontSize: Math.max(7, Math.round(dim * 0.62)),
+        bgcolor: '#2563eb',
+        border: `${Math.max(2, Math.round(dim * 0.06))}px solid #1d4ed8`,
+        color: '#ffffff',
+        fontSize: Math.max(14, Math.round(dim * 0.52)),
         fontWeight: 800,
         lineHeight: 1,
         letterSpacing: 0,
         userSelect: 'none',
-        pointerEvents: 'none'
+        pointerEvents: 'none',
+        // Above SVI / rack-IP chrome (those sit in higher stacking contexts than the header).
+        zIndex: 6,
+        boxSizing: 'border-box',
+        boxShadow: '0 1px 3px rgba(15,23,42,0.35)'
       }}
     >
       i
@@ -382,7 +396,7 @@ const DeviceShape2dComponent = ({
       return {
         id: svi.id,
         vlan,
-        ip: svi.ip?.trim() || '',
+        ip: svi.dhcp ? 'DHCP' : svi.ip?.trim() || '',
         color
       };
     });
@@ -403,6 +417,15 @@ const DeviceShape2dComponent = ({
     (showShadow
       ? 'drop-shadow(0 3px 5px rgba(15,23,42,0.22)) drop-shadow(0 1px 2px rgba(15,23,42,0.12))'
       : undefined);
+
+  const infoSlot = getShape2dInfoSlotMetrics({
+    size: {
+      width: pxWidth / TILE_SIZE_2D,
+      height: pxHeight / TILE_SIZE_2D
+    },
+    icon: shapeId
+  });
+  const infoReservePx = infoSlot.dim + Math.max(8, tileW * 0.2);
 
   /** Host jack: inherit peer switch access VLAN (cable / pill source). */
   const resolveHostPortStatusColor = (portId: string) => {
@@ -492,12 +515,20 @@ const DeviceShape2dComponent = ({
                 overflow: 'hidden',
                 whiteSpace: 'nowrap',
                 textOverflow: 'ellipsis',
-                maxWidth: hasDescription ? 'calc(100% - 18px)' : '100%'
+                maxWidth: hasDescription
+                  ? `calc(100% - ${infoSlot.dim + 10}px)`
+                  : '100%'
               }}
             >
               {name}
             </Typography>
-            {hasDescription ? <DescriptionInfoDot size={nameSize} /> : null}
+            {hasDescription ? (
+              <DescriptionInfoSlot
+                dim={infoSlot.dim}
+                headerBandH={headerBandH}
+                padRight={Math.max(4, tileW * 0.2)}
+              />
+            ) : null}
           </Box>
         </Box>
       </Box>
@@ -523,42 +554,6 @@ const DeviceShape2dComponent = ({
           outlineOffset: vlanBorderColor ? 2 : undefined
         }}
       >
-        {poePowerWarning && (
-          <Box
-            title="Urządzenie zasilane PoE nie jest podłączone do portu PoE Out"
-            sx={{
-              position: 'absolute',
-              top: 4,
-              right: 4,
-              width: Math.max(16, Math.round(cellSize * 0.55)),
-              height: Math.max(16, Math.round(cellSize * 0.55)),
-              zIndex: 8,
-              pointerEvents: 'auto',
-              cursor: 'help'
-            }}
-          >
-            <Box
-              component="svg"
-              viewBox="0 0 16 14"
-              sx={{ width: '100%', height: '100%', display: 'block' }}
-            >
-              <path
-                d="M8 1.2L14.8 13H1.2L8 1.2z"
-                fill="#facc15"
-                stroke="#ca8a04"
-                strokeWidth={0.9}
-                strokeLinejoin="round"
-              />
-              <path
-                d="M8 5v4.2"
-                stroke="#78350f"
-                strokeWidth={1.3}
-                strokeLinecap="round"
-              />
-              <circle cx={8} cy={11} r={0.7} fill="#78350f" />
-            </Box>
-          </Box>
-        )}
         <svg
           width="100%"
           height="100%"
@@ -687,6 +682,7 @@ const DeviceShape2dComponent = ({
                 compactLabel={compactPortLabels}
                 poe={port.poe ?? null}
                 poweredByPoe={poweredByPoe}
+                poePowerWarning={poweredByPoe && poePowerWarning}
                 labelPosition="above"
               />
             </Box>
@@ -1303,47 +1299,6 @@ const DeviceShape2dComponent = ({
         })}
       {isPc ? (
         <>
-          {/* PoE warning — top-right corner, above title */}
-          {poePowerWarning && (
-            <Box
-              title="Urządzenie zasilane PoE nie jest podłączone do portu PoE Out"
-              sx={{
-                position: 'absolute',
-                top: Math.max(3, Math.round(tileH * 0.12)),
-                right: Math.max(3, Math.round(tileW * 0.12)),
-                width: Math.max(18, Math.round(headerBandH * 0.42)),
-                height: Math.max(18, Math.round(headerBandH * 0.42)),
-                zIndex: 10,
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                pointerEvents: 'auto',
-                cursor: 'help'
-              }}
-            >
-              <Box
-                component="svg"
-                viewBox="0 0 16 14"
-                sx={{ width: '100%', height: '100%', display: 'block' }}
-              >
-                <path
-                  d="M8 1.2L14.8 13H1.2L8 1.2z"
-                  fill="#facc15"
-                  stroke="#ca8a04"
-                  strokeWidth={0.9}
-                  strokeLinejoin="round"
-                />
-                <path
-                  d="M8 5v4.2"
-                  stroke="#78350f"
-                  strokeWidth={1.3}
-                  strokeLinecap="round"
-                />
-                <circle cx={8} cy={11} r={0.7} fill="#78350f" />
-              </Box>
-            </Box>
-          )}
-
           {/* Node header — 30%: icon (full height) + title (~10 chars/line, then wrap) */}
           <Box
             sx={{
@@ -1356,7 +1311,10 @@ const DeviceShape2dComponent = ({
               flexDirection: 'row',
               alignItems: 'stretch',
               gap: `${Math.max(6, Math.round(tileW * 0.18))}px`,
-              px: `${Math.max(4, tileW * 0.15)}px`,
+              pl: `${Math.max(4, tileW * 0.15)}px`,
+              pr: hasDescription
+                ? `${infoReservePx}px`
+                : `${Math.max(4, tileW * 0.15)}px`,
               py: `${Math.max(4, Math.round(headerBandH * 0.06))}px`,
               boxSizing: 'border-box',
               zIndex: 1,
@@ -1413,10 +1371,14 @@ const DeviceShape2dComponent = ({
               >
                 {name}
               </Typography>
-              {hasDescription ? (
-                <DescriptionInfoDot size={headerNameSize} />
-              ) : null}
             </Box>
+            {hasDescription ? (
+              <DescriptionInfoSlot
+                dim={infoSlot.dim}
+                headerBandH={headerBandH}
+                padRight={Math.max(4, tileW * 0.15)}
+              />
+            ) : null}
           </Box>
 
           {/* Node body — 30%: full-width IP label */}
@@ -1518,7 +1480,8 @@ const DeviceShape2dComponent = ({
           alignItems: 'center',
           justifyContent: 'space-between',
           gap: `${Math.max(6, Math.round(tileW * 0.15))}px`,
-          px: `${Math.max(3, tileW * 0.18)}px`,
+          pl: `${Math.max(3, tileW * 0.18)}px`,
+          pr: hasDescription ? `${infoReservePx}px` : `${Math.max(3, tileW * 0.18)}px`,
           boxSizing: 'border-box',
           zIndex: 1,
           overflow: 'hidden'
@@ -1575,42 +1538,6 @@ const DeviceShape2dComponent = ({
                 {roleLabel}
               </Box>
             )}
-            {poePowerWarning && (
-              <Box
-                title="Urządzenie zasilane PoE nie jest podłączone do portu PoE Out"
-                sx={{
-                  flexShrink: 0,
-                  width: Math.max(14, Math.round(headerIconSize * 0.7)),
-                  height: Math.max(14, Math.round(headerIconSize * 0.7)),
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  pointerEvents: 'auto',
-                  cursor: 'help'
-                }}
-              >
-                <Box
-                  component="svg"
-                  viewBox="0 0 16 14"
-                  sx={{ width: '100%', height: '100%', display: 'block' }}
-                >
-                  <path
-                    d="M8 1.2L14.8 13H1.2L8 1.2z"
-                    fill="#facc15"
-                    stroke="#ca8a04"
-                    strokeWidth={0.9}
-                    strokeLinejoin="round"
-                  />
-                  <path
-                    d="M8 5v4.2"
-                    stroke="#78350f"
-                    strokeWidth={1.3}
-                    strokeLinecap="round"
-                  />
-                  <circle cx={8} cy={11} r={0.7} fill="#78350f" />
-                </Box>
-              </Box>
-            )}
             <Typography
               sx={{
                 color: '#1f2937',
@@ -1628,9 +1555,6 @@ const DeviceShape2dComponent = ({
             >
               {name}
             </Typography>
-            {hasDescription ? (
-              <DescriptionInfoDot size={headerNameSize} />
-            ) : null}
           </Box>
           {subtitle && !isRack && (
             <Typography
@@ -1684,13 +1608,24 @@ const DeviceShape2dComponent = ({
         </Box>
       </Box>
 
+      {/* Info (i) — device-root sibling so SVI (zIndex 3) cannot cover it */}
+      {hasDescription ? (
+        <DescriptionInfoSlot
+          dim={infoSlot.dim}
+          headerBandH={headerBandH}
+          padRight={infoSlot.padFromDeviceRight}
+        />
+      ) : null}
+
       {/* IP on rack face — right side of header (title is oversized) */}
       {Boolean(ip?.trim()) && isRack && (
         <Box
           sx={{
             position: 'absolute',
             top: 0,
-            right: tileW * 0.5,
+            right: hasDescription
+              ? Math.round(infoSlot.padFromDeviceRight + infoReservePx)
+              : tileW * 0.5,
             height: headerBandH,
             display: 'flex',
             flexDirection: 'row',
@@ -1746,13 +1681,20 @@ const DeviceShape2dComponent = ({
         </>
       )}
 
-      {/* SVI section — sits in top-right of header, own pointer-events layer */}
+      {/* SVI section — top-right of header; leave room for description (i) slot */}
       {sviRows.length > 0 && (
         <Box
           sx={{
             position: 'absolute',
             top: 0,
-            right: tileW * 0.5,
+            // Anchor left of the device-root info square (same inset as header).
+            right: hasDescription
+              ? Math.round(
+                  infoSlot.padFromDeviceRight +
+                    infoSlot.dim +
+                    Math.max(12, tileW * 0.28)
+                )
+              : tileW * 0.5,
             height: headerBandH,
             display: 'flex',
             flexDirection: 'row',
@@ -1761,7 +1703,7 @@ const DeviceShape2dComponent = ({
             zIndex: 3,
             pointerEvents: 'auto',
             overflow: 'visible',
-            maxWidth: '60%'
+            maxWidth: hasDescription ? '48%' : '60%'
           }}
         >
           {/* Vertical separator */}
@@ -1806,7 +1748,11 @@ const DeviceShape2dComponent = ({
               <Box
                 key={svi.id}
                 className="svi-hoverable"
-                data-svi-tooltip={JSON.stringify({ vlan: svi.vlan, ip: svi.ip, color: svi.color })}
+                data-svi-tooltip={JSON.stringify({
+                  vlan: svi.vlan,
+                  ip: svi.ip || undefined,
+                  color: svi.color
+                })}
                 sx={{
                   position: 'relative',
                   display: 'flex',
@@ -1947,6 +1893,7 @@ const DeviceShape2dComponent = ({
               compactLabel={compactPortLabels}
               poe={isPc ? null : port.poe ?? null}
               poweredByPoe={isPc ? poweredByPoe : false}
+              poePowerWarning={isPc ? poePowerWarning : false}
               labelPosition="above"
               isHovered={hoveredPortId === port.id}
             />

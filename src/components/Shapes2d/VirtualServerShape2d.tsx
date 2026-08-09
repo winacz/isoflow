@@ -165,7 +165,7 @@ export const VirtualServerShape2d = ({
       return {
         id: svi.id,
         vlan,
-        ip: svi.ip?.trim() || '',
+        ip: svi.dhcp ? 'DHCP' : svi.ip?.trim() || '',
         color
       };
     });

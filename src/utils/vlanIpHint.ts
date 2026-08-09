@@ -1,4 +1,4 @@
-import { getModelItemPorts } from 'src/config';
+import { getModelItemPorts, getShape2dPortIfaceName } from 'src/config';
 import type { Connector, ModelItem } from 'src/types';
 import {
   isNonVlanAwareDevice,
@@ -7,6 +7,7 @@ import {
   vlansMatch
 } from 'src/utils/vlanColors';
 import { findPatchPanelBridgePeer, isPatchPanelItem } from 'src/utils/patchPanel';
+import { isSwitchLikeIcon } from 'src/utils/shape2dLayout';
 
 export type VlanIpHint =
   | { kind: 'suggestion'; placeholder: string; networkKey: string }
@@ -124,7 +125,7 @@ const collectLocalAccessVlans = (item: ModelItem): Set<string> => {
 /**
  * Resolve peer on the other end of a cable, following patch-panel bridges.
  */
-const resolveCablePeer = ({
+export const resolveCablePeer = ({
   itemId,
   portId,
   connectors,
@@ -164,6 +165,80 @@ const resolveCablePeer = ({
   }
 
   return { itemId: peerItem.id, portId: other.ref.port };
+};
+
+export type SwitchAccessUplink = {
+  switchItemId: string;
+  switchName: string;
+  switchPortId: string;
+  switchPortLabel: string;
+  vlan: string;
+  vlanColorCustom?: string;
+  /** Peer exists but is trunk — host cannot inherit access VLAN. */
+  isTrunk?: boolean;
+};
+
+const switchPortDisplayLabel = (item: ModelItem, portId: string): string => {
+  const named =
+    item.ports?.[portId]?.name?.trim() ||
+    item.ports?.[portId]?.label?.trim();
+  if (named) return named;
+  if (item.icon) {
+    return getShape2dPortIfaceName(item.icon, portId) || portId;
+  }
+  return portId;
+};
+
+/**
+ * Access uplink for an endpoint port: peer switch access VLAN (patch panels bridged).
+ */
+export const findSwitchAccessUplinkForPort = ({
+  itemId,
+  portId,
+  connectors,
+  modelItems
+}: {
+  itemId: string;
+  portId: string;
+  connectors: Connector[];
+  modelItems: ModelItem[];
+}): SwitchAccessUplink | null => {
+  const peer = resolveCablePeer({
+    itemId,
+    portId,
+    connectors,
+    modelItems
+  });
+  if (!peer) return null;
+
+  const peerItem = modelItems.find((candidate) => candidate.id === peer.itemId);
+  if (!peerItem || isNonVlanAwareDevice(peerItem.icon)) return null;
+  if (!isSwitchLikeIcon(peerItem.icon)) return null;
+
+  const peerCfg = peerItem.ports?.[peer.portId];
+  const switchName = peerItem.name?.trim() || 'Switch';
+  const switchPortLabel = switchPortDisplayLabel(peerItem, peer.portId);
+
+  if (peerCfg?.type === 'trunk') {
+    return {
+      switchItemId: peerItem.id,
+      switchName,
+      switchPortId: peer.portId,
+      switchPortLabel,
+      vlan: '1',
+      isTrunk: true
+    };
+  }
+
+  const vlan = normalizeVlanKey(peerCfg?.vlan) || '1';
+  return {
+    switchItemId: peerItem.id,
+    switchName,
+    switchPortId: peer.portId,
+    switchPortLabel,
+    vlan,
+    vlanColorCustom: peerCfg?.vlanColor
+  };
 };
 
 /**
@@ -225,6 +300,7 @@ const collectIpsInVlan = ({
     // Switch SVIs
     item.svis?.forEach((svi) => {
       if (!vlansMatch(svi.vlan, vlan)) return;
+      if (svi.dhcp) return;
       const ip = svi.ip?.trim();
       if (ip) ips.push(ip);
     });
@@ -251,7 +327,7 @@ const collectIpsInVlan = ({
 
 /**
  * Suggest an IP pattern for a node from SVIs / peers in the same VLAN.
- * Conflicting networks → `ambiguous` ("Nie jasna konfiguracja IP").
+ * Conflicting networks → `ambiguous` (UI: różne sieci w VLAN, brak podpowiedzi).
  */
 export const getVlanIpHint = ({
   itemId,

@@ -9,7 +9,7 @@ import {
   SWITCH_2D_SIZE,
   getCabinetSize
 } from 'src/config';
-import { generateId, layoutDeviceTemplate, getCabinetSlotTile } from 'src/utils';
+import { generateId, layoutDeviceTemplate, getCabinetSlotTile, ViewKindEnum } from 'src/utils';
 
 /** Shared 48-port RACK template (access + core). */
 export const RACK_48_TEMPLATE: DeviceTemplate = {
@@ -434,7 +434,7 @@ export const createStartingTopology2d = (): InitialData => {
   ];
 
   return {
-    title: 'Sieć karczma',
+    title: 'Karczma',
     version: '1.0',
     fitToView: true,
     projectionMode: 'TWO_D',
@@ -445,7 +445,8 @@ export const createStartingTopology2d = (): InitialData => {
     views: [
       {
         id: viewId,
-        name: 'Plan',
+        name: 'Szafa - Schowek',
+        kind: ViewKindEnum.PLAN_2D_V3,
         items: [
           { id: cabinetId, tile: cabinetTile },
           {

@@ -9,25 +9,22 @@ import { DragAndDrop } from 'src/components/DragAndDrop/DragAndDrop';
 import { ItemControlsManager } from 'src/components/ItemControls/ItemControlsManager';
 import { ToolMenu } from 'src/components/ToolMenu/ToolMenu';
 import { useUiStateStore } from 'src/stores/uiStateStore';
-import { useModelStore } from 'src/stores/modelStore';
-import { MainMenu } from 'src/components/MainMenu/MainMenu';
 import { ZoomControls } from 'src/components/ZoomControls/ZoomControls';
 import { ConnectorRelationPanel } from 'src/components/ConnectorRelationPanel/ConnectorRelationPanel';
 import { useResizeObserver } from 'src/hooks/useResizeObserver';
 import { ContextMenuManager } from 'src/components/ContextMenu/ContextMenuManager';
-import { ViewModeTabs } from 'src/components/ViewModeTabs/ViewModeTabs';
+import { ViewModeTabs, VIEW_MODE_TABS_BAR_HEIGHT } from 'src/components/ViewModeTabs/ViewModeTabs';
 import { PortPipOverlay } from 'src/components/PortPipOverlay/PortPipOverlay';
 import { PortPipHoverController } from 'src/components/PortPipOverlay/PortPipHoverController';
 import { Shape2dPortHoverController } from 'src/components/PortPipOverlay/Shape2dPortHoverController';
 import { PortLoupeOverlay } from 'src/components/PortPipOverlay/PortLoupeOverlay';
 import { SviHoverController } from 'src/components/UiOverlay/SviHoverController';
 import { WorkshopView } from 'src/components/Workshop/WorkshopView';
+import { PlanPickerView } from 'src/components/PlanPicker/PlanPickerView';
 import { PerfHud } from 'src/components/PerfHud/PerfHud';
 import { ExportImageDialog } from '../ExportImageDialog/ExportImageDialog';
 import { useScene } from 'src/hooks/useScene';
 import {
-  ViewKindEnum,
-  getProjectTabs,
   isPlanProjection,
   isPlan2dCanvas
 } from 'src/utils';
@@ -124,20 +121,17 @@ export const UiOverlay = () => {
   const availableTools = useMemo(() => {
     return getEditorModeMapping(editorMode);
   }, [editorMode]);
+  const topChrome = availableTools.includes('VIEW_MODE_TABS')
+    ? VIEW_MODE_TABS_BAR_HEIGHT
+    : 0;
   const rendererEl = useUiStateStore((state) => {
     return state.rendererEl;
   });
   const isWorkshopOpen = useUiStateStore((state) => {
     return state.isWorkshopOpen;
   });
-  const activeViewId = useUiStateStore((state) => {
-    return state.view;
-  });
-  const views = useModelStore((state) => {
-    return state.views;
-  });
-  const projectTitle = useModelStore((state) => {
-    return state.title;
+  const isPlanPickerOpen = useUiStateStore((state) => {
+    return state.isPlanPickerOpen;
   });
   const isRightSidebarOpen = useUiStateStore((state) => {
     return state.isRightSidebarOpen;
@@ -146,17 +140,6 @@ export const UiOverlay = () => {
   const { size: rendererSize } = useResizeObserver(rendererEl);
   const isTwoD = isPlanProjection(projectionMode);
 
-  const activePlanLabel = useMemo(() => {
-    if (isWorkshopOpen) return null;
-    const tabs = getProjectTabs(views, projectTitle);
-    const plan = tabs.find(
-      (tab) =>
-        tab.viewId === activeViewId &&
-        (tab.kind === ViewKindEnum.PLAN_2D ||
-          tab.kind === ViewKindEnum.PLAN_2D_V3)
-    );
-    return plan?.label ?? null;
-  }, [views, projectTitle, activeViewId, isWorkshopOpen]);
   // In the 2D plan the dock always has content: with nothing selected it shows
   // a short hint (layout tools are on the RMB context menu).
   const hasItemControlsContent = Boolean(itemControls) || isTwoD;
@@ -214,7 +197,8 @@ export const UiOverlay = () => {
   const showPlanSidebarChrome =
     isTwoD &&
     availableTools.includes('ITEM_CONTROLS') &&
-    !isWorkshopOpen;
+    !isWorkshopOpen &&
+    !isPlanPickerOpen;
   const planSidebarExpanded = showPlanSidebarChrome && isRightSidebarOpen;
 
   /** Iso mode: floating panel only when there is content. */
@@ -222,7 +206,8 @@ export const UiOverlay = () => {
     !isTwoD &&
     availableTools.includes('ITEM_CONTROLS') &&
     hasItemControlsContent &&
-    !isWorkshopOpen;
+    !isWorkshopOpen &&
+    !isPlanPickerOpen;
 
   return (
     <>
@@ -232,6 +217,7 @@ export const UiOverlay = () => {
       <PortPipOverlay />
       <SviHoverController />
       {isWorkshopOpen && <WorkshopView />}
+      {isPlanPickerOpen && <PlanPickerView />}
       <Box
         sx={{
           position: 'absolute',
@@ -250,17 +236,22 @@ export const UiOverlay = () => {
                 sx={{
                   position: 'absolute',
                   width: `${itemControlsWidth}px`,
-                  height: `${rendererSize.height}px`,
-                  maxHeight: `${rendererSize.height}px`,
+                  height: `${rendererSize.height - topChrome}px`,
+                  maxHeight: `${rendererSize.height - topChrome}px`,
                   overflow: 'hidden',
                   borderRadius: 0,
                   boxShadow: '-2px 0 12px rgba(15,23,42,0.08)',
                   display: 'flex',
-                  flexDirection: 'column'
+                  flexDirection: 'column',
+                  bgcolor: 'transparent',
+                  background:
+                    'linear-gradient(165deg, #eef2f7 0%, #e8edf4 42%, #e2e8f0 100%)',
+                  borderLeft: '1px solid',
+                  borderColor: 'rgba(148, 163, 184, 0.45)'
                 }}
                 style={{
                   left: rendererSize.width - itemControlsWidth,
-                  top: 0
+                  top: topChrome
                 }}
               >
                 {/* Tools stay fixed — not inside the scrolling context */}
@@ -272,7 +263,9 @@ export const UiOverlay = () => {
                     gap: 0.5,
                     px: 0.75,
                     py: 0.75,
-                    bgcolor: 'background.paper'
+                    bgcolor: 'rgba(255,255,255,0.45)',
+                    borderBottom: '1px solid',
+                    borderColor: 'rgba(148, 163, 184, 0.35)'
                   }}
                 >
                   <Box sx={{ flex: 1, minWidth: 0 }}>
@@ -413,7 +406,7 @@ export const UiOverlay = () => {
                 }}
                 style={{
                   left: rendererSize.width - appPadding.x,
-                  top: appPadding.y,
+                  top: topChrome + appPadding.y,
                   transform: 'translateX(-100%)'
                 }}
               >
@@ -456,8 +449,9 @@ export const UiOverlay = () => {
             }}
             style={{
               left: appPadding.x,
-              top: appPadding.y * 2 + spacing(2),
-              maxHeight: rendererSize.height - appPadding.y * 6
+              top: topChrome + appPadding.y * 2 + spacing(2),
+              maxHeight:
+                rendererSize.height - topChrome - appPadding.y * 6
             }}
           >
             <ItemControlsManager />
@@ -475,14 +469,16 @@ export const UiOverlay = () => {
               }}
               style={{
                 left: rendererSize.width - appPadding.x,
-                top: appPadding.y
+                top: topChrome + appPadding.y
               }}
             >
               <ToolMenu />
             </Box>
           )}
 
-        {availableTools.includes('ZOOM_CONTROLS') && !isWorkshopOpen && (
+        {availableTools.includes('ZOOM_CONTROLS') &&
+          !isWorkshopOpen &&
+          !isPlanPickerOpen && (
           <Box
             sx={{
               position: 'absolute',
@@ -503,33 +499,17 @@ export const UiOverlay = () => {
 
         {/* Density group tools: RMB context menu (2D v3) */}
 
-        {availableTools.includes('MAIN_MENU') && !isWorkshopOpen && (
-          <Box
-            sx={{
-              position: 'absolute',
-              display: 'flex',
-              flexDirection: 'column',
-              alignItems: 'flex-start',
-              gap: 1
-            }}
-            style={{
-              top: appPadding.y,
-              left: appPadding.x
-            }}
-          >
-            <MainMenu planLabel={activePlanLabel} />
-          </Box>
-        )}
-
         {availableTools.includes('VIEW_MODE_TABS') && (
           <Box
             sx={{
               position: 'absolute',
-              transform: 'translateX(-50%)'
+              left: 0,
+              top: 0,
+              zIndex: 30,
+              pointerEvents: 'auto'
             }}
             style={{
-              top: appPadding.y,
-              left: rendererSize.width / 2
+              width: rendererSize.width
             }}
           >
             <ViewModeTabs />
