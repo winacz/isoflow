@@ -7,6 +7,7 @@ import { Grid } from 'src/components/Grid/Grid';
 import { Cursor } from 'src/components/Cursor/Cursor';
 import { Nodes } from 'src/components/SceneLayers/Nodes/Nodes';
 import { NodeDescriptionLabels } from 'src/components/SceneLayers/Nodes/NodeDescriptionLabels';
+import { IsoNodeLabels } from 'src/components/SceneLayers/Nodes/IsoNodeLabels';
 import { MultiSelectMoveHandle } from 'src/components/SceneLayers/Nodes/MultiSelectMoveHandle';
 import { Rectangles } from 'src/components/SceneLayers/Rectangles/Rectangles';
 import { Connectors } from 'src/components/SceneLayers/Connectors/Connectors';
@@ -182,6 +183,22 @@ export const Renderer = ({ showGrid, backgroundColor }: RendererProps) => {
         }
       }}
     >
+      {/* Plan 2D: grid under nodes so enlarge (header click) is not covered by lines. */}
+      {isTwoD && isShowGrid && (
+        <Box
+          sx={{
+            position: 'absolute',
+            width: '100%',
+            height: '100%',
+            top: 0,
+            left: 0,
+            zIndex: 0,
+            pointerEvents: 'none'
+          }}
+        >
+          <Grid />
+        </Box>
+      )}
       {!isTwoD && (
         <SceneViewport>
           <SceneLayer>
@@ -198,9 +215,6 @@ export const Renderer = ({ showGrid, backgroundColor }: RendererProps) => {
           </SceneLayer>
           <SceneLayer order={11} sx={{ pointerEvents: 'none' }}>
             <Nodes nodes={visibleNodes} />
-          </SceneLayer>
-          <SceneLayer order={12} sx={{ pointerEvents: 'none' }}>
-            <TransformControlsManager />
           </SceneLayer>
         </SceneViewport>
       )}
@@ -245,17 +259,20 @@ export const Renderer = ({ showGrid, backgroundColor }: RendererProps) => {
           )}
         </SceneViewport>
       )}
-      <Box
-        sx={{
-          position: 'absolute',
-          width: '100%',
-          height: '100%',
-          top: 0,
-          left: 0
-        }}
-      >
-        {isShowGrid && <Grid />}
-      </Box>
+      {/* Isometric keeps grid overlay on top of the diamond floor. */}
+      {!isTwoD && (
+        <Box
+          sx={{
+            position: 'absolute',
+            width: '100%',
+            height: '100%',
+            top: 0,
+            left: 0
+          }}
+        >
+          {isShowGrid && <Grid />}
+        </Box>
+      )}
       {mode.showCursor && mode.type !== 'CURSOR' && (
         <SceneLayer omitTransform={false}>
           <Cursor />
@@ -275,6 +292,17 @@ export const Renderer = ({ showGrid, backgroundColor }: RendererProps) => {
         }}
       />
       {/* Above interaction overlay — own transform (outside SceneViewport) */}
+      {!isTwoD && (
+        <SceneLayer
+          omitTransform={false}
+          order={12}
+          sx={{ pointerEvents: 'none' }}
+        >
+          <IsoNodeLabels nodes={visibleNodes} />
+          {/* Must sit above the interaction layer or resize handles never receive clicks. */}
+          <TransformControlsManager />
+        </SceneLayer>
+      )}
       {isTwoD && (
         <SceneLayer omitTransform={false} order={12} sx={{ pointerEvents: 'none' }}>
           <NodeDescriptionLabels nodes={visibleNodes} />
@@ -296,6 +324,7 @@ export const Renderer = ({ showGrid, backgroundColor }: RendererProps) => {
       {isTwoDV3 && (
         <SceneLayer omitTransform={false} order={11} sx={{ pointerEvents: 'none' }}>
           <MultiSelectMoveHandle />
+          <TransformControlsManager />
         </SceneLayer>
       )}
     </Box>

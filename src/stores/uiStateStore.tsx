@@ -107,6 +107,7 @@ const initialState = () => {
       simplePaths: INITIAL_UI_STATE.simplePaths,
       routingStyle: INITIAL_UI_STATE.routingStyle,
       isWorkshopOpen: INITIAL_UI_STATE.isWorkshopOpen,
+      workshopSection: INITIAL_UI_STATE.workshopSection,
       isRightSidebarOpen: INITIAL_UI_STATE.isRightSidebarOpen,
       actions: {
         setView: (view) => {
@@ -614,6 +615,9 @@ const initialState = () => {
         },
         setWorkshopOpen: (isWorkshopOpen) => {
           set({ isWorkshopOpen });
+        },
+        setWorkshopSection: (workshopSection) => {
+          set({ workshopSection });
         },
         setRightSidebarOpen: (isRightSidebarOpen) => {
           set({ isRightSidebarOpen });

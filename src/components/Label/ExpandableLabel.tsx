@@ -10,6 +10,8 @@ type Props = Omit<LabelProps, 'maxHeight'> & {
   collapsedMaxHeight?: number;
   /** Allow the card itself to receive pointer events (2D drag). */
   interactive?: boolean;
+  /** Show expand arrow even when collapsed content is not truncated. */
+  forceExpandControl?: boolean;
 };
 
 const STANDARD_LABEL_HEIGHT = 80;
@@ -19,6 +21,7 @@ export const ExpandableLabel = ({
   onToggleExpand,
   collapsedMaxHeight = STANDARD_LABEL_HEIGHT,
   interactive = false,
+  forceExpandControl = false,
   ...rest
 }: Props) => {
   const [isExpanded, setIsExpanded] = useState(false);
@@ -63,12 +66,14 @@ export const ExpandableLabel = ({
   }, [isExpanded, measureTruncation]);
 
   const containerMaxHeight = isExpanded ? undefined : collapsedMaxHeight;
-  const showExpandControl = isExpanded || isContentTruncated;
+  const showExpandControl =
+    isExpanded || isContentTruncated || forceExpandControl;
 
   return (
     <Label
       {...rest}
-      maxHeight={containerMaxHeight}
+      // Keep padding outside the content clamp so margins match isometric.
+      maxHeight={undefined}
       maxWidth={isExpanded ? rest.maxWidth * 1.5 : rest.maxWidth}
       sx={{
         pointerEvents: interactive ? 'auto' : 'none',

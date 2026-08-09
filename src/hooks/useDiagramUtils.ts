@@ -1,12 +1,13 @@
 import { useCallback, useMemo } from 'react';
 import { useUiStateStore } from 'src/stores/uiStateStore';
-import { useModelStore } from 'src/stores/modelStore';
+import { useModelStore, useModelStoreApi } from 'src/stores/modelStore';
 import { Size, Coords } from 'src/types';
 import {
   getUnprojectedBounds as getUnprojectedBoundsUtil,
   getFitToViewParams as getFitToViewParamsUtil,
   CoordsUtils,
-  isPlan2dCanvas
+  isPlan2dCanvas,
+  snapModelToGrid
 } from 'src/utils';
 import { useScene } from 'src/hooks/useScene';
 import { useResizeObserver } from './useResizeObserver';
@@ -16,8 +17,15 @@ export const useDiagramUtils = () => {
   const modelItems = useModelStore((state) => {
     return state.items;
   });
+  const modelStore = useModelStoreApi();
+  const modelActions = useModelStore((state) => {
+    return state.actions;
+  });
   const projectionMode = useUiStateStore((state) => {
     return state.projectionMode;
+  });
+  const gridStyle = useUiStateStore((state) => {
+    return state.gridStyle;
   });
   const rendererEl = useUiStateStore((state) => {
     return state.rendererEl;
@@ -54,6 +62,18 @@ export const useDiagramUtils = () => {
   );
 
   const fitToView = useCallback(async () => {
+    let viewForFit = scene.currentView;
+
+    // Plan 2D: snap free nodes / areas to the floor grid before fitting.
+    if (isPlan2dCanvas(projectionMode)) {
+      const snapped = snapModelToGrid(modelStore.getState(), { gridStyle });
+      modelActions.set({ views: snapped.views });
+      const snappedView = snapped.views.find((view) => view.id === viewForFit.id);
+      if (snappedView) {
+        viewForFit = snappedView;
+      }
+    }
+
     // Sidebar covers the right edge in 2D — fit into the free canvas only.
     const sidebarW =
       isPlan2dCanvas(projectionMode) && itemControls
@@ -63,7 +83,11 @@ export const useDiagramUtils = () => {
       width: Math.max(120, rendererSize.width - sidebarW),
       height: rendererSize.height
     };
-    const { zoom, scroll } = getFitToViewParams(viewport);
+    const { zoom, scroll } = getFitToViewParamsUtil(
+      viewForFit,
+      viewport,
+      boundsOptions
+    );
 
     uiStateActions.setScroll({
       position: {
@@ -75,10 +99,14 @@ export const useDiagramUtils = () => {
     uiStateActions.setZoom(zoom);
   }, [
     uiStateActions,
-    getFitToViewParams,
+    scene.currentView,
+    boundsOptions,
     rendererSize,
     projectionMode,
-    itemControls
+    itemControls,
+    modelStore,
+    modelActions,
+    gridStyle
   ]);
 
   return {

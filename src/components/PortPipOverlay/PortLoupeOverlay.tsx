@@ -29,7 +29,8 @@ import {
   setLoupeRevealLock,
   setLoupeGlassActive,
   isLoupeRevealLocked,
-  isLoupeGlassActive
+  isLoupeGlassActive,
+  hasNodeDescription
 } from 'src/utils';
 import { ModelItem } from 'src/types';
 
@@ -1221,7 +1222,7 @@ export const PortLoupeOverlay = () => {
                       svis={modelItem.svis}
                       ip={modelItem.dhcp ? 'DHCP' : modelItem.ip}
                       nodeIcon={modelItem.nodeIcon}
-                      description={modelItem.description}
+                      hasDescription={hasNodeDescription(modelItem)}
                       color={modelItem.color}
                       poweredByPoe={Boolean(modelItem.poweredByPoe)}
                       modelItems={modelItems}

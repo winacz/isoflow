@@ -31,7 +31,12 @@ export const sviSchema = z.object({
 export const modelItemSchema = z.object({
   id,
   name: constrainedStrings.name,
-  description: constrainedStrings.description.optional(),
+  /** Rich notes (Quill HTML) — opened via large editor, not on the badge. */
+  description: constrainedStrings.descriptionNotes.optional(),
+  /** Plakietka header. */
+  descriptionTitle: constrainedStrings.descriptionTitle.optional(),
+  /** Plakietka body (plain, max 500, single line). */
+  descriptionSummary: constrainedStrings.descriptionSummary.optional(),
   icon: id.optional(),
   /** Chassis / body fill for 2D plan devices (hex / hex8 / rgba). */
   color: z.string().max(64).optional(),
@@ -74,10 +79,10 @@ export const modelItemSchema = z.object({
    * When true, a green bolt shows on the jack; warn if not linked to PoE OUT.
    */
   poweredByPoe: z.boolean().optional(),
-  /** Portal from isometric node → Plan (2D) item / rectangle. */
+  /** Portal from isometric node → Plan item / area / whole 2D project. */
   portal: z
     .object({
-      targetType: z.enum(['ITEM', 'RECTANGLE']),
+      targetType: z.enum(['ITEM', 'RECTANGLE', 'VIEW']),
       targetId: id,
       label: z.string().max(120).optional()
     })

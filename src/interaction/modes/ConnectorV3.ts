@@ -7,7 +7,8 @@ import {
   setWindowCursor,
   BLACK_CROSSHAIR_CURSOR,
   screenToTile2dContinuous,
-  diagonalFanShape2dRoutes
+  diagonalFanShape2dRoutes,
+  resolveLoupePortHit
 } from 'src/utils';
 import { resolveOverlapsWithTargetDiagonal } from 'src/v3/densityGroupBuses';
 import { routeNewConnection, type RoutedConnector } from 'src/v3/routing';
@@ -36,7 +37,8 @@ const portUnderCursor = ({
   scroll,
   rendererSize,
   selectedItemIds,
-  enlargedItemId
+  enlargedItemId,
+  shape2dPortHover
 }: {
   scene: Parameters<NonNullable<ModeActions['mousedown']>>[0]['scene'];
   model: Parameters<NonNullable<ModeActions['mousedown']>>[0]['model'];
@@ -47,7 +49,15 @@ const portUnderCursor = ({
   rendererSize: { width: number; height: number };
   selectedItemIds: string[];
   enlargedItemId?: string | null;
+  shape2dPortHover: { itemId: string; portId: string | null } | null;
 }) => {
+  const loupeHit = resolveLoupePortHit({
+    shape2dPortHover,
+    viewItems: scene.items,
+    modelItems: model.items
+  });
+  if (loupeHit !== undefined) return loupeHit;
+
   const point = screenToTile2dContinuous({
     mouse: screen,
     zoom,
@@ -92,7 +102,8 @@ export const ConnectorV3: ModeActions = {
       scroll: uiState.scroll,
       rendererSize,
       selectedItemIds: uiState.selectedItemIds,
-      enlargedItemId: uiState.shape2dEnlargedItemId
+      enlargedItemId: uiState.shape2dEnlargedItemId,
+      shape2dPortHover: uiState.shape2dPortHover
     });
 
     // Nothing to start from — stay armed rather than creating a stray cable.
@@ -176,7 +187,8 @@ export const ConnectorV3: ModeActions = {
       scroll: uiState.scroll,
       rendererSize,
       selectedItemIds: uiState.selectedItemIds,
-      enlargedItemId: uiState.shape2dEnlargedItemId
+      enlargedItemId: uiState.shape2dEnlargedItemId,
+      shape2dPortHover: uiState.shape2dPortHover
     });
 
     const sameJack =

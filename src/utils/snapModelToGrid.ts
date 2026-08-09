@@ -8,7 +8,6 @@ import {
 import { CoordsUtils } from './CoordsUtils';
 import { getCabinetSlotTile, isCabinetItem, isFullWidthRackItem } from './cabinet';
 import { getGridSnapStep, snapTile2dToGrid } from './renderer';
-import { isPlan2dCanvas } from './projection';
 
 const tileNeedsSnap = (tile: Coords, step: { x: number; y: number }) => {
   const snapped = snapTile2dToGrid(tile, step);
@@ -134,21 +133,19 @@ const snapViewToGrid = (
 };
 
 /**
- * When opening a 2D diagram, snap Plan-view free nodes / areas to the floor
- * grid and re-seat mounted devices into exact cabinet 1U slots.
+ * Snap Plan-view free nodes / areas to the floor grid and re-seat mounted
+ * devices into exact cabinet 1U slots.
  * Never touch classic isometric views (even in a mixed Iso+Plan model).
+ * Runs regardless of the currently active projection (app may open on Iso).
  */
 export const snapModelToGrid = (
   model: Model,
   options: {
     gridStyle?: string | null;
+    /** @deprecated ignored — plan views are always snapped */
     projectionMode?: ProjectionMode;
   } = {}
 ): Model => {
-  if (!isPlan2dCanvas(options.projectionMode ?? '')) {
-    return model;
-  }
-
   const floorStep = getGridSnapStep(options.gridStyle);
   const views = model.views.map((view) => {
     if (!isPlan2dView(view, model.items)) {

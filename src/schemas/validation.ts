@@ -210,19 +210,25 @@ export const validateRectangle = (
   const issues: Issue[] = [];
 
   if (rectangle.color) {
-    try {
-      getItemByIdOrThrow(ctx.model.colors, rectangle.color);
-    } catch (e) {
-      issues.push({
-        type: 'INVALID_RECTANGLE_COLOR_REF',
-        params: {
-          rectangle: rectangle.id,
-          view: ctx.view.id,
-          color: rectangle.color
-        },
-        message:
-          'Rectangle references a color that does not exist in the model.'
-      });
+    const colorRef = rectangle.color.trim();
+    const isCssColor =
+      /^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})$/.test(colorRef) ||
+      /^(rgb|hsl)a?\(/i.test(colorRef);
+    if (!isCssColor) {
+      try {
+        getItemByIdOrThrow(ctx.model.colors, rectangle.color);
+      } catch (e) {
+        issues.push({
+          type: 'INVALID_RECTANGLE_COLOR_REF',
+          params: {
+            rectangle: rectangle.id,
+            view: ctx.view.id,
+            color: rectangle.color
+          },
+          message:
+            'Rectangle references a color that does not exist in the model.'
+        });
+      }
     }
   }
 

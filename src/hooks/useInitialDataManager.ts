@@ -43,7 +43,19 @@ export const useInitialDataManager = () => {
 
       setIsReady(false);
 
-      const validationResult = modelSchema.safeParse(_initialData);
+      // Template icons must exist before modelSchema validates icon refs.
+      let initialData: InitialData = {
+        ..._initialData,
+        deviceTemplates: mergeDeviceTemplatesWithLibrary(
+          _initialData.deviceTemplates
+        )
+      };
+      initialData.icons = ensureDeviceTemplateIcons(
+        initialData.icons ?? [],
+        initialData.deviceTemplates ?? []
+      );
+
+      const validationResult = modelSchema.safeParse(initialData);
 
       if (!validationResult.success) {
         // TODO: let's get better at reporting error messages here (starting with how we present them to users)
@@ -57,17 +69,7 @@ export const useInitialDataManager = () => {
         return;
       }
 
-      let initialData = _initialData;
-
-      const deviceTemplates = mergeDeviceTemplatesWithLibrary(
-        initialData.deviceTemplates
-      );
-      initialData.deviceTemplates = deviceTemplates;
-      initialData.icons = ensureDeviceTemplateIcons(
-        initialData.icons ?? [],
-        deviceTemplates
-      );
-      saveDeviceTemplatesLibrary(deviceTemplates);
+      saveDeviceTemplatesLibrary(initialData.deviceTemplates ?? []);
 
       // Stamp view kinds/orders and ensure default project tabs exist.
       initialData = ensureProjectViews(initialData);

@@ -3,8 +3,12 @@ import {
   Accordion,
   AccordionDetails,
   AccordionSummary,
-  Slider,
   Box,
+  Button,
+  Dialog,
+  DialogContent,
+  DialogTitle,
+  Slider,
   TextField,
   Typography
 } from '@mui/material';
@@ -12,7 +16,7 @@ import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import { ModelItem, ViewItem } from 'src/types';
 import { MarkdownEditor } from 'src/components/MarkdownEditor/MarkdownEditor';
 import { useModelItem } from 'src/hooks/useModelItem';
-import { MARKDOWN_EMPTY_VALUE } from 'src/config';
+import { hasNodeDescriptionNotes } from 'src/utils';
 import { DeleteButton } from '../../components/DeleteButton';
 import { Section } from '../../components/Section';
 import { NodePortalSettings } from './NodePortalSettings';
@@ -37,9 +41,8 @@ export const NodeSettings = ({
 }: Props) => {
   const modelItem = useModelItem(node.id);
   const [opisOpen, setOpisOpen] = useState(false);
-  const hasDescription = Boolean(
-    modelItem.description && modelItem.description !== MARKDOWN_EMPTY_VALUE
-  );
+  const [notesDialogOpen, setNotesDialogOpen] = useState(false);
+  const hasNotes = hasNodeDescriptionNotes(modelItem);
 
   return (
     <>
@@ -78,17 +81,18 @@ export const NodeSettings = ({
               color="text.secondary"
               textTransform="uppercase"
             >
-              Description{hasDescription ? '' : ' (empty)'}
+              Description{hasNotes ? '' : ' (empty)'}
             </Typography>
           </AccordionSummary>
           <AccordionDetails sx={{ px: 0, pt: 0, pb: 0.5 }}>
-            <MarkdownEditor
-              value={modelItem.description}
-              onChange={(text) => {
-                if (modelItem.description !== text)
-                  onModelItemUpdated({ description: text });
-              }}
-            />
+            <Button
+              variant="contained"
+              size="small"
+              onClick={() => setNotesDialogOpen(true)}
+              sx={{ textTransform: 'none' }}
+            >
+              {hasNotes ? 'Otwórz opis' : 'Dodaj opis'}
+            </Button>
           </AccordionDetails>
         </Accordion>
       </Section>
@@ -116,6 +120,44 @@ export const NodeSettings = ({
           <DeleteButton onClick={onDeleted} />
         </Box>
       </Section>
+
+      <Dialog
+        open={notesDialogOpen}
+        onClose={() => setNotesDialogOpen(false)}
+        fullWidth
+        maxWidth="md"
+        PaperProps={{
+          sx: {
+            height: 'min(82vh, 720px)',
+            display: 'flex',
+            flexDirection: 'column'
+          }
+        }}
+      >
+        <DialogTitle sx={{ fontSize: 16, fontWeight: 700, pb: 1 }}>
+          Opis — {modelItem.name || 'urządzenie'}
+        </DialogTitle>
+        <DialogContent
+          sx={{
+            display: 'flex',
+            flexDirection: 'column',
+            flex: 1,
+            minHeight: 0,
+            pt: 1
+          }}
+        >
+          <MarkdownEditor
+            variant="notebook"
+            height={520}
+            value={modelItem.description}
+            onChange={(text) => {
+              if (modelItem.description !== text) {
+                onModelItemUpdated({ description: text });
+              }
+            }}
+          />
+        </DialogContent>
+      </Dialog>
     </>
   );
 };

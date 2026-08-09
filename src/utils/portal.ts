@@ -13,10 +13,16 @@ import {
   SHAPE_2D_CABINET_ID,
   TILE_SIZE_2D
 } from 'src/config';
-import { getShape2dCenterPosition } from './renderer';
+import { getShape2dCenterPosition, getFitToViewParams } from './renderer';
 import { findPlanView } from './plan2dv2';
+import {
+  ViewKindEnum,
+  getIpamPlanTabs,
+  inferViewKind,
+  projectionModeForKind
+} from './projectTabs';
 
-export type PortalTargetType = 'ITEM' | 'RECTANGLE';
+export type PortalTargetType = 'ITEM' | 'RECTANGLE' | 'VIEW';
 
 export type PortalTarget = {
   targetType: PortalTargetType;
@@ -45,7 +51,7 @@ const itemKindLabel = (modelItem: ModelItem | undefined) => {
   return 'Urządzenie';
 };
 
-/** Resolve portal link text (building / device name on the Plan). */
+/** Resolve portal link text (building / device / project name on Plan). */
 export const getPortalDisplayLabel = (
   portal: ModelItemPortal,
   model: Model
@@ -60,10 +66,26 @@ export const getPortalDisplayLabel = (
   return match?.label ?? portal.targetId;
 };
 
-/** All Plan-view nodes, cabinets and areas available as portal targets. */
+/** All Plan-view nodes, cabinets, areas and 2D projects available as portal targets. */
 export const listPlan2dPortalTargets = (model: Model): PortalTarget[] => {
+  const planProjects: PortalTarget[] = getIpamPlanTabs(
+    model.views,
+    model.title
+  ).map((tab) => {
+    return {
+      targetType: 'VIEW' as const,
+      targetId: tab.viewId,
+      label: tab.label,
+      kindLabel: 'Projekt 2D'
+    };
+  });
+
   const plan = findPlan2dView(model);
-  if (!plan) return [];
+  if (!plan) {
+    return planProjects.sort((a, b) => {
+      return a.label.localeCompare(b.label, 'pl', { sensitivity: 'base' });
+    });
+  }
 
   const items: PortalTarget[] = (plan.items ?? []).map((viewItem) => {
     const modelItem = model.items.find((candidate) => {
@@ -89,7 +111,10 @@ export const listPlan2dPortalTargets = (model: Model): PortalTarget[] => {
     };
   });
 
-  return [...items, ...rectangles].sort((a, b) => {
+  return [...planProjects, ...items, ...rectangles].sort((a, b) => {
+    // Projects first, then the rest A–Z.
+    if (a.targetType === 'VIEW' && b.targetType !== 'VIEW') return -1;
+    if (b.targetType === 'VIEW' && a.targetType !== 'VIEW') return 1;
     return a.label.localeCompare(b.label, 'pl', { sensitivity: 'base' });
   });
 };
@@ -106,6 +131,8 @@ export const getPortalTargetCenterPx = (
   plan: View,
   modelItems: ModelItem[]
 ): Coords | null => {
+  if (portal.targetType === 'VIEW') return null;
+
   if (portal.targetType === 'ITEM') {
     const viewItem = plan.items?.find((item) => {
       return item.id === portal.targetId;
@@ -163,6 +190,10 @@ export const getPortalTargetFootprintPx = (
   plan: View,
   modelItems: ModelItem[]
 ): Size => {
+  if (portal.targetType === 'VIEW') {
+    return { width: TILE_SIZE_2D * 20, height: TILE_SIZE_2D * 20 };
+  }
+
   if (portal.targetType === 'ITEM') {
     const modelItem = modelItems.find((item) => {
       return item.id === portal.targetId;
@@ -197,7 +228,8 @@ export type PortalJumpPlan = {
   scroll: Coords;
   select:
     | { type: 'ITEM'; id: string }
-    | { type: 'RECTANGLE'; id: string };
+    | { type: 'RECTANGLE'; id: string }
+    | null;
 };
 
 /** Compute 2D jump (zoom/scroll/selection) for an isometric→Plan portal. */
@@ -210,13 +242,6 @@ export const planPortalJump = ({
   model: Model;
   rendererSize: Size;
 }): PortalJumpPlan | null => {
-  const plan = findPlan2dView(model);
-  if (!plan) return null;
-
-  const centerPx = getPortalTargetCenterPx(portal, plan, model.items);
-  if (!centerPx) return null;
-
-  const footprint = getPortalTargetFootprintPx(portal, plan, model.items);
   const sidebarW = Math.min(
     340,
     Math.max(290, Math.round(rendererSize.width * 0.22))
@@ -225,6 +250,39 @@ export const planPortalJump = ({
     width: Math.max(120, rendererSize.width - sidebarW),
     height: rendererSize.height
   };
+
+  if (portal.targetType === 'VIEW') {
+    const view = model.views.find((candidate) => {
+      return candidate.id === portal.targetId;
+    });
+    if (!view) return null;
+    const kind = inferViewKind(view);
+    if (kind === ViewKindEnum.ISOMETRIC) return null;
+
+    const mode = projectionModeForKind(kind);
+    const { zoom, scroll } = getFitToViewParams(view, viewport, {
+      projectionMode: mode,
+      modelItems: model.items
+    });
+
+    return {
+      planViewId: view.id,
+      zoom,
+      scroll: {
+        x: scroll.x - sidebarW * 0.5,
+        y: scroll.y
+      },
+      select: null
+    };
+  }
+
+  const plan = findPlan2dView(model);
+  if (!plan) return null;
+
+  const centerPx = getPortalTargetCenterPx(portal, plan, model.items);
+  if (!centerPx) return null;
+
+  const footprint = getPortalTargetFootprintPx(portal, plan, model.items);
   const zoom = getPortalJumpZoom(viewport, footprint);
   const scroll = getScrollToCenterPx(centerPx, zoom);
 

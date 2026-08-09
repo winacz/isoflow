@@ -83,8 +83,8 @@ interface Props {
   ip?: string;
   /** Endpoint Node face icon (overrides shape-derived icon). */
   nodeIcon?: NodeIconKind | null;
-  /** Markdown / plain description shown under IP on Node face. */
-  description?: string;
+  /** Show (i) circle next to the device name when description fields exist. */
+  hasDescription?: boolean;
   /**
    * Drop shadow under free-standing devices.
    * Off for devices mounted inside a cabinet.
@@ -104,6 +104,37 @@ interface Props {
    */
   lodSimplified?: boolean;
 }
+
+/** Small (i) marker next to the device name when a description exists. */
+const DescriptionInfoDot = ({ size }: { size: number }) => {
+  const dim = Math.max(10, Math.round(size * 0.85));
+  return (
+    <Box
+      aria-hidden
+      title="Ma opis"
+      sx={{
+        flexShrink: 0,
+        width: dim,
+        height: dim,
+        borderRadius: '50%',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        bgcolor: 'rgba(37, 99, 235, 0.14)',
+        border: '1.5px solid rgba(37, 99, 235, 0.85)',
+        color: '#1d4ed8',
+        fontSize: Math.max(7, Math.round(dim * 0.62)),
+        fontWeight: 800,
+        lineHeight: 1,
+        letterSpacing: 0,
+        userSelect: 'none',
+        pointerEvents: 'none'
+      }}
+    >
+      i
+    </Box>
+  );
+};
 
 /**
  * Topology-card device (Switch / PC): thin frame, header, RJ45/SFP port grid.
@@ -131,7 +162,7 @@ const DeviceShape2dComponent = ({
   color = '#ffffff',
   ip,
   nodeIcon = null,
-  description,
+  hasDescription = false,
   showShadow = true,
   vlanBorderColor = null,
   poweredByPoe = false,
@@ -228,14 +259,6 @@ const DeviceShape2dComponent = ({
     }
     return 'pc';
   })();
-  const plainDescription = useMemo(() => {
-    if (!description?.trim() || description === '<p><br></p>') return '';
-    return description
-      .replace(/<[^>]+>/g, ' ')
-      .replace(/[#*_`>~\[\]]/g, '')
-      .replace(/\s+/g, ' ')
-      .trim();
-  }, [description]);
   const headerIconSize = isPc
     ? Math.max(22, Math.round(headerBandH * 0.88))
     : isRack
@@ -262,17 +285,10 @@ const DeviceShape2dComponent = ({
    * Font is sized so that address never ellipsizes.
    */
   const NODE_IP_WORST_CHARS = 18;
-  /**
-   * On-face description budget — longer text continues on the floating plakietka.
-   * Example capacity: "sdfasdfasdfasdfasdfasdfasdfasdfasdsdf" (39).
-   */
-  const NODE_DESC_FACE_MAX_CHARS = 39;
-  const faceDescription = plainDescription.slice(0, NODE_DESC_FACE_MAX_CHARS);
   const nodeMidLayout = (() => {
     if (!isPc) {
       return {
         ipFontSize: 12,
-        descFontSize: 11,
         midPadX: 6,
         midPadTop: 4,
         midPadBottom: 4,
@@ -290,35 +306,14 @@ const DeviceShape2dComponent = ({
     // Monospace digit advance ≈ 0.62em.
     const ipFontSize = Math.max(8, Math.floor(ipTextW / (NODE_IP_WORST_CHARS * 0.62)));
     const ipPadY = Math.max(4, Math.round(ipFontSize * 0.32));
-    const ipBoxH = ipFontSize * 1.15 + ipPadY * 2;
-    const contentH = Math.max(24, midBandH - midPadTop - midPadBottom);
-    const descH = Math.max(16, contentH - ipBoxH - gap);
-    const descW = Math.max(32, pxWidth - midPadX * 2);
-    const chars = Math.max(1, faceDescription.length || NODE_DESC_FACE_MAX_CHARS);
-    const charW = 0.52;
-    const lineHFactor = 1.08;
-    // Largest font that still fits when wrapping to fill the description box.
-    let descFontSize = 8;
-    const maxLines = Math.max(1, Math.floor(descH / 10));
-    for (let lines = 1; lines <= maxLines; lines += 1) {
-      const cpl = Math.max(1, Math.ceil(chars / lines));
-      const fsFromW = descW / (cpl * charW);
-      const fsFromH = descH / (lines * lineHFactor);
-      const fs = Math.floor(Math.min(fsFromW, fsFromH));
-      if (fs > descFontSize) descFontSize = fs;
-    }
-    descFontSize = Math.max(10, Math.min(descFontSize, Math.floor(descH / 1.05)));
     return {
       ipFontSize,
-      descFontSize,
       midPadX,
       midPadTop,
       midPadBottom,
       gap,
       ipPadX,
-      ipPadY,
-      descH,
-      descW
+      ipPadY
     };
   })();
   /** Full-width IP label: node color, less transparent than chassis tint. */
@@ -480,6 +475,7 @@ const DeviceShape2dComponent = ({
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
+              gap: `${Math.max(4, Math.round(nameSize * 0.25))}px`,
               px: `${Math.max(4, tileW * 0.2)}px`,
               boxSizing: 'border-box'
             }}
@@ -496,11 +492,12 @@ const DeviceShape2dComponent = ({
                 overflow: 'hidden',
                 whiteSpace: 'nowrap',
                 textOverflow: 'ellipsis',
-                maxWidth: '100%'
+                maxWidth: hasDescription ? 'calc(100% - 18px)' : '100%'
               }}
             >
               {name}
             </Typography>
+            {hasDescription ? <DescriptionInfoDot size={nameSize} /> : null}
           </Box>
         </Box>
       </Box>
@@ -1393,6 +1390,7 @@ const DeviceShape2dComponent = ({
                 height: '100%',
                 display: 'flex',
                 alignItems: 'center',
+                gap: `${Math.max(4, Math.round(headerNameSize * 0.22))}px`,
                 overflow: 'hidden'
               }}
             >
@@ -1404,7 +1402,8 @@ const DeviceShape2dComponent = ({
                   letterSpacing: 0.15,
                   lineHeight: 1.05,
                   userSelect: 'none',
-                  width: '100%',
+                  minWidth: 0,
+                  flex: '1 1 auto',
                   overflow: 'hidden',
                   whiteSpace: 'normal',
                   wordBreak: 'break-word',
@@ -1414,10 +1413,13 @@ const DeviceShape2dComponent = ({
               >
                 {name}
               </Typography>
+              {hasDescription ? (
+                <DescriptionInfoDot size={headerNameSize} />
+              ) : null}
             </Box>
           </Box>
 
-          {/* Node body — 30%: full-width IP label + description (no divider) */}
+          {/* Node body — 30%: full-width IP label */}
           <Box
             sx={{
               position: 'absolute',
@@ -1483,45 +1485,6 @@ const DeviceShape2dComponent = ({
                 {ip?.trim() || '—'}
               </Typography>
             </Box>
-            {faceDescription ? (
-              <Box
-                sx={{
-                  flex: '1 1 auto',
-                  minHeight: 0,
-                  width: '100%',
-                  px: `${nodeMidLayout.midPadX}px`,
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  overflow: 'hidden'
-                }}
-              >
-                <Typography
-                  sx={{
-                    color: '#334155',
-                    fontSize: nodeMidLayout.descFontSize,
-                    fontWeight: 700,
-                    lineHeight: 1.08,
-                    letterSpacing: 0.1,
-                    userSelect: 'none',
-                    width: '100%',
-                    height: '100%',
-                    maxHeight: '100%',
-                    overflow: 'hidden',
-                    whiteSpace: 'normal',
-                    wordBreak: 'break-all',
-                    overflowWrap: 'anywhere',
-                    textAlign: 'center',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    hyphens: 'auto'
-                  }}
-                >
-                  {faceDescription}
-                </Typography>
-              </Box>
-            ) : null}
           </Box>
 
           {/* Chassis edge above face content (IP label etc.) */}
@@ -1665,6 +1628,9 @@ const DeviceShape2dComponent = ({
             >
               {name}
             </Typography>
+            {hasDescription ? (
+              <DescriptionInfoDot size={headerNameSize} />
+            ) : null}
           </Box>
           {subtitle && !isRack && (
             <Typography
@@ -2030,7 +1996,7 @@ export const DeviceShape2d = React.memo(
     if (prev.color !== next.color) return false;
     if (prev.ip !== next.ip) return false;
     if (prev.nodeIcon !== next.nodeIcon) return false;
-    if (prev.description !== next.description) return false;
+    if (prev.hasDescription !== next.hasDescription) return false;
     if (prev.showShadow !== next.showShadow) return false;
     if (prev.vlanBorderColor !== next.vlanBorderColor) return false;
     if (prev.poweredByPoe !== next.poweredByPoe) return false;

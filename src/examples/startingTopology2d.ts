@@ -434,7 +434,7 @@ export const createStartingTopology2d = (): InitialData => {
   ];
 
   return {
-    title: 'Demo — szafa IDF + VLANy',
+    title: 'Sieć karczma',
     version: '1.0',
     fitToView: true,
     projectionMode: 'TWO_D',

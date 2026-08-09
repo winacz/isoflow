@@ -26,9 +26,6 @@ export const V3DensityGroupsPanel = () => {
   const toggle = useDensityGroupsDebugStore((state) => {
     return state.toggle;
   });
-  const setVisible = useDensityGroupsDebugStore((state) => {
-    return state.setVisible;
-  });
   const { items, runDensityGroupBuses, runArrangeDensityGroups } = useScene();
   const modelItems = useModelStore((state) => {
     return state.items;
@@ -44,7 +41,6 @@ export const V3DensityGroupsPanel = () => {
   const runBus = useCallback(
     (exitStyle: DensityBusExitStyle, label: string) => {
       setBusBusy(true);
-      setVisible(true);
       void (async () => {
         await yieldToMain();
         try {
@@ -64,12 +60,11 @@ export const V3DensityGroupsPanel = () => {
         }
       })();
     },
-    [runDensityGroupBuses, setVisible]
+    [runDensityGroupBuses]
   );
 
   const runArrange = useCallback(() => {
     setBusBusy(true);
-    setVisible(true);
     void (async () => {
       await yieldToMain();
       try {
@@ -92,11 +87,10 @@ export const V3DensityGroupsPanel = () => {
         setBusBusy(false);
       }
     })();
-  }, [runArrangeDensityGroups, setVisible]);
+  }, [runArrangeDensityGroups]);
 
   const runArrangeMagistrala = useCallback(() => {
     setBusBusy(true);
-    setVisible(true);
     void (async () => {
       await yieldToMain();
       try {
@@ -119,7 +113,7 @@ export const V3DensityGroupsPanel = () => {
         setBusBusy(false);
       }
     })();
-  }, [runArrangeDensityGroups, setVisible]);
+  }, [runArrangeDensityGroups]);
 
   return (
     <UiElement sx={{ px: 1.25, py: 1, width: 240 }}>

@@ -1,34 +1,20 @@
 import React, { useState } from 'react';
 import { Box, Stack, ToggleButton, ToggleButtonGroup } from '@mui/material';
 import { DeviceCreatorPanel } from 'src/components/ItemControls/DeviceCreator/DeviceCreatorPanel';
-import { VirtualServerCreatorPanel } from 'src/components/ItemControls/VirtualServerCreator/VirtualServerCreatorPanel';
-import { ServerV2CreatorPanel } from 'src/components/ItemControls/ServerV2Creator/ServerV2CreatorPanel';
 import { ConnectionMatrixCreatorPanel } from 'src/components/ConnectionMatrixTopology/ConnectionMatrixCreatorPanel';
+import { IpamPanel } from 'src/components/Workshop/IpamPanel';
 import { useModelStore, useModelStoreApi } from 'src/stores/modelStore';
+import { useUiStateStore } from 'src/stores/uiStateStore';
+
+type CreatorType = 'SWITCH' | 'MATRIX';
 
 export const WorkshopView = () => {
-  const [creatorType, setCreatorType] = useState<
-    'SWITCH' | 'SERVER' | 'SERVER_V2' | 'PATCH_PANEL' | 'MATRIX'
-  >('MATRIX');
-  const [v2PreviewMode, setV2PreviewMode] = useState<'logical' | 'rack'>(
-    'logical'
-  );
+  const section = useUiStateStore((state) => state.workshopSection);
+  const [creatorType, setCreatorType] = useState<CreatorType>('MATRIX');
   const modelActions = useModelStore((state) => state.actions);
   const modelApi = useModelStoreApi();
 
   const handleSaveDevice = (template: any) => {
-    const { deviceTemplates = [] } = modelApi.getState();
-    const existing = deviceTemplates.findIndex((t) => t.id === template.id);
-    if (existing >= 0) {
-      const next = [...deviceTemplates];
-      next[existing] = template;
-      modelActions.set({ deviceTemplates: next });
-    } else {
-      modelActions.set({ deviceTemplates: [...deviceTemplates, template] });
-    }
-  };
-
-  const handleSaveVirtualServer = (template: any) => {
     const { deviceTemplates = [] } = modelApi.getState();
     const existing = deviceTemplates.findIndex((t) => t.id === template.id);
     if (existing >= 0) {
@@ -54,71 +40,47 @@ export const WorkshopView = () => {
         flexDirection: 'column'
       }}
     >
-      <Stack
-        direction="row"
-        spacing={1}
-        alignItems="center"
-        sx={{
-          position: 'absolute',
-          top: 16,
-          right: 24,
-          zIndex: 100
-        }}
-      >
-        {creatorType === 'SERVER_V2' && (
+      {section === 'templates' && (
+        <Stack
+          direction="row"
+          spacing={1}
+          alignItems="center"
+          sx={{
+            position: 'absolute',
+            top: 16,
+            right: 24,
+            zIndex: 100
+          }}
+        >
           <ToggleButtonGroup
             color="primary"
-            value={v2PreviewMode}
+            value={creatorType}
             exclusive
-            onChange={(_, val) => val && setV2PreviewMode(val)}
+            onChange={(_, val) => val && setCreatorType(val)}
             size="small"
             sx={{ bgcolor: 'background.paper' }}
           >
-            <ToggleButton value="logical">Topologia</ToggleButton>
-            <ToggleButton value="rack">Rack</ToggleButton>
+            <ToggleButton value="SWITCH">Switch</ToggleButton>
+            <ToggleButton value="MATRIX">Macierz Proxmox</ToggleButton>
           </ToggleButtonGroup>
-        )}
-        <ToggleButtonGroup
-          color="primary"
-          value={creatorType}
-          exclusive
-          onChange={(_, val) => val && setCreatorType(val)}
-          size="small"
-          sx={{ bgcolor: 'background.paper' }}
-        >
-          <ToggleButton value="SWITCH">Switch</ToggleButton>
-          <ToggleButton value="SERVER">Serwer (Virtual)</ToggleButton>
-          <ToggleButton value="SERVER_V2">Serwer V2</ToggleButton>
-          <ToggleButton value="MATRIX">Macierz Proxmox</ToggleButton>
-        </ToggleButtonGroup>
-      </Stack>
-
-      {creatorType === 'SWITCH' && (
-        <DeviceCreatorPanel
-          isWorkshopMode
-          onSave={handleSaveDevice}
-          onCancel={() => {}}
-        />
+        </Stack>
       )}
 
-      {creatorType === 'SERVER' && (
-        <VirtualServerCreatorPanel
-          isWorkshopMode
-          onSave={handleSaveVirtualServer}
-          onCancel={() => {}}
-        />
-      )}
+      {section === 'ipam' ? (
+        <IpamPanel />
+      ) : (
+        <>
+          {creatorType === 'SWITCH' && (
+            <DeviceCreatorPanel
+              isWorkshopMode
+              onSave={handleSaveDevice}
+              onCancel={() => {}}
+            />
+          )}
 
-      {creatorType === 'SERVER_V2' && (
-        <ServerV2CreatorPanel
-          isWorkshopMode
-          previewMode={v2PreviewMode}
-          onSave={handleSaveVirtualServer}
-          onCancel={() => {}}
-        />
+          {creatorType === 'MATRIX' && <ConnectionMatrixCreatorPanel />}
+        </>
       )}
-
-      {creatorType === 'MATRIX' && <ConnectionMatrixCreatorPanel />}
     </Box>
   );
 };

@@ -121,7 +121,9 @@ export const Label = ({
         onMouseDown={onMouseDown}
         sx={{
           position: 'absolute',
-          display: 'inline-block',
+          display: 'block',
+          boxSizing: 'border-box',
+          width: '100%',
           bgcolor: 'common.white',
           border: '1px solid',
           borderColor: 'grey.400',
@@ -138,6 +140,7 @@ export const Label = ({
         style={{
           maxHeight,
           maxWidth,
+          width: maxWidth,
           top: useFreeStem ? tipY : -labelHeight,
           left: useFreeStem ? tipX : 0
         }}

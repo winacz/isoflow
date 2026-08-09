@@ -6,6 +6,9 @@ import {
   Alert,
   Box,
   Button,
+  Dialog,
+  DialogContent,
+  DialogTitle,
   FormControl,
   FormControlLabel,
   InputLabel,
@@ -51,7 +54,6 @@ import {
   PATCH_PANEL_MIN_PORTS,
   PATCH_PANEL_MAX_PORTS,
   clampPatchPanelPorts,
-  MARKDOWN_EMPTY_VALUE,
   NODE_LABEL_SCALE_MIN,
   NODE_LABEL_SCALE_MAX,
   NODE_LABEL_SCALE_STEP,
@@ -77,7 +79,12 @@ import {
   collectOccupiedRackUnits,
   isFullWidthRackItem,
   getVlanIpHint,
-  supportsConnectorTools
+  supportsConnectorTools,
+  DESCRIPTION_SUMMARY_MAX,
+  clampDescriptionSummary,
+  hasNodeDescription,
+  hasNodeDescriptionBadge,
+  hasNodeDescriptionNotes
 } from 'src/utils';
 import {
   DeviceTypeIcon,
@@ -586,6 +593,7 @@ export const NodeControls2d = ({ id }: Props) => {
   const [sidebarTab, setSidebarTab] = useState<
     'ports' | 'svi' | 'opis' | null
   >(null);
+  const [notesDialogOpen, setNotesDialogOpen] = useState(false);
   const svis = modelItem.svis ?? [];
   const rackUnits = isBlanking
     ? modelItem.rackUnits ?? BLANKING_DEFAULT_UNITS
@@ -593,10 +601,9 @@ export const NodeControls2d = ({ id }: Props) => {
   const patchPortCount =
     modelItem.portCount ?? PATCH_PANEL_DEFAULT_PORTS;
   const multiPort = focusedPortIds.length > 1;
-  const hasDescription = Boolean(
-    modelItem.description &&
-      modelItem.description !== MARKDOWN_EMPTY_VALUE
-  );
+  const hasDescription = hasNodeDescription(modelItem);
+  const hasBadge = hasNodeDescriptionBadge(modelItem);
+  const hasNotes = hasNodeDescriptionNotes(modelItem);
 
   const vlanIpHint = useMemo(() => {
     if (!isPc) return { kind: 'none' as const };
@@ -1891,33 +1898,61 @@ export const NodeControls2d = ({ id }: Props) => {
 
         {sidebarTab === 'opis' && (
           <Box sx={{ pt: 0.5 }}>
-            <MarkdownEditor
-              variant="notebook"
-              height={400}
-              value={modelItem.description}
-              onChange={(text) => {
-                if (modelItem.description !== text) {
-                  updateModelItem(viewItem.id, { description: text });
-                }
-              }}
-            />
-            {isPc && (
+            <Stack spacing={1.25}>
+              <TextField
+                label="Tytuł"
+                size="small"
+                fullWidth
+                value={modelItem.descriptionTitle ?? ''}
+                onChange={(e) => {
+                  const descriptionTitle = e.target.value;
+                  updateModelItem(viewItem.id, {
+                    descriptionTitle: descriptionTitle.trim()
+                      ? descriptionTitle
+                      : undefined
+                  });
+                }}
+                sx={fieldSx}
+              />
+              <TextField
+                label="Skrót"
+                size="small"
+                fullWidth
+                value={modelItem.descriptionSummary ?? ''}
+                onChange={(e) => {
+                  const descriptionSummary = clampDescriptionSummary(
+                    e.target.value
+                  );
+                  updateModelItem(viewItem.id, {
+                    descriptionSummary: descriptionSummary.trim()
+                      ? descriptionSummary
+                      : undefined
+                  });
+                }}
+                inputProps={{ maxLength: DESCRIPTION_SUMMARY_MAX }}
+                helperText={`${(modelItem.descriptionSummary ?? '').length}/${DESCRIPTION_SUMMARY_MAX} · treść plakietki (pełny opis po rozwinięciu)`}
+                FormHelperTextProps={{ sx: { fontSize: 10, m: 0, mt: 0.5 } }}
+                sx={fieldSx}
+              />
+              <Button
+                variant="contained"
+                size="small"
+                onClick={() => setNotesDialogOpen(true)}
+                sx={{ textTransform: 'none', alignSelf: 'flex-start' }}
+              >
+                {hasNotes ? 'Otwórz opis (notatki)' : 'Dodaj opis (notatki)'}
+              </Button>
               <Typography
                 sx={{
-                  mt: 0.75,
                   fontSize: 11,
                   color: 'text.secondary',
                   lineHeight: 1.35
                 }}
               >
-                Na froncie Node: pierwsze 39 znaków tekstu. Pełna treść (ze
-                zdjęciami i plikami) jest w tym notatniku; skrót możesz pokazać
-                na plakietce.
+                Na plakietce: tytuł + skrót. Strzałka rozwija pełny opis.
               </Typography>
-            )}
-            {isPc && (
               <FormControlLabel
-                sx={{ mt: 1, ml: 0, mr: 0 }}
+                sx={{ mt: 0, ml: 0, mr: 0 }}
                 control={
                   <Switch
                     size="small"
@@ -1935,68 +1970,104 @@ export const NodeControls2d = ({ id }: Props) => {
                   </Typography>
                 }
               />
-            )}
-            {hasDescription && (
-              <Box sx={{ mt: 1 }}>
-                <Typography
-                  sx={{
-                    fontSize: 10,
-                    fontWeight: 600,
-                    letterSpacing: 0.4,
-                    color: 'text.secondary',
-                    textTransform: 'uppercase',
-                    mb: 0.5
+              {hasBadge && (
+                <Box>
+                  <Typography
+                    sx={{
+                      fontSize: 10,
+                      fontWeight: 600,
+                      letterSpacing: 0.4,
+                      color: 'text.secondary',
+                      textTransform: 'uppercase',
+                      mb: 0.5
+                    }}
+                  >
+                    Wielkość plakietki
+                  </Typography>
+                  <Slider
+                    size="small"
+                    step={NODE_LABEL_SCALE_STEP}
+                    min={NODE_LABEL_SCALE_MIN}
+                    max={NODE_LABEL_SCALE_MAX}
+                    value={clampNodeLabelScale(viewItem.labelScale)}
+                    onChange={(_, value) => {
+                      const labelScale = Array.isArray(value) ? value[0] : value;
+                      updateViewItem(viewItem.id, {
+                        labelScale: clampNodeLabelScale(labelScale)
+                      });
+                    }}
+                    valueLabelDisplay="off"
+                  />
+                  <Typography
+                    sx={{
+                      fontSize: 10,
+                      fontWeight: 600,
+                      letterSpacing: 0.4,
+                      color: 'text.secondary',
+                      textTransform: 'uppercase',
+                      mb: 0.5,
+                      mt: 1
+                    }}
+                  >
+                    Długość linii
+                  </Typography>
+                  <Slider
+                    size="small"
+                    marks
+                    step={20}
+                    min={60}
+                    max={320}
+                    value={viewItem.labelHeight ?? 140}
+                    onChange={(_, value) => {
+                      const labelHeight = Array.isArray(value) ? value[0] : value;
+                      updateViewItem(viewItem.id, {
+                        labelHeight,
+                        labelOffset: undefined
+                      });
+                    }}
+                    valueLabelDisplay="auto"
+                  />
+                </Box>
+              )}
+            </Stack>
+
+            <Dialog
+              open={notesDialogOpen}
+              onClose={() => setNotesDialogOpen(false)}
+              fullWidth
+              maxWidth="md"
+              PaperProps={{
+                sx: {
+                  height: 'min(82vh, 720px)',
+                  display: 'flex',
+                  flexDirection: 'column'
+                }
+              }}
+            >
+              <DialogTitle sx={{ fontSize: 16, fontWeight: 700, pb: 1 }}>
+                Opis — {modelItem.name || 'urządzenie'}
+              </DialogTitle>
+              <DialogContent
+                sx={{
+                  display: 'flex',
+                  flexDirection: 'column',
+                  flex: 1,
+                  minHeight: 0,
+                  pt: 1
+                }}
+              >
+                <MarkdownEditor
+                  variant="notebook"
+                  height={520}
+                  value={modelItem.description}
+                  onChange={(text) => {
+                    if (modelItem.description !== text) {
+                      updateModelItem(viewItem.id, { description: text });
+                    }
                   }}
-                >
-                  Wielkość plakietki
-                </Typography>
-                <Slider
-                  size="small"
-                  marks
-                  step={NODE_LABEL_SCALE_STEP}
-                  min={NODE_LABEL_SCALE_MIN}
-                  max={NODE_LABEL_SCALE_MAX}
-                  value={clampNodeLabelScale(viewItem.labelScale)}
-                  onChange={(_, value) => {
-                    const labelScale = Array.isArray(value) ? value[0] : value;
-                    updateViewItem(viewItem.id, {
-                      labelScale: clampNodeLabelScale(labelScale)
-                    });
-                  }}
-                  valueLabelDisplay="auto"
-                  valueLabelFormat={(v) => `${v}×`}
                 />
-                <Typography
-                  sx={{
-                    fontSize: 10,
-                    fontWeight: 600,
-                    letterSpacing: 0.4,
-                    color: 'text.secondary',
-                    textTransform: 'uppercase',
-                    mb: 0.5,
-                    mt: 1
-                  }}
-                >
-                  Długość linii
-                </Typography>
-                <Slider
-                  size="small"
-                  marks
-                  step={20}
-                  min={60}
-                  max={320}
-                  value={viewItem.labelHeight ?? 140}
-                  onChange={(_, value) => {
-                    const labelHeight = Array.isArray(value) ? value[0] : value;
-                    updateViewItem(viewItem.id, {
-                      labelHeight,
-                      labelOffset: undefined
-                    });
-                  }}
-                  valueLabelDisplay="auto"
-                />
-              </Box>
-            )}
+              </DialogContent>
+            </Dialog>
           </Box>
         )}
       </Box>

@@ -12,7 +12,8 @@ import {
   getTilePosition2d,
   isShape2dPortUnavailable,
   isPlanProjection,
-  SHAPE_2D_PORT_SNAP_DISTANCE
+  SHAPE_2D_PORT_SNAP_DISTANCE,
+  resolveLoupePortHit
 } from 'src/utils';
 import { TILE_SIZE_2D, getShape2dSize } from 'src/config';
 
@@ -65,22 +66,35 @@ export const Cursor = () => {
     const excludeConnectorId =
       mode.type === 'CONNECTOR' ? mode.id : null;
 
+    const isPortAvailable = (hit: {
+      itemId: string;
+      portId: string;
+    }) => {
+      return !isShape2dPortUnavailable({
+        itemId: hit.itemId,
+        portId: hit.portId,
+        connectors: scene.currentView.connectors ?? [],
+        modelItems,
+        viewItems: scene.items,
+        excludeConnectorId
+      });
+    };
+
+    const loupeHit = resolveLoupePortHit({
+      shape2dPortHover,
+      viewItems: scene.items,
+      modelItems,
+      isPortAvailable
+    });
+    if (loupeHit !== undefined) return loupeHit;
+
     return getNearestShape2dPort({
       tile,
       scene,
       modelItems,
       maxDistance: SHAPE_2D_PORT_SNAP_DISTANCE,
       stickyHover: shape2dPortHover,
-      isPortAvailable: (hit) => {
-        return !isShape2dPortUnavailable({
-          itemId: hit.itemId,
-          portId: hit.portId,
-          connectors: scene.currentView.connectors ?? [],
-          modelItems,
-          viewItems: scene.items,
-          excludeConnectorId
-        });
-      }
+      isPortAvailable
     });
   }, [
     projectionMode,

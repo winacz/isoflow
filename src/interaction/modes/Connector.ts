@@ -10,7 +10,8 @@ import {
   BLACK_CROSSHAIR_CURSOR,
   SHAPE_2D_PORT_SNAP_DISTANCE,
   isShape2dPortUnavailable,
-  supportsConnectorTools
+  supportsConnectorTools,
+  resolveLoupePortHit
 } from 'src/utils';
 import {
   ModeActions,
@@ -66,22 +67,46 @@ const resolveAnchorRef = ({
     const excludeConnectorId =
       uiState.mode.type === 'CONNECTOR' ? uiState.mode.id : null;
 
+    const isPortAvailable = (hit: {
+      itemId: string;
+      portId: string;
+    }) => {
+      return !isShape2dPortUnavailable({
+        itemId: hit.itemId,
+        portId: hit.portId,
+        connectors,
+        modelItems: model.items,
+        viewItems: scene.items,
+        excludeConnectorId
+      });
+    };
+
+    // Loupe magnifies visually; canvas nearest-port sees the wrong jack.
+    const loupeHit = resolveLoupePortHit({
+      shape2dPortHover: uiState.shape2dPortHover,
+      viewItems: scene.items,
+      modelItems: model.items,
+      isPortAvailable
+    });
+    if (loupeHit !== undefined) {
+      if (loupeHit) {
+        return {
+          item: loupeHit.itemId,
+          port: loupeHit.portId
+        };
+      }
+      return {
+        tile: uiState.mouse.position.tile
+      };
+    }
+
     const portHit = getNearestShape2dPort({
       tile: uiState.mouse.position.tile,
       scene,
       modelItems: model.items,
       maxDistance: SHAPE_2D_PORT_SNAP_DISTANCE,
       stickyHover: uiState.shape2dPortHover,
-      isPortAvailable: (hit) => {
-        return !isShape2dPortUnavailable({
-          itemId: hit.itemId,
-          portId: hit.portId,
-          connectors,
-          modelItems: model.items,
-          viewItems: scene.items,
-          excludeConnectorId
-        });
-      }
+      isPortAvailable
     });
 
     if (portHit) {

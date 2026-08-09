@@ -6,7 +6,8 @@ import {
   GridOnOutlined as GridOnIcon,
   GridOffOutlined as GridOffIcon,
   SearchOutlined as LoupeOnIcon,
-  SearchOffOutlined as LoupeOffIcon
+  SearchOffOutlined as LoupeOffIcon,
+  BubbleChartOutlined as DensityGroupsIcon
 } from '@mui/icons-material';
 import { Stack, Box, Typography, Divider } from '@mui/material';
 import { toPx } from 'src/utils';
@@ -17,6 +18,7 @@ import { useUiStateStore } from 'src/stores/uiStateStore';
 import { useDiagramUtils } from 'src/hooks/useDiagramUtils';
 import { isPlanProjection } from 'src/utils';
 import { NodeStylePicker } from 'src/components/ZoomControls/NodeStylePicker';
+import { useDensityGroupsDebugStore } from 'src/v3/densityGroupsStore';
 
 export const ZoomControls = () => {
   const uiStateStoreActions = useUiStateStore((state) => {
@@ -37,8 +39,15 @@ export const ZoomControls = () => {
   const projectionMode = useUiStateStore((state) => {
     return state.projectionMode;
   });
+  const densityVisible = useDensityGroupsDebugStore((state) => {
+    return state.visible;
+  });
+  const toggleDensity = useDensityGroupsDebugStore((state) => {
+    return state.toggle;
+  });
   const { fitToView } = useDiagramUtils();
   const minZoom = isPlanProjection(projectionMode) ? MIN_ZOOM_2D : MIN_ZOOM;
+  const isTwoDV3 = projectionMode === 'TWO_D_V3';
 
   return (
     <Stack direction="row" spacing={1}>
@@ -96,6 +105,18 @@ export const ZoomControls = () => {
           isActive={showLoupe}
         />
       </UiElement>
+      {isTwoDV3 && (
+        <UiElement>
+          <IconButton
+            name={densityVisible ? 'Ukryj grupy' : 'Pokaż grupy'}
+            Icon={
+              <DensityGroupsIcon sx={{ opacity: densityVisible ? 1 : 0.55 }} />
+            }
+            onClick={toggleDensity}
+            isActive={densityVisible}
+          />
+        </UiElement>
+      )}
       <UiElement>
         <IconButton
           name={animateConnectors ? 'Wyłącz animację' : 'Włącz animację'}

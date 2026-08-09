@@ -73,6 +73,21 @@ export const findPlanView = (views: View[]): View | null => {
   return findPlan2dViewByName(views, PLAN_2D_VIEW_NAME);
 };
 
+/** Plan 2D v3 tab (primary IPAM / density surface). */
+export const findPlan2dV3View = (views: View[]): View | null => {
+  const byKind = views
+    .filter((view) => {
+      if (view.kind === 'PLAN_2D_V3') return true;
+      if (view.kind) return false;
+      return view.name === PLAN_2D_V3_VIEW_NAME;
+    })
+    .sort((a, b) => {
+      return (a.order ?? 0) - (b.order ?? 0);
+    });
+  if (byKind.length > 0) return byKind[0];
+  return findPlan2dViewByName(views, PLAN_2D_V3_VIEW_NAME);
+};
+
 export type PeerEndpoint = {
   itemId: string;
   portId: string | null;

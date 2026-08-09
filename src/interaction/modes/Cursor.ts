@@ -39,7 +39,8 @@ import {
   connectorModeForProjection,
   isLoupeGlassActive,
   getLoupeAnchorItemId,
-  getShape2dPortWorldTile
+  getShape2dPortWorldTile,
+  resolveLoupePortHit
 } from 'src/utils';
 import { getModelItemPorts } from 'src/config';
 import { useScene } from 'src/hooks/useScene';
@@ -398,32 +399,12 @@ const resolvePortHitForClick = ({
   tile: Coords;
   tilePoint: Coords;
 }) => {
-  if (isLoupeGlassActive()) {
-    const hover = uiState.shape2dPortHover;
-    const anchorId = getLoupeAnchorItemId();
-    if (
-      hover?.portId &&
-      (!anchorId || hover.itemId === anchorId)
-    ) {
-      const viewItem = scene.items.find((item) => item.id === hover.itemId);
-      const modelItem = modelItems.find((item) => item.id === hover.itemId);
-      const port = modelItem
-        ? getModelItemPorts(modelItem).find((p) => p.id === hover.portId)
-        : null;
-      if (viewItem && port) {
-        return {
-          itemId: hover.itemId,
-          portId: hover.portId,
-          portTile: port.tile,
-          worldTile: getShape2dPortWorldTile(viewItem.tile, port.tile)
-        };
-      }
-      return null;
-    }
-    // Loupe open on chassis (no jack under glass centre) — do not pick a
-    // stacked node/port underneath.
-    return null;
-  }
+  const loupeHit = resolveLoupePortHit({
+    shape2dPortHover: uiState.shape2dPortHover,
+    viewItems: scene.items,
+    modelItems
+  });
+  if (loupeHit !== undefined) return loupeHit;
 
   return getShape2dPortAtTile({
     tile,
@@ -437,6 +418,33 @@ const resolvePortHitForClick = ({
       modelItems
     })
   });
+};
+
+/** Port the user pressed — survives loupe clearing jack highlight mid-drag. */
+const resolvePortHitFromMousedownFocus = ({
+  mousedownItemId,
+  focusedPortId,
+  scene,
+  modelItems
+}: {
+  mousedownItemId: string;
+  focusedPortId: string | null | undefined;
+  scene: { items: { id: string; tile: Coords }[] };
+  modelItems: ModelItem[];
+}) => {
+  if (!focusedPortId) return null;
+  const viewItem = scene.items.find((item) => item.id === mousedownItemId);
+  const modelItem = modelItems.find((item) => item.id === mousedownItemId);
+  const port = modelItem
+    ? getModelItemPorts(modelItem).find((p) => p.id === focusedPortId)
+    : null;
+  if (!viewItem || !port) return null;
+  return {
+    itemId: mousedownItemId,
+    portId: focusedPortId,
+    portTile: port.tile,
+    worldTile: getShape2dPortWorldTile(viewItem.tile, port.tile)
+  };
 };
 
 const resolveWaypointAtTile = (
@@ -793,13 +801,22 @@ export const Cursor: ModeActions = {
         scroll: uiState.scroll,
         rendererSize
       });
-      const portHit = resolvePortHitForClick({
-        uiState,
-        scene,
-        modelItems: model.items,
-        tile: uiState.mouse.mousedown.tile,
-        tilePoint: mousedownPoint
-      });
+      const portHit =
+        resolvePortHitForClick({
+          uiState,
+          scene,
+          modelItems: model.items,
+          tile: uiState.mouse.mousedown.tile,
+          tilePoint: mousedownPoint
+        }) ??
+        // Dragging off the jack (still on the loupe node body) clears
+        // shape2dPortHover.portId — keep the port from mousedown focus.
+        resolvePortHitFromMousedownFocus({
+          mousedownItemId: uiState.mode.mousedownItem.id,
+          focusedPortId: uiState.focusedPortIds[0],
+          scene,
+          modelItems: model.items
+        });
 
       if (
         portHit &&

@@ -83,6 +83,71 @@ const restoreCursorForMode = (modeType: string) => {
   }
 };
 
+const isTypingTarget = (target: EventTarget | null) => {
+  if (!(target instanceof HTMLElement)) return false;
+  const tag = target.tagName;
+  if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return true;
+  if (target.isContentEditable) return true;
+  return Boolean(target.closest('[contenteditable="true"]'));
+};
+
+/** Escape → drop the active tool / in-progress gesture and return to CURSOR. */
+const clearUiHovers = (actions: State['uiState']['actions']) => {
+  actions.setPortPipHover(null);
+  actions.setShape2dPortHover(null);
+  actions.setShape2dHeaderHoverItemId(null);
+  actions.setShape2dNodeHoverItemId(null);
+  actions.setShape2dEnlargedItemId(null);
+  actions.setSviHover(null);
+};
+
+const hasUiHover = (uiState: State['uiState']) => {
+  return Boolean(
+    uiState.portPipHover ||
+      uiState.shape2dPortHover ||
+      uiState.shape2dPortHoverPinned ||
+      uiState.shape2dHeaderHoverItemId ||
+      uiState.shape2dNodeHoverItemId ||
+      uiState.shape2dEnlargedItemId ||
+      uiState.sviHover
+  );
+};
+
+const cancelActiveTool = (state: State) => {
+  const { uiState, scene } = state;
+  const mode = uiState.mode;
+
+  if (mode.type === 'RECTANGLE.DRAW' && mode.id) {
+    scene.deleteRectangle(mode.id);
+  }
+  if (
+    (mode.type === 'CONNECTOR' || mode.type === 'CONNECTOR_V3') &&
+    mode.id
+  ) {
+    scene.deleteConnector(mode.id);
+    if (mode.type === 'CONNECTOR_V3') {
+      scene.endHistoryTransaction();
+    }
+  }
+
+  if (mode.type === 'PLACE_ICON' || mode.type === 'RECTANGLE.DRAW') {
+    uiState.actions.setItemControls(null);
+  }
+
+  if (uiState.contextMenu) {
+    uiState.actions.setContextMenu(null);
+  }
+
+  clearUiHovers(uiState.actions);
+
+  uiState.actions.setMode({
+    type: 'CURSOR',
+    showCursor: true,
+    mousedownItem: null
+  });
+  setWindowCursor('default');
+};
+
 export const useInteractionManager = () => {
   const rendererRef = useRef<HTMLElement>();
   const reducerTypeRef = useRef<string>();
@@ -428,12 +493,63 @@ export const useInteractionManager = () => {
     };
 
     const onKeyChange = (e: KeyboardEvent) => {
-      if (e.key !== 'Shift') return;
-      const nextMouse = {
-        ...mouseRef.current,
-        shiftKey: e.type === 'keydown'
+      if (e.key === 'Shift') {
+        const nextMouse = {
+          ...mouseRef.current,
+          shiftKey: e.type === 'keydown'
+        };
+        commitMouse(nextMouse, { immediate: true });
+        return;
+      }
+
+      if (e.type !== 'keydown' || e.key !== 'Escape') return;
+      if (isTypingTarget(e.target)) return;
+
+      const liveUi = uiStore.getState();
+      if (liveUi.editorMode !== 'EDITABLE') return;
+      if (liveUi.mode.type === 'INTERACTIONS_DISABLED') return;
+
+      // Already idle with nothing to dismiss.
+      if (
+        liveUi.mode.type === 'CURSOR' &&
+        !liveUi.contextMenu &&
+        !liveUi.itemControls &&
+        !hasUiHover(liveUi)
+      ) {
+        return;
+      }
+
+      e.preventDefault();
+
+      const prevMode = modes[liveUi.mode.type];
+      const model = modelStore.getState();
+      const baseState: State = {
+        model,
+        scene,
+        uiState: { ...liveUi, mouse: mouseRef.current },
+        rendererRef: rendererRef.current!,
+        rendererSize,
+        isRendererInteraction: false
       };
-      commitMouse(nextMouse, { immediate: true });
+
+      if (prevMode?.exit) {
+        prevMode.exit(baseState);
+      }
+
+      // CURSOR + open panel / menu / hover — just close UI chrome.
+      if (liveUi.mode.type === 'CURSOR') {
+        if (liveUi.contextMenu) {
+          liveUi.actions.setContextMenu(null);
+        }
+        if (liveUi.itemControls) {
+          liveUi.actions.setItemControls(null);
+        }
+        clearUiHovers(liveUi.actions);
+        return;
+      }
+
+      cancelActiveTool(baseState);
+      reducerTypeRef.current = 'CURSOR';
     };
 
     const onScrollOrResize = () => {
@@ -478,7 +594,11 @@ export const useInteractionManager = () => {
     onMouseEvent,
     modeType,
     onContextMenu,
-    commitMouse
+    commitMouse,
+    scene,
+    uiStore,
+    modelStore,
+    rendererSize
   ]);
 
   const setInteractionsElement = useCallback((element: HTMLElement) => {

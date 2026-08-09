@@ -7,6 +7,7 @@ import { IconSelectionControls } from 'src/components/ItemControls/IconSelection
 import { ShapeSelectionControls } from 'src/components/ItemControls/ShapeSelectionControls/ShapeSelectionControls';
 import { DeviceTemplateEditorControls } from 'src/components/ItemControls/DeviceCreator/DeviceTemplateEditorControls';
 import { MultiNodeControls } from 'src/components/ItemControls/MultiNodeControls/MultiNodeControls';
+import { StressV3TestButton } from 'src/components/StressV3TestButton/StressV3TestButton';
 import { isPlanProjection } from 'src/utils';
 import { NodeControls } from './NodeControls/NodeControls';
 import { NodeControls2d } from './NodeControls/NodeControls2d';
@@ -33,6 +34,10 @@ const NodeControlsSwitcher = ({
 
 /** 2D plan with an empty selection: hint only (layout tools live in RMB menu). */
 const EmptyPlanControls = () => {
+  const projectionMode = useUiStateStore((state) => {
+    return state.projectionMode;
+  });
+
   return (
     <Box sx={{ px: 2, py: 2 }}>
       <Typography
@@ -48,7 +53,12 @@ const EmptyPlanControls = () => {
         Kontekst
       </Typography>
       <Typography
-        sx={{ fontSize: 13, color: 'text.secondary', lineHeight: 1.45 }}
+        sx={{
+          fontSize: 13,
+          color: 'text.secondary',
+          lineHeight: 1.45,
+          mb: projectionMode === 'TWO_D_V3' ? 1.5 : 0
+        }}
       >
         Wybierz urządzenie na planie albo naciśnij{' '}
         <Box component="span" sx={{ fontWeight: 700 }}>
@@ -56,6 +66,7 @@ const EmptyPlanControls = () => {
         </Box>{' '}
         aby dodać nowe. Auto-Układ i grupy — PPM na planie.
       </Typography>
+      {projectionMode === 'TWO_D_V3' && <StressV3TestButton />}
     </Box>
   );
 };

@@ -76,10 +76,10 @@ export const createEditorInitialData = (): InitialData => {
   };
 
   return {
-    title: plan.title ?? isometricDemo.title ?? 'Isoflow',
+    title: 'Sieć karczma',
     version: isometricDemo.version ?? '1.0',
     fitToView: true,
-    projectionMode: 'TWO_D',
+    projectionMode: 'ISOMETRIC',
     icons,
     colors,
     items: [...(isometricDemo.items ?? []), ...(plan.items ?? [])],
@@ -97,6 +97,6 @@ export const createEditorInitialData = (): InitialData => {
         textBoxes: isoView?.textBoxes ?? []
       }
     ],
-    view: planViewId
+    view: isometricViewId
   };
 };

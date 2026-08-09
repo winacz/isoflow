@@ -101,7 +101,6 @@ export const MultiSelectMoveHandle = () => {
       if (dragItems.length === 0) return;
 
       const mouse = uiActions.getMouse();
-      const originTile = itemOrigins[dragItems[0].id] ?? mouse.position.tile;
 
       // Screen coords are renderer-relative (same space as getMouse).
       const rect = rendererEl?.getBoundingClientRect();
@@ -116,7 +115,8 @@ export const MultiSelectMoveHandle = () => {
         ...mouse,
         mousedown: {
           screen,
-          tile: { ...originTile }
+          // Real cursor tile — free-drag recomputes continuous coords from screen.
+          tile: { ...mouse.position.tile }
         },
         position: {
           ...mouse.position,

@@ -9,6 +9,7 @@ import { DragAndDrop } from 'src/components/DragAndDrop/DragAndDrop';
 import { ItemControlsManager } from 'src/components/ItemControls/ItemControlsManager';
 import { ToolMenu } from 'src/components/ToolMenu/ToolMenu';
 import { useUiStateStore } from 'src/stores/uiStateStore';
+import { useModelStore } from 'src/stores/modelStore';
 import { MainMenu } from 'src/components/MainMenu/MainMenu';
 import { ZoomControls } from 'src/components/ZoomControls/ZoomControls';
 import { ConnectorRelationPanel } from 'src/components/ConnectorRelationPanel/ConnectorRelationPanel';
@@ -24,7 +25,12 @@ import { WorkshopView } from 'src/components/Workshop/WorkshopView';
 import { PerfHud } from 'src/components/PerfHud/PerfHud';
 import { ExportImageDialog } from '../ExportImageDialog/ExportImageDialog';
 import { useScene } from 'src/hooks/useScene';
-import { isPlanProjection, isPlan2dCanvas } from 'src/utils';
+import {
+  ViewKindEnum,
+  getProjectTabs,
+  isPlanProjection,
+  isPlan2dCanvas
+} from 'src/utils';
 
 const findConnectorIdForPort = (
   connectors: { id: string; anchors: { ref: { item?: string; port?: string } }[] }[],
@@ -124,12 +130,33 @@ export const UiOverlay = () => {
   const isWorkshopOpen = useUiStateStore((state) => {
     return state.isWorkshopOpen;
   });
+  const activeViewId = useUiStateStore((state) => {
+    return state.view;
+  });
+  const views = useModelStore((state) => {
+    return state.views;
+  });
+  const projectTitle = useModelStore((state) => {
+    return state.title;
+  });
   const isRightSidebarOpen = useUiStateStore((state) => {
     return state.isRightSidebarOpen;
   });
   const { connectors } = useScene();
   const { size: rendererSize } = useResizeObserver(rendererEl);
   const isTwoD = isPlanProjection(projectionMode);
+
+  const activePlanLabel = useMemo(() => {
+    if (isWorkshopOpen) return null;
+    const tabs = getProjectTabs(views, projectTitle);
+    const plan = tabs.find(
+      (tab) =>
+        tab.viewId === activeViewId &&
+        (tab.kind === ViewKindEnum.PLAN_2D ||
+          tab.kind === ViewKindEnum.PLAN_2D_V3)
+    );
+    return plan?.label ?? null;
+  }, [views, projectTitle, activeViewId, isWorkshopOpen]);
   // In the 2D plan the dock always has content: with nothing selected it shows
   // a short hint (layout tools are on the RMB context menu).
   const hasItemControlsContent = Boolean(itemControls) || isTwoD;
@@ -490,7 +517,7 @@ export const UiOverlay = () => {
               left: appPadding.x
             }}
           >
-            <MainMenu />
+            <MainMenu planLabel={activePlanLabel} />
           </Box>
         )}
 

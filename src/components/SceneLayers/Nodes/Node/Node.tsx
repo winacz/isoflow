@@ -1,13 +1,9 @@
-import React, { useCallback, useMemo, useRef, useEffect } from 'react';
-import { Box, Link, Typography, Stack } from '@mui/material';
+import React, { useCallback, useMemo } from 'react';
+import { Box } from '@mui/material';
 import {
-  PROJECTED_TILE_SIZE,
-  DEFAULT_LABEL_HEIGHT,
-  MARKDOWN_EMPTY_VALUE,
   TILE_SIZE_2D,
   getModelItemSize,
   isShape2dIcon,
-  clampNodeLabelScale,
   SHAPE_2D_CABINET_ID
 } from 'src/config';
 import {
@@ -17,24 +13,17 @@ import {
   getPeerHighlightedPortIdsForItem,
   isPlanProjection,
   findPlanView,
-  getPortalDisplayLabel,
-  planPortalJump,
   getSinglePortNodeVlanBorderColor,
   hasPoePowerWarning,
-  CoordsUtils,
   getShape2dHeaderFraction
 } from 'src/utils';
 import { useIcon } from 'src/hooks/useIcon';
 import { ViewItem } from 'src/types';
 import { useModelItem } from 'src/hooks/useModelItem';
 import { useScene } from 'src/hooks/useScene';
-import { ExpandableLabel } from 'src/components/Label/ExpandableLabel';
-import { MarkdownEditor } from 'src/components/MarkdownEditor/MarkdownEditor';
-import { useUiStateStore, useUiStateStoreApi } from 'src/stores/uiStateStore';
-import { useModelStore, useModelStoreApi } from 'src/stores/modelStore';
+import { useUiStateStore } from 'src/stores/uiStateStore';
+import { useModelStore } from 'src/stores/modelStore';
 import { useNodeDragStore } from 'src/stores/nodeDragStore';
-import { useView } from 'src/hooks/useView';
-import { useResizeObserver } from 'src/hooks/useResizeObserver';
 
 interface Props {
   node: ViewItem;
@@ -81,7 +70,6 @@ export const Node = React.memo(({
   );
   const modelItem = useModelItem(node.id);
   const { connectors: sceneConnectors } = useScene();
-  const modelStoreApi = useModelStoreApi();
   const modelItems = useModelStore((state) => {
     return state.items;
   });
@@ -91,22 +79,6 @@ export const Node = React.memo(({
   const projectionMode = useUiStateStore((state) => {
     return state.projectionMode;
   });
-  const uiStateActions = useUiStateStore((state) => {
-    return state.actions;
-  });
-  const uiStateStoreApi = useUiStateStoreApi();
-  const rendererEl = useUiStateStore((state) => {
-    return state.rendererEl;
-  });
-  const { size: rendererSize } = useResizeObserver(rendererEl);
-  
-  // Keep rendererSize in a ref so the subscription doesn't need to rebind or call getBoundingClientRect
-  const rendererSizeRef = useRef(rendererSize);
-  useEffect(() => {
-    rendererSizeRef.current = rendererSize;
-  }, [rendererSize]);
-
-  const { changeView } = useView();
 
   // 2Dv2 has no cables of its own — port link state comes from Plan connectors.
   const connectors = useMemo(() => {
@@ -271,131 +243,6 @@ export const Node = React.memo(({
     });
   }, [tile, isTwoD, shapeSize]);
 
-  const description = useMemo(() => {
-    if (
-      modelItem.description === undefined ||
-      modelItem.description === MARKDOWN_EMPTY_VALUE
-    )
-      return null;
-
-    return modelItem.description;
-  }, [modelItem.description]);
-
-  // Iso icons: name/description/portal float above the sprite.
-  // 2D plan descriptions render in NodeDescriptionLabels (above overlay).
-  const showFloatingLabel = isPlanShape
-    ? false
-    : Boolean(modelItem.name || description || modelItem.portal);
-
-  const portalLabel = useMemo(() => {
-    if (isTwoD || !modelItem.portal) return null;
-    return getPortalDisplayLabel(modelItem.portal, modelStoreApi.getState());
-  }, [isTwoD, modelItem.portal, modelStoreApi, views, modelItems]);
-
-  const onPortalClick = useCallback(
-    (event: React.MouseEvent) => {
-      event.preventDefault();
-      event.stopPropagation();
-      const portal = modelItem.portal;
-      if (!portal) return;
-
-      uiStateActions.setPortPipHover(null);
-
-      const model = modelStoreApi.getState();
-      const jump = planPortalJump({
-        portal,
-        model,
-        rendererSize: rendererSizeRef.current
-      });
-      if (!jump) return;
-
-      changeView(jump.planViewId, model);
-      uiStateActions.setProjectionMode('TWO_D');
-      uiStateActions.setZoom(jump.zoom);
-      uiStateActions.setScroll({
-        position: jump.scroll,
-        offset: CoordsUtils.zero()
-      });
-      uiStateActions.setMode({
-        type: 'CURSOR',
-        showCursor: true,
-        mousedownItem: null
-      });
-      uiStateActions.clearSelectedItemIds();
-
-      if (jump.select.type === 'ITEM') {
-        uiStateActions.setItemControls({ type: 'ITEM', id: jump.select.id });
-        uiStateActions.setSelectedItemIds([jump.select.id]);
-      } else {
-        uiStateActions.setItemControls({
-          type: 'RECTANGLE',
-          id: jump.select.id
-        });
-      }
-    },
-    [modelItem.portal, modelStoreApi, changeView, uiStateActions]
-  );
-
-  const onPortalMouseEnter = useCallback(
-    (event: React.MouseEvent) => {
-      const portal = modelItem.portal;
-      if (!portal || isTwoD) return;
-
-      uiStateActions.setPortPipHover({
-        hostItemId: node.id,
-        hostPortId: null,
-        peerItemId: portal.targetType === 'ITEM' ? portal.targetId : null,
-        peerPortId: null,
-        peerRectangleId:
-          portal.targetType === 'RECTANGLE' ? portal.targetId : null,
-        title: portalLabel ?? undefined,
-        screen: { x: event.clientX, y: event.clientY }
-      });
-    },
-    [modelItem.portal, isTwoD, node.id, portalLabel, uiStateActions]
-  );
-
-  const onPortalMouseMove = useCallback(
-    (event: React.MouseEvent) => {
-      if (!modelItem.portal || isTwoD) return;
-      const current = uiStateStoreApi.getState().portPipHover;
-      if (!current || current.hostItemId !== node.id) return;
-      uiStateActions.setPortPipHover({
-        ...current,
-        screen: { x: event.clientX, y: event.clientY }
-      });
-    },
-    [modelItem.portal, isTwoD, node.id, uiStateActions, uiStateStoreApi]
-  );
-
-  const onPortalMouseLeave = useCallback(() => {
-    const current = uiStateStoreApi.getState().portPipHover;
-    if (current?.hostItemId === node.id && current.hostPortId == null) {
-      uiStateActions.setPortPipHover(null);
-    }
-  }, [node.id, uiStateActions, uiStateStoreApi]);
-
-  const labelAnchorBottom =
-    isPlanShape && shapeSize
-      ? (shapeSize.height * TILE_SIZE_2D) / 2
-      : PROJECTED_TILE_SIZE.height / 2;
-
-  const labelScale = isPlanShape ? clampNodeLabelScale(node.labelScale) : 1;
-  const labelMaxWidth = isPlanShape
-    ? Math.round(140 * labelScale)
-    : 250;
-  const labelCollapsedHeight = isPlanShape
-    ? Math.round(55 * labelScale)
-    : 80;
-  const labelStemHeight =
-    node.labelHeight ?? (isPlanShape ? 140 : DEFAULT_LABEL_HEIGHT);
-  const titleFontSize = isPlanShape
-    ? Math.round(5.5 * labelScale + 2)
-    : undefined;
-  const bodyFontSize = isPlanShape
-    ? Math.round(4.5 * labelScale + 2)
-    : undefined;
-
   return (
     <Box
       className={`isoflow-node ${
@@ -480,82 +327,6 @@ export const Node = React.memo(({
                 'background 0.12s ease, box-shadow 0.12s ease'
             }}
           />
-        )}
-        {showFloatingLabel && (
-          <Box
-            sx={{ position: 'absolute' }}
-            style={{
-              bottom: labelAnchorBottom
-            }}
-          >
-            <ExpandableLabel
-              maxWidth={labelMaxWidth}
-              expandDirection="BOTTOM"
-              stemDirection={isPlanShape ? 'diagonal' : 'vertical'}
-              labelHeight={labelStemHeight}
-              collapsedMaxHeight={labelCollapsedHeight}
-            >
-              <Stack spacing={isPlanShape ? 1.25 : 1}>
-                {modelItem.name && (
-                  <Typography
-                    fontWeight={700}
-                    sx={
-                      titleFontSize
-                        ? { fontSize: titleFontSize, lineHeight: 1.25 }
-                        : undefined
-                    }
-                  >
-                    {modelItem.name}
-                  </Typography>
-                )}
-                {portalLabel && (
-                  <Link
-                    component="button"
-                    type="button"
-                    underline="hover"
-                    onClick={onPortalClick}
-                    onMouseEnter={onPortalMouseEnter}
-                    onMouseMove={onPortalMouseMove}
-                    onMouseLeave={onPortalMouseLeave}
-                    onMouseDown={(event) => {
-                      event.stopPropagation();
-                    }}
-                    sx={{
-                      pointerEvents: 'auto',
-                      alignSelf: 'flex-start',
-                      fontSize: titleFontSize
-                        ? Math.max(10, titleFontSize - 1)
-                        : 12,
-                      fontWeight: 600,
-                      lineHeight: 1.2,
-                      color: 'primary.main',
-                      cursor: 'pointer',
-                      textAlign: 'left',
-                      border: 0,
-                      background: 'none',
-                      p: 0
-                    }}
-                  >
-                    → {portalLabel}
-                  </Link>
-                )}
-                {description && (
-                  <MarkdownEditor
-                    value={description}
-                    readOnly
-                    styles={
-                      bodyFontSize
-                        ? {
-                            fontSize: bodyFontSize,
-                            lineHeight: 1.4
-                          }
-                        : undefined
-                    }
-                  />
-                )}
-              </Stack>
-            </ExpandableLabel>
-          </Box>
         )}
         {iconComponent && (
           <Box

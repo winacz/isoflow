@@ -2,8 +2,8 @@ import React, { useMemo } from 'react';
 import { Box, Typography } from '@mui/material';
 import { Coords } from 'src/types';
 import { TILE_SIZE_2D } from 'src/config';
-import { getTilePosition2d } from 'src/utils';
 import { useUiStateStore } from 'src/stores/uiStateStore';
+import { Svg } from 'src/components/Svg/Svg';
 
 interface Props {
   from: Coords;
@@ -28,6 +28,7 @@ const normalizeBounds = (from: Coords, to: Coords) => {
 
 /**
  * Axis-aligned tile rectangle for 2D plan — sits under devices.
+ * Uses SVG rx like IsoTileArea so corner rounding matches isometric.
  */
 export const TileArea2d = ({
   from,
@@ -50,19 +51,18 @@ export const TileArea2d = ({
   const heightTiles = bounds.maxY - bounds.minY + 1;
   const pxW = widthTiles * TILE_SIZE_2D;
   const pxH = heightTiles * TILE_SIZE_2D;
-  const topLeft = getTilePosition2d({
-    tile: { x: bounds.minX, y: bounds.minY },
-    origin: 'CENTER'
-  });
-  // Position box so its top-left tile center maps correctly: offset by half tile
-  const left = topLeft.x - TILE_SIZE_2D / 2;
-  const top = topLeft.y - TILE_SIZE_2D / 2;
+  const left = bounds.minX * TILE_SIZE_2D;
+  const top = bounds.minY * TILE_SIZE_2D;
   const isBuilding = kind === 'building';
   const stroke = strokeColor ?? (isBuilding ? '#475569' : '#64748b');
   const alpha = Math.min(1, Math.max(0, opacity));
   const label = name?.trim() || 'Budynek';
+  const strokeWidth = locked ? 3 : isBuilding ? 2 : 1;
+  // Stronger rounding in 2D than iso SVG rx (user request).
+  const cornerRadiusPx = isBuilding
+    ? Math.min(28, Math.floor(Math.min(pxW, pxH) * 0.22))
+    : Math.min(48, Math.floor(Math.min(pxW, pxH) * 0.35));
 
-  // Size from building footprint; counter SceneLayer zoom so it stays readable.
   const invZoom = 1 / Math.max(zoom, 0.12);
   const baseHeaderH = Math.max(
     36,
@@ -86,21 +86,34 @@ export const TileArea2d = ({
         width: pxW,
         height: pxH,
         pointerEvents: 'none',
-        boxSizing: 'border-box'
+        overflow: 'visible'
       }}
     >
-      <Box
-        sx={{
+      <Svg
+        viewboxSize={{ width: pxW, height: pxH }}
+        style={{
           position: 'absolute',
-          inset: 0,
-          bgcolor: fill,
-          opacity: alpha,
-          borderRadius: isBuilding ? 1 : 0.5,
-          border: `${locked ? 3 : isBuilding ? 2.5 : 1.5}px ${locked ? 'dashed' : 'solid'} ${stroke}`,
-          boxSizing: 'border-box',
-          boxShadow: locked ? '0 0 0 1px rgba(234, 88, 12, 0.35)' : undefined
+          left: 0,
+          top: 0,
+          width: pxW,
+          height: pxH,
+          overflow: 'visible'
         }}
-      />
+      >
+        <rect
+          x={strokeWidth / 2}
+          y={strokeWidth / 2}
+          width={Math.max(0, pxW - strokeWidth)}
+          height={Math.max(0, pxH - strokeWidth)}
+          rx={cornerRadiusPx}
+          ry={cornerRadiusPx}
+          fill={fill}
+          fillOpacity={alpha}
+          stroke={stroke}
+          strokeWidth={strokeWidth}
+          strokeDasharray={locked ? '6 4' : undefined}
+        />
+      </Svg>
       {isBuilding && (
         <>
           <Box

@@ -19,8 +19,9 @@ import type { PlacementMode, RouteStyle } from 'src/utils/autoLayout';
 import { yieldToMain } from 'src/utils/scheduleHeavyWork';
 import { useScene } from 'src/hooks/useScene';
 import { useModelStore } from 'src/stores/modelStore';
+import { useInitialDataManager } from 'src/hooks/useInitialDataManager';
+import { buildStressV3Model } from 'src/fixtures/stressV3Model';
 import { computeDensityGroups } from 'src/v3/densityGroups';
-import { useDensityGroupsDebugStore } from 'src/v3/densityGroupsStore';
 import type { DensityBusExitStyle } from 'src/v3/densityGroupBuses';
 import { ContextMenu, ContextMenuEntry } from './ContextMenu';
 
@@ -73,16 +74,7 @@ export const ContextMenuManager = ({ anchorEl }: Props) => {
     runLayoutByVlanGroups,
     runLayoutByVlanGroupsV2
   } = scene;
-
-  const densityVisible = useDensityGroupsDebugStore((state) => {
-    return state.visible;
-  });
-  const toggleDensity = useDensityGroupsDebugStore((state) => {
-    return state.toggle;
-  });
-  const setDensityVisible = useDensityGroupsDebugStore((state) => {
-    return state.setVisible;
-  });
+  const { load } = useInitialDataManager();
 
   const onClose = useCallback(() => {
     uiStateActions.setContextMenu(null);
@@ -175,10 +167,16 @@ export const ContextMenuManager = ({ anchorEl }: Props) => {
         dividerBefore: true
       },
       {
+        label: 'Generuj stress test (100)',
+        onClick: () => {
+          load(buildStressV3Model());
+          onClose();
+        }
+      },
+      {
         label: 'Test',
         disabled: groupCount === 0,
         onClick: () => {
-          setDensityVisible(true);
           setTimeout(() => {
             runTestLayoutForDensityGroups();
           }, 0);
@@ -188,7 +186,6 @@ export const ContextMenuManager = ({ anchorEl }: Props) => {
       {
         label: 'Sortuj via VLAN',
         onClick: () => {
-          setDensityVisible(true);
           setTimeout(() => {
             runSortByVlanLayout();
           }, 0);
@@ -198,7 +195,6 @@ export const ContextMenuManager = ({ anchorEl }: Props) => {
       {
         label: 'Układanie VLAN (1v)',
         onClick: () => {
-          setDensityVisible(true);
           setTimeout(() => {
             runLayoutByVlanGroups();
           }, 0);
@@ -208,7 +204,6 @@ export const ContextMenuManager = ({ anchorEl }: Props) => {
       {
         label: 'Układanie VLAN (2v)',
         onClick: () => {
-          setDensityVisible(true);
           setTimeout(() => {
             runLayoutByVlanGroupsV2();
           }, 0);
@@ -219,11 +214,11 @@ export const ContextMenuManager = ({ anchorEl }: Props) => {
   }, [
     projectionMode,
     groupCount,
-    setDensityVisible,
     runTestLayoutForDensityGroups,
     runSortByVlanLayout,
     runLayoutByVlanGroups,
     runLayoutByVlanGroupsV2,
+    load,
     onClose
   ]);
 
@@ -231,7 +226,6 @@ export const ContextMenuManager = ({ anchorEl }: Props) => {
     if (projectionMode !== 'TWO_D_V3') return [];
 
     const runBus = (exitStyle: DensityBusExitStyle) => {
-      setDensityVisible(true);
       void (async () => {
         await yieldToMain();
         runDensityGroupBuses({ exitStyle });
@@ -240,7 +234,6 @@ export const ContextMenuManager = ({ anchorEl }: Props) => {
     };
 
     const runArrange = (mode?: 'magistrala') => {
-      setDensityVisible(true);
       void (async () => {
         await yieldToMain();
         runArrangeDensityGroups(mode ? { mode } : undefined);
@@ -257,13 +250,6 @@ export const ContextMenuManager = ({ anchorEl }: Props) => {
         label: `Gęstość · ${groupCount} ${groupWord}`,
         isHeader: true,
         dividerBefore: true
-      },
-      {
-        label: densityVisible ? 'Ukryj grupy' : 'Pokaż grupy',
-        onClick: () => {
-          toggleDensity();
-          onClose();
-        }
       },
       {
         label: 'Ułóż grupy',
@@ -304,9 +290,6 @@ export const ContextMenuManager = ({ anchorEl }: Props) => {
   }, [
     projectionMode,
     groupCount,
-    densityVisible,
-    toggleDensity,
-    setDensityVisible,
     runDensityGroupBuses,
     runArrangeDensityGroups,
     onClose

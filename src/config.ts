@@ -509,27 +509,21 @@ export const VIEW_ITEM_DEFAULTS: Required<
 };
 
 /**
- * Plan description callout size. Former max (10×) is now the minimum —
- * bubbles were unreadably small at the old 3× floor. Steps of 10 keep
- * size changes obvious on screen.
+ * Plan description callout size (continuous slider, default ×10).
  */
 export const NODE_LABEL_SCALE_MIN = 10;
 export const NODE_LABEL_SCALE_MAX = 40;
-export const NODE_LABEL_SCALE_STEP = 10;
-export const NODE_LABEL_SCALE_DEFAULT = NODE_LABEL_SCALE_MIN;
+/** Continuous slider granularity (no discrete × marks). */
+export const NODE_LABEL_SCALE_STEP = 0.1;
+/** Default plakietka size in Plan 2D. */
+export const NODE_LABEL_SCALE_DEFAULT = 10;
 
 export const clampNodeLabelScale = (value: number | undefined | null) => {
   const raw = value ?? NODE_LABEL_SCALE_DEFAULT;
-  const clamped = Math.min(
+  return Math.min(
     NODE_LABEL_SCALE_MAX,
     Math.max(NODE_LABEL_SCALE_MIN, raw)
   );
-  // Snap to the configured step so legacy fractional scales land cleanly.
-  const stepped =
-    Math.round((clamped - NODE_LABEL_SCALE_MIN) / NODE_LABEL_SCALE_STEP) *
-      NODE_LABEL_SCALE_STEP +
-    NODE_LABEL_SCALE_MIN;
-  return Math.min(NODE_LABEL_SCALE_MAX, Math.max(NODE_LABEL_SCALE_MIN, stepped));
 };
 
 export const CONNECTOR_DEFAULTS: Required<Omit<Connector, 'id' | 'color'>> = {
@@ -585,6 +579,7 @@ export const INITIAL_UI_STATE = {
   },
   projectionMode: 'ISOMETRIC' as const,
   isWorkshopOpen: false,
+  workshopSection: 'templates' as const,
   isRightSidebarOpen: true,
   showGrid: true,
   showLoupe: true,

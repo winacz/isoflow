@@ -354,6 +354,8 @@ export interface UiState {
   routingStyle: 'ORTHOGONAL' | 'DIAGONAL' | 'BUS' | 'STRAIGHT';
   /** Whether the Workshop view is currently active. */
   isWorkshopOpen: boolean;
+  /** Active workshop sub-section (templates creator vs IPAM). */
+  workshopSection: 'templates' | 'ipam';
   /**
    * Plan (2D): right item-controls dock is visible.
    * When false, only a reopen chevron is shown on the right edge.
@@ -435,6 +437,7 @@ export interface UiStateActions {
   toggleSimplePaths: () => void;
   setRoutingStyle: (style: UiState['routingStyle']) => void;
   setWorkshopOpen: (isWorkshopOpen: boolean) => void;
+  setWorkshopSection: (section: UiState['workshopSection']) => void;
   setRightSidebarOpen: (isOpen: boolean) => void;
   toggleRightSidebar: () => void;
 }

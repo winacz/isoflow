@@ -25,6 +25,13 @@ export type ProjectTab = {
   order: number;
 };
 
+/** Truncate for tab strip / IPAM labels (keeps quotes readable). */
+export const truncateProjectLabel = (text: string, max = 20): string => {
+  const trimmed = text.trim() || 'Untitled';
+  if (trimmed.length <= max) return trimmed;
+  return `${trimmed.slice(0, max)}…`;
+};
+
 export const inferViewKind = (view: Pick<View, 'name' | 'kind'>): ViewKind => {
   // Legacy PLAN_2D_V2 collapses into the modular PLAN_2D tab kind.
   if (view.kind === 'ISOMETRIC') return ViewKindEnum.ISOMETRIC;
@@ -51,14 +58,30 @@ export const projectionModeForKind = (kind: ViewKind): ProjectionMode => {
   }
 };
 
-export const defaultLabelForKind = (kind: ViewKind, name: string): string => {
+/** Canonical primary Plan (classic "2D") — kept in model, hidden from the tab strip. */
+export const isPrimaryPlan2dView = (
+  view: Pick<View, 'name' | 'kind'>
+): boolean => {
+  return (
+    inferViewKind(view) === ViewKindEnum.PLAN_2D &&
+    view.name === PLAN_2D_VIEW_NAME
+  );
+};
+
+export const defaultLabelForKind = (
+  kind: ViewKind,
+  name: string,
+  projectTitle?: string
+): string => {
   switch (kind) {
     case ViewKindEnum.ISOMETRIC:
       return 'Isometric';
     case ViewKindEnum.PLAN_2D:
       return name === PLAN_2D_VIEW_NAME ? '2D' : name;
-    case ViewKindEnum.PLAN_2D_V3:
-      return name === PLAN_2D_V3_VIEW_NAME ? '2D v3' : name;
+    case ViewKindEnum.PLAN_2D_V3: {
+      // Menu under the "2D" tab — show project name, not "2D …".
+      return truncateProjectLabel(projectTitle?.trim() || 'Untitled');
+    }
     default:
       return name;
   }
@@ -68,9 +91,10 @@ export const defaultOrderForKind = (kind: ViewKind): number => {
   switch (kind) {
     case ViewKindEnum.ISOMETRIC:
       return 0;
-    case ViewKindEnum.PLAN_2D:
-      return 100;
     case ViewKindEnum.PLAN_2D_V3:
+      // Main plan tab (shown as 2D "project") — before extra 2D tabs.
+      return 100;
+    case ViewKindEnum.PLAN_2D:
       return 200;
     default:
       return 50;
@@ -157,7 +181,7 @@ export const ensureProjectViews = <
     ];
   }
 
-  // Canonical strip order: Isometric → 2D (extra 2D tabs) → 2D v3.
+  // Canonical strip order: Isometric → 2D "project" (v3) → extra 2D tabs.
   const primaryPlan = views
     .filter((view) => {
       return inferViewKind(view) === ViewKindEnum.PLAN_2D;
@@ -184,16 +208,17 @@ export const ensureProjectViews = <
         order: defaultOrderForKind(ViewKindEnum.ISOMETRIC)
       };
     }
-    if (kind === ViewKindEnum.PLAN_2D && view.id === primaryPlan?.id) {
-      return {
-        ...view,
-        order: defaultOrderForKind(ViewKindEnum.PLAN_2D)
-      };
-    }
     if (kind === ViewKindEnum.PLAN_2D_V3) {
       return {
         ...view,
         order: defaultOrderForKind(ViewKindEnum.PLAN_2D_V3)
+      };
+    }
+    if (kind === ViewKindEnum.PLAN_2D && view.id === primaryPlan?.id) {
+      return {
+        ...view,
+        // Hidden from strip; keep after v3 so extras can sit next to +.
+        order: defaultOrderForKind(ViewKindEnum.PLAN_2D)
       };
     }
     if (kind === ViewKindEnum.PLAN_2D) {
@@ -202,7 +227,10 @@ export const ensureProjectViews = <
       });
       return {
         ...view,
-        order: defaultOrderForKind(ViewKindEnum.PLAN_2D) + 1 + Math.max(0, extraIndex)
+        order:
+          defaultOrderForKind(ViewKindEnum.PLAN_2D) +
+          1 +
+          Math.max(0, extraIndex)
       };
     }
     return view;
@@ -249,20 +277,39 @@ export const ensureProjectViews = <
   return { ...model, views };
 };
 
-export const getProjectTabs = (views: View[]): ProjectTab[] => {
+export const getProjectTabs = (
+  views: View[],
+  projectTitle?: string
+): ProjectTab[] => {
   return [...views]
+    .filter((view) => {
+      // Classic primary "2D" / Plan — hidden; v3 is the main plan tab.
+      return !isPrimaryPlan2dView(view);
+    })
     .map((view, index) => {
       const kind = inferViewKind(view);
       return {
         viewId: view.id,
         kind,
-        label: defaultLabelForKind(kind, view.name),
+        label: defaultLabelForKind(kind, view.name, projectTitle),
         order: view.order ?? defaultOrderForKind(kind) + index
       };
     })
     .sort((a, b) => {
       return a.order - b.order;
     });
+};
+
+/** Plan tabs suitable for IPAM (excludes Isometric + hidden primary Plan). */
+export const getIpamPlanTabs = (
+  views: View[],
+  projectTitle?: string
+): ProjectTab[] => {
+  return getProjectTabs(views, projectTitle).filter((tab) => {
+    return (
+      tab.kind === ViewKindEnum.PLAN_2D || tab.kind === ViewKindEnum.PLAN_2D_V3
+    );
+  });
 };
 
 /** Primary Plan view (lowest-order PLAN_2D) */

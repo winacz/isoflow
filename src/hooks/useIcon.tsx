@@ -4,7 +4,7 @@ import { useUiStateStore } from 'src/stores/uiStateStore';
 import { useCabinetSnapStore } from 'src/stores/cabinetSnapStore';
 import { useNodeDragStore } from 'src/stores/nodeDragStore';
 import { useScene } from 'src/hooks/useScene';
-import { getItemByIdOrThrow } from 'src/utils';
+import { getItemByIdOrThrow, hasNodeDescription } from 'src/utils';
 import { IsometricIcon } from 'src/components/SceneLayers/Nodes/Node/IconTypes/IsometricIcon';
 import { NonIsometricIcon } from 'src/components/SceneLayers/Nodes/Node/IconTypes/NonIsometricIcon';
 import { DeviceShape2d } from 'src/components/Shapes2d/DeviceShape2d';
@@ -177,7 +177,9 @@ export const useIcon = (
         ? 'DHCP'
         : modelItemForIcon?.ip;
       const itemNodeIcon = modelItemForIcon?.nodeIcon ?? null;
-      const itemDescription = modelItemForIcon?.description;
+      const itemHasDescription = modelItemForIcon
+        ? hasNodeDescription(modelItemForIcon)
+        : false;
 
       if (template?.kind === 'SERVER_V2') {
         const layout = layoutDeviceTemplate(template);
@@ -236,7 +238,7 @@ export const useIcon = (
           svis={svis}
           ip={itemIp}
           nodeIcon={itemNodeIcon}
-          description={itemDescription}
+          hasDescription={itemHasDescription}
           connectedPortIds={connectedPortIds}
           mismatchPortIds={mismatchPortIds}
           focusedPortIds={focusedPortIds}

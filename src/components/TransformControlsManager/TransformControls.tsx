@@ -14,7 +14,14 @@ import { TransformAnchor } from './TransformAnchor';
 interface Props {
   from: Coords;
   to: Coords;
-  onAnchorMouseDown?: (anchorPosition: AnchorPosition) => void;
+  /** When true, only the four corner handles (default for rectangles). */
+  cornersOnly?: boolean;
+  onAnchorPointerDown?: (
+    anchorPosition: AnchorPosition,
+    event: React.PointerEvent
+  ) => void;
+  onAnchorPointerMove?: (event: React.PointerEvent) => void;
+  onAnchorPointerUp?: (event: React.PointerEvent) => void;
 }
 
 const strokeWidth = 2;
@@ -26,14 +33,21 @@ const EDGE_ORIGINS: Record<'TOP' | 'BOTTOM' | 'LEFT' | 'RIGHT', TileOrigin> = {
   RIGHT: 'RIGHT'
 };
 
-export const TransformControls = ({ from, to, onAnchorMouseDown }: Props) => {
+export const TransformControls = ({
+  from,
+  to,
+  cornersOnly = false,
+  onAnchorPointerDown,
+  onAnchorPointerMove,
+  onAnchorPointerUp
+}: Props) => {
   const { css, pxSize } = useIsoProjection({
     from,
     to
   });
 
   const anchors = useMemo(() => {
-    if (!onAnchorMouseDown) return [];
+    if (!onAnchorPointerDown) return [];
 
     const corners = getBoundingBox([from, to]);
     const namedCorners = convertBoundsToNamedAnchors(corners);
@@ -50,14 +64,10 @@ export const TransformControls = ({ from, to, onAnchorMouseDown }: Props) => {
         origin: outermostCornerPositions[i]
       });
 
-      return {
-        key,
-        position,
-        onMouseDown: () => {
-          onAnchorMouseDown(key);
-        }
-      };
+      return { key, position };
     });
+
+    if (cornersOnly) return cornerAnchors;
 
     const edgeKeys: Array<'TOP' | 'BOTTOM' | 'LEFT' | 'RIGHT'> = [
       'TOP',
@@ -72,17 +82,11 @@ export const TransformControls = ({ from, to, onAnchorMouseDown }: Props) => {
         origin: EDGE_ORIGINS[key]
       });
 
-      return {
-        key,
-        position,
-        onMouseDown: () => {
-          onAnchorMouseDown(key);
-        }
-      };
+      return { key, position };
     });
 
     return [...cornerAnchors, ...edgeAnchors];
-  }, [onAnchorMouseDown, from, to]);
+  }, [onAnchorPointerDown, from, to, cornersOnly]);
 
   return (
     <>
@@ -105,15 +109,21 @@ export const TransformControls = ({ from, to, onAnchorMouseDown }: Props) => {
         </g>
       </Svg>
 
-      {anchors.map(({ key, position, onMouseDown }) => {
-        return (
-          <TransformAnchor
-            key={key}
-            position={position}
-            onMouseDown={onMouseDown}
-          />
-        );
-      })}
+      {onAnchorPointerDown &&
+        anchors.map(({ key, position }) => {
+          return (
+            <TransformAnchor
+              key={key}
+              anchor={key}
+              position={position}
+              onPointerDown={(event) => {
+                onAnchorPointerDown(key, event);
+              }}
+              onPointerMove={onAnchorPointerMove}
+              onPointerUp={onAnchorPointerUp}
+            />
+          );
+        })}
     </>
   );
 };

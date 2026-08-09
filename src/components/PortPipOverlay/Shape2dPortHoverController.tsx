@@ -175,19 +175,9 @@ export const Shape2dPortHoverController = () => {
       }
 
       // Loupe glass magnifies; canvas hit-tests underneath must not steal hover.
+      // (Reveal lock + glass cover this — do not also freeze on every mousedown
+      // while showLoupe is on, or connector drags never retarget the end port.)
       if (isLoupePortHoverFrozen()) {
-        clearPending();
-        return;
-      }
-
-      // While clicking with the loupe active, freeze hover. Selection scale /
-      // sticky hit-boxes would otherwise switch the hovered port mid-click and
-      // reframe the loupe ("obraz przeskakuje").
-      if (
-        uiState.showLoupe &&
-        uiState.mouse.mousedown &&
-        shape2dPortHover
-      ) {
         clearPending();
         return;
       }

@@ -5,7 +5,8 @@ export const rectangleKindSchema = z.enum(['area', 'building']);
 
 export const rectangleSchema = z.object({
   id,
-  color: id.optional(),
+  /** Fill color — palette id (legacy) or CSS hex. */
+  color: z.string().optional(),
   from: coords,
   to: coords,
   /** Visual style — area (default) or building outline. */

@@ -46,7 +46,9 @@ export * from './liveViewport';
 export * from './scheduleHeavyWork';
 export * from './pathfinderCalls';
 export * from './loupeRevealLock';
+export * from './loupePortHit';
 export * from './nodeHighlightScale';
+export * from './nodeDescription';
 export * from './connectorBodyCrossingCache';
 
 // NOT re-exported here on purpose: offscreenPlanRenderer, exportAsHtml and

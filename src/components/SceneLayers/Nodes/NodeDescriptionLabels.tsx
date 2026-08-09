@@ -1,13 +1,20 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Box, Typography, Stack } from '@mui/material';
 import {
-  MARKDOWN_EMPTY_VALUE,
   TILE_SIZE_2D,
   getModelItemSize,
   isShape2dIcon,
+  MARKDOWN_EMPTY_VALUE,
   clampNodeLabelScale
 } from 'src/config';
-import { getShape2dCenterPosition, isPlanProjection } from 'src/utils';
+import {
+  getDescriptionSummary,
+  getDescriptionTitle,
+  getShape2dCenterPosition,
+  hasNodeDescriptionBadge,
+  hasNodeDescriptionNotes,
+  isPlanProjection
+} from 'src/utils';
 import { ViewItem } from 'src/types';
 import { useModelStore } from 'src/stores/modelStore';
 import { useUiStateStore } from 'src/stores/uiStateStore';
@@ -20,6 +27,9 @@ interface Props {
   nodes: ViewItem[];
 }
 
+/** Same card width as isometric `IsoNodeLabels`. */
+const PLAN_LABEL_MAX_WIDTH = 250;
+
 const defaultStemOffset = (labelHeight: number) => {
   return {
     x: Math.round(labelHeight * 0.85),
@@ -27,9 +37,139 @@ const defaultStemOffset = (labelHeight: number) => {
   };
 };
 
+interface PlanBadgeProps {
+  nodeId: string;
+  title: string;
+  summary: string;
+  description: string | null;
+  hasNotes: boolean;
+  labelScale: number;
+  position: { x: number; y: number };
+  labelAnchorBottom: number;
+  stemOffset: { x: number; y: number };
+  canDrag: boolean;
+  onLabelMouseDown: (
+    nodeId: string,
+    stemOffset: { x: number; y: number }
+  ) => (event: React.MouseEvent) => void;
+}
+
 /**
- * Plan-view description callouts rendered above the interaction overlay
- * so they stay visible and can be dragged.
+ * Plan callout: isometric card style — title + skrót; expand → full markdown.
+ * Size follows `labelScale` (default ×10).
+ */
+const PlanDescriptionBadge = ({
+  nodeId,
+  title,
+  summary,
+  description,
+  hasNotes,
+  labelScale,
+  position,
+  labelAnchorBottom,
+  stemOffset,
+  canDrag,
+  onLabelMouseDown
+}: PlanBadgeProps) => {
+  const [isExpanded, setIsExpanded] = useState(false);
+
+  // World-space sizes for Plan zoom (×10 default). Width matches isometric.
+  const titleFontSize = Math.round(5.5 * labelScale + 2);
+  const bodyFontSize = Math.round(4.5 * labelScale + 2);
+  const labelMaxWidth = PLAN_LABEL_MAX_WIDTH;
+  const labelCollapsedHeight = Math.round(55 * labelScale);
+  // Match isometric card padding proportions relative to text size.
+  const padY = Math.max(8, Math.round(bodyFontSize * 0.55));
+  const padX = Math.max(10, Math.round(bodyFontSize * 0.7));
+
+  return (
+    <Box
+      sx={{
+        position: 'absolute',
+        left: position.x,
+        top: position.y,
+        zIndex: 1,
+        pointerEvents: 'none'
+      }}
+    >
+      <Box sx={{ position: 'absolute', bottom: labelAnchorBottom }}>
+        <ExpandableLabel
+          maxWidth={labelMaxWidth}
+          expandDirection="BOTTOM"
+          stemDirection="diagonal"
+          stemOffset={stemOffset}
+          labelHeight={Math.max(
+            1,
+            Math.round(Math.hypot(stemOffset.x, stemOffset.y))
+          )}
+          collapsedMaxHeight={labelCollapsedHeight}
+          interactive={canDrag}
+          forceExpandControl={hasNotes}
+          onToggleExpand={setIsExpanded}
+          onMouseDown={onLabelMouseDown(nodeId, stemOffset)}
+          sx={{
+            py: `${padY}px`,
+            px: `${padX}px`
+          }}
+        >
+          <Stack
+            spacing={0}
+            sx={{
+              gap: `${Math.max(6, Math.round(bodyFontSize * 0.35))}px`,
+              width: '100%',
+              minWidth: 0
+            }}
+          >
+            {title ? (
+              <Typography
+                fontWeight={700}
+                sx={{
+                  fontSize: titleFontSize,
+                  lineHeight: 1.25,
+                  width: '100%',
+                  whiteSpace: 'normal',
+                  overflowWrap: 'anywhere',
+                  wordBreak: 'break-word'
+                }}
+              >
+                {title}
+              </Typography>
+            ) : null}
+            {isExpanded && description ? (
+              <MarkdownEditor
+                value={description}
+                readOnly
+                styles={{
+                  fontSize: bodyFontSize,
+                  lineHeight: 1.4,
+                  width: '100%'
+                }}
+              />
+            ) : summary ? (
+              <Typography
+                sx={{
+                  fontSize: bodyFontSize,
+                  lineHeight: 1.4,
+                  color: 'text.secondary',
+                  width: '100%',
+                  whiteSpace: 'normal',
+                  overflowWrap: 'anywhere',
+                  wordBreak: 'break-word'
+                }}
+              >
+                {summary}
+              </Typography>
+            ) : null}
+          </Stack>
+        </ExpandableLabel>
+      </Box>
+    </Box>
+  );
+};
+
+/**
+ * Plan-view description callouts above the interaction overlay.
+ * Same card style as isometric; body = Skrót until expanded → full Opis.
  */
 export const NodeDescriptionLabels = ({ nodes }: Props) => {
   const projectionMode = useUiStateStore((state) => {
@@ -105,14 +245,18 @@ export const NodeDescriptionLabels = ({ nodes }: Props) => {
         return item.id === node.id;
       });
       if (!modelItem || !isShape2dIcon(modelItem.icon)) return [];
+      if (!hasNodeDescriptionBadge(modelItem)) return [];
+      if (node.showDescriptionLabel === false) return [];
 
+      const title = getDescriptionTitle(modelItem);
+      const summary = getDescriptionSummary(modelItem);
+      const hasNotes = hasNodeDescriptionNotes(modelItem);
       const description =
+        hasNotes &&
         modelItem.description &&
         modelItem.description !== MARKDOWN_EMPTY_VALUE
           ? modelItem.description
           : null;
-      if (!description) return [];
-      if (node.showDescriptionLabel === false) return [];
 
       const shapeSize = getModelItemSize(modelItem);
       const tile = liveTiles[node.id] ?? node.tile;
@@ -133,11 +277,13 @@ export const NodeDescriptionLabels = ({ nodes }: Props) => {
       return [
         {
           node,
-          modelItem,
+          title,
+          summary,
           description,
+          hasNotes,
+          labelScale,
           position,
           labelAnchorBottom,
-          labelScale,
           stemOffset
         }
       ];
@@ -173,64 +319,30 @@ export const NodeDescriptionLabels = ({ nodes }: Props) => {
       {entries.map(
         ({
           node,
-          modelItem,
+          title,
+          summary,
           description,
+          hasNotes,
+          labelScale,
           position,
           labelAnchorBottom,
-          labelScale,
           stemOffset
         }) => {
-          const titleFontSize = Math.round(5.5 * labelScale + 2);
-          const bodyFontSize = Math.round(4.5 * labelScale + 2);
-          const labelMaxWidth = Math.round(140 * labelScale);
-          const labelCollapsedHeight = Math.round(55 * labelScale);
-
           return (
-            <Box
+            <PlanDescriptionBadge
               key={`desc-${node.id}`}
-              sx={{
-                position: 'absolute',
-                left: position.x,
-                top: position.y,
-                zIndex: 1,
-                pointerEvents: 'none'
-              }}
-            >
-              <Box sx={{ position: 'absolute', bottom: labelAnchorBottom }}>
-                <ExpandableLabel
-                  maxWidth={labelMaxWidth}
-                  expandDirection="BOTTOM"
-                  stemDirection="diagonal"
-                  stemOffset={stemOffset}
-                  labelHeight={Math.max(
-                    1,
-                    Math.round(Math.hypot(stemOffset.x, stemOffset.y))
-                  )}
-                  collapsedMaxHeight={labelCollapsedHeight}
-                  interactive={canDrag}
-                  onMouseDown={onLabelMouseDown(node.id, stemOffset)}
-                >
-                  <Stack spacing={1.25}>
-                    {modelItem.name && (
-                      <Typography
-                        fontWeight={700}
-                        sx={{ fontSize: titleFontSize, lineHeight: 1.25 }}
-                      >
-                        {modelItem.name}
-                      </Typography>
-                    )}
-                    <MarkdownEditor
-                      value={description}
-                      readOnly
-                      styles={{
-                        fontSize: bodyFontSize,
-                        lineHeight: 1.4
-                      }}
-                    />
-                  </Stack>
-                </ExpandableLabel>
-              </Box>
-            </Box>
+              nodeId={node.id}
+              title={title}
+              summary={summary}
+              description={description}
+              hasNotes={hasNotes}
+              labelScale={labelScale}
+              position={position}
+              labelAnchorBottom={labelAnchorBottom}
+              stemOffset={stemOffset}
+              canDrag={canDrag}
+              onLabelMouseDown={onLabelMouseDown}
+            />
           );
         }
       )}

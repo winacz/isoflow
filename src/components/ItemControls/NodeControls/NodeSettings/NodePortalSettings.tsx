@@ -21,10 +21,11 @@ import { useView } from 'src/hooks/useView';
 import { useResizeObserver } from 'src/hooks/useResizeObserver';
 import {
   CoordsUtils,
-  findPlan2dView,
   getPortalDisplayLabel,
+  inferViewKind,
   listPlan2dPortalTargets,
   planPortalJump,
+  projectionModeForKind,
   type PortalTarget
 } from 'src/utils';
 import { Section } from '../../components/Section';
@@ -85,8 +86,13 @@ export const NodePortalSettings = ({
     });
     if (!jump) return;
 
+    const targetView = model.views.find((view) => view.id === jump.planViewId);
+    const mode = targetView
+      ? projectionModeForKind(inferViewKind(targetView))
+      : 'TWO_D';
+
     changeView(jump.planViewId, model);
-    uiStateActions.setProjectionMode('TWO_D');
+    uiStateActions.setProjectionMode(mode);
     uiStateActions.setZoom(jump.zoom);
     uiStateActions.setScroll({
       position: jump.scroll,
@@ -99,10 +105,10 @@ export const NodePortalSettings = ({
     });
     uiStateActions.clearSelectedItemIds();
 
-    if (jump.select.type === 'ITEM') {
+    if (jump.select?.type === 'ITEM') {
       uiStateActions.setItemControls({ type: 'ITEM', id: jump.select.id });
       uiStateActions.setSelectedItemIds([jump.select.id]);
-    } else {
+    } else if (jump.select?.type === 'RECTANGLE') {
       uiStateActions.setItemControls({
         type: 'RECTANGLE',
         id: jump.select.id
@@ -131,7 +137,7 @@ export const NodePortalSettings = ({
     closeCreator();
   };
 
-  const planMissing = !findPlan2dView(model);
+  const planMissing = listPlan2dPortalTargets(model).length === 0;
   const creatorOpen = mode === 'create' || mode === 'edit';
 
   return (
@@ -139,7 +145,7 @@ export const NodePortalSettings = ({
       <Stack spacing={1.25}>
         {planMissing ? (
           <Typography sx={{ fontSize: 12, color: 'text.secondary' }}>
-            Brak widoku „Plan” — portal wymaga mapy 2D.
+            Brak projektu / widoku 2D — portal wymaga mapy Plan.
           </Typography>
         ) : creatorOpen ? (
           <Stack spacing={1}>
@@ -154,7 +160,7 @@ export const NodePortalSettings = ({
               onChange={(e) => {
                 setQuery(e.target.value);
               }}
-              placeholder="Szukaj urządzenia, szafy, obszaru…"
+              placeholder="Szukaj projektu, urządzenia, szafy, obszaru…"
               inputProps={{ 'aria-label': 'Szukaj celu portalu' }}
             />
             <List
@@ -270,7 +276,8 @@ export const NodePortalSettings = ({
             <Typography
               sx={{ mt: 0.75, fontSize: 11, color: 'text.secondary' }}
             >
-              Skrót do urządzenia, szafy lub obszaru na mapie Plan.
+              Skrót do projektu 2D (np. Sieć karczma), urządzenia, szafy lub
+              obszaru.
             </Typography>
           </Box>
         )}

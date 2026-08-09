@@ -26,7 +26,7 @@ export const NODE_VISUAL_STYLE_OPTIONS: NodeVisualStyleOption[] = [
   {
     id: 'gradient',
     label: 'Gradient',
-    description: 'Miękki przejście — białe też czytelne'
+    description: 'Miękkie przejście z koloru urządzenia'
   },
   {
     id: 'glass',
@@ -138,13 +138,35 @@ const resolveBase = (tint?: Tint | null) => {
 };
 
 const buildGradient = (tint?: Tint | null): NodeChassisVisual => {
-  const { base, lum, isPale } = resolveBase(tint);
-  const top = isPale ? '#ffffff' : lighten(base, 0.42);
-  const mid = isPale ? '#e8eef6' : lighten(base, 0.12);
-  const bottom = isPale ? '#c5d0de' : darken(base, 0.18);
-  const borderColor = isPale
-    ? '#64748b'
-    : darken(base, clamp(0.22 + (1 - lum) * 0.15, 0.18, 0.4));
+  const { hasTint, base, lum } = resolveBase(tint);
+
+  // No node color → soft slate default.
+  if (!hasTint) {
+    return {
+      skipTintOverlay: true,
+      borderColor: '#64748b',
+      outerFilter: 'drop-shadow(0 4px 10px rgba(15,23,42,0.14))',
+      sx: {
+        bgcolor: '#e8eef6',
+        backgroundImage:
+          'linear-gradient(155deg, #ffffff 0%, #e8eef6 48%, #c5d0de 100%)',
+        boxShadow:
+          'inset 0 1px 0 rgba(255,255,255,0.95), inset 0 -1px 0 rgba(15,23,42,0.06), 0 4px 14px rgba(15,23,42,0.12)'
+      }
+    };
+  }
+
+  // Always derive stops from the node color (keep hue even for pale pastels).
+  const topAmt = lum > 0.78 ? 0.16 : 0.42;
+  const midAmt = lum > 0.78 ? 0 : 0.12;
+  const botAmt = lum > 0.78 ? 0.24 : lum > 0.45 ? 0.2 : 0.14;
+  const top = lighten(base, topAmt);
+  const mid = midAmt > 0 ? lighten(base, midAmt) : base;
+  const bottom = darken(base, botAmt);
+  const borderColor = darken(
+    base,
+    clamp(0.22 + (1 - lum) * 0.15, 0.18, 0.4)
+  );
 
   return {
     skipTintOverlay: true,
@@ -153,9 +175,7 @@ const buildGradient = (tint?: Tint | null): NodeChassisVisual => {
     sx: {
       bgcolor: mid,
       backgroundImage: `linear-gradient(155deg, ${top} 0%, ${mid} 48%, ${bottom} 100%)`,
-      boxShadow: isPale
-        ? 'inset 0 1px 0 rgba(255,255,255,0.95), inset 0 -1px 0 rgba(15,23,42,0.06), 0 4px 14px rgba(15,23,42,0.12)'
-        : `inset 0 1px 0 ${lighten(base, 0.55)}aa, 0 6px 16px rgba(15,23,42,0.16)`
+      boxShadow: `inset 0 1px 0 ${lighten(base, 0.55)}aa, 0 6px 16px rgba(15,23,42,0.16)`
     }
   };
 };
