@@ -11,18 +11,68 @@ import { getDeviceTemplateLayout, hasNodeDescription } from 'src/utils';
 
 const VIEWPORT = 220;
 const PAD = 1.35;
+const GAP = 14;
+const EDGE = 12;
+
+type AnchorRect = {
+  left: number;
+  top: number;
+  right: number;
+  bottom: number;
+  width: number;
+  height: number;
+};
 
 type Props = {
   item: ModelItem;
   viewItem: ViewItem;
-  /** Screen position (fixed) — typically near the cursor / button. */
-  screen: { x: number; y: number };
+  /** Button / control rect — PiP is placed beside it, never on top. */
+  anchor: AnchorRect;
+};
+
+const placeBesideAnchor = (
+  anchor: AnchorRect,
+  cardW: number,
+  cardH: number
+): { left: number; top: number } => {
+  const vw = typeof window !== 'undefined' ? window.innerWidth : 1200;
+  const vh = typeof window !== 'undefined' ? window.innerHeight : 800;
+  const midY = anchor.top + anchor.height / 2 - cardH / 2;
+  const clampY = (y: number) => Math.min(Math.max(EDGE, y), vh - cardH - EDGE);
+  const clampX = (x: number) => Math.min(Math.max(EDGE, x), vw - cardW - EDGE);
+
+  // Prefer left of the map button (row actions sit on the right).
+  const leftCandidate = anchor.left - cardW - GAP;
+  if (leftCandidate >= EDGE) {
+    return { left: leftCandidate, top: clampY(midY) };
+  }
+
+  // Then right.
+  const rightCandidate = anchor.right + GAP;
+  if (rightCandidate + cardW <= vw - EDGE) {
+    return { left: rightCandidate, top: clampY(midY) };
+  }
+
+  // Then above.
+  const above = anchor.top - cardH - GAP;
+  if (above >= EDGE) {
+    return {
+      left: clampX(anchor.left + anchor.width / 2 - cardW / 2),
+      top: above
+    };
+  }
+
+  // Fallback: below.
+  return {
+    left: clampX(anchor.left + anchor.width / 2 - cardW / 2),
+    top: clampY(anchor.bottom + GAP)
+  };
 };
 
 /**
  * Mini PiP card of a single Plan v3 node (IPAM locate hover).
  */
-export const IpamNodePipPreview = ({ item, viewItem, screen }: Props) => {
+export const IpamNodePipPreview = ({ item, viewItem, anchor }: Props) => {
   const size = useMemo(() => {
     return (
       getModelItemSize(item) ??
@@ -42,12 +92,9 @@ export const IpamNodePipPreview = ({ item, viewItem, screen }: Props) => {
     0.55
   );
 
-  const vw = typeof window !== 'undefined' ? window.innerWidth : 1200;
-  const vh = typeof window !== 'undefined' ? window.innerHeight : 800;
   const cardW = VIEWPORT + 16;
   const cardH = VIEWPORT + 36;
-  const left = Math.min(Math.max(12, screen.x + 18), vw - cardW - 12);
-  const top = Math.min(Math.max(12, screen.y + 18), vh - cardH - 12);
+  const { left, top } = placeBesideAnchor(anchor, cardW, cardH);
 
   return (
     <Portal>

@@ -379,17 +379,21 @@ const buildSchowekPlan = (colorId: string): PlanBuild => {
   };
 
   const corePorts: NonNullable<ModelItem['ports']> = {
+    // Servers 1–3 arrive via patch jacks pp-7…pp-9
     [rackPort(1)]: accessPort(
       KARCZMA_VLANS.servers.id,
-      KARCZMA_VLANS.servers.color
+      KARCZMA_VLANS.servers.color,
+      { name: 'from-pp-7' }
     ),
     [rackPort(2)]: accessPort(
       KARCZMA_VLANS.servers.id,
-      KARCZMA_VLANS.servers.color
+      KARCZMA_VLANS.servers.color,
+      { name: 'from-pp-8' }
     ),
     [rackPort(3)]: accessPort(
       KARCZMA_VLANS.servers.id,
-      KARCZMA_VLANS.servers.color
+      KARCZMA_VLANS.servers.color,
+      { name: 'from-pp-9' }
     ),
     [rackPort(5)]: {
       type: 'trunk',
@@ -485,13 +489,22 @@ const buildSchowekPlan = (colorId: string): PlanBuild => {
       { item: accessId, port: rackPort(28) },
       { item: ap.id, port: 'port-1' }
     ),
-    ...servers.map((pc, i) =>
-      link(
-        colorId,
-        { item: coreId, port: rackPort(i + 1) },
-        { item: pc.id, port: 'port-1' }
-      )
-    ),
+    // Servers ↔ patch (pp-7…) ↔ core — same physical path as desk drops
+    ...servers.flatMap((pc, i) => {
+      const jack = `pp-${7 + i}`;
+      return [
+        link(
+          colorId,
+          { item: pc.id, port: 'port-1' },
+          { item: patchId, port: jack }
+        ),
+        link(
+          colorId,
+          { item: patchId, port: jack },
+          { item: coreId, port: rackPort(i + 1) }
+        )
+      ];
+    }),
     link(
       colorId,
       { item: accessId, port: rackPort(30) },
@@ -537,7 +550,7 @@ const buildSchowekPlan = (colorId: string): PlanBuild => {
       portCount: 24,
       color: PATCH_PANEL_COLOR,
       descriptionTitle: 'Patch panel',
-      descriptionSummary: 'Mostek stanowisk 1–6 do SW-ACCESS'
+      descriptionSummary: 'PC 1–6 → access; serwery → core (pp-7…9)'
     },
     {
       id: upsId,

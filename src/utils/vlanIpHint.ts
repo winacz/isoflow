@@ -154,10 +154,12 @@ export const resolveCablePeer = ({
   if (!peerItem) return null;
 
   if (isPassiveBridgeDevice(peerItem.icon) || isPatchPanelItem(peerItem)) {
+    // Must skip `direct` — otherwise the bridge lookup returns this host.
     const bridged = findPatchPanelBridgePeer({
       panelItemId: peerItem.id,
       portId: other.ref.port,
-      connectors
+      connectors,
+      excludeConnectorId: direct.id
     });
     if (bridged?.itemId && bridged.portId) {
       return { itemId: bridged.itemId, portId: bridged.portId };

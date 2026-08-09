@@ -48,7 +48,11 @@ export const ConnectorControls2d = ({ id }: Props) => {
 
   const trunkEndpoints = useMemo(() => {
     return linkSummary.endpoints.filter((endpoint) => {
-      return endpoint.type === 'trunk' && Boolean(endpoint.portId);
+      return (
+        endpoint.role !== 'via' &&
+        endpoint.type === 'trunk' &&
+        Boolean(endpoint.portId)
+      );
     });
   }, [linkSummary.endpoints]);
 

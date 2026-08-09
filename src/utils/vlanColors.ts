@@ -444,6 +444,11 @@ export type ConnectorEndpointSummary = {
    * (SVI matching the access VLAN the connected node is on).
    */
   ip?: string | null;
+  /**
+   * `via` = intermediate patch panel on the path (between the two real ends).
+   * Default / omitted = real cable endpoint.
+   */
+  role?: 'endpoint' | 'via';
 };
 
 export type ConnectorLinkMode = 'access' | 'trunk' | 'mismatch';
@@ -492,6 +497,7 @@ export const getMismatchPortIdsForItem = ({
     if (summary.linkMode !== 'mismatch') return;
 
     summary.endpoints.forEach((endpoint) => {
+      if (endpoint.role === 'via') return;
       if (endpoint.itemId === itemId && endpoint.portId) {
         portIds.add(endpoint.portId);
       }
@@ -575,7 +581,11 @@ export const getConnectorRelationSummary = ({
 }): ConnectorRelationSummary => {
   const endpoints: ConnectorEndpointSummary[] = [];
 
-  const pushEndpoint = (itemId: string, portId: string) => {
+  const pushEndpoint = (
+    itemId: string,
+    portId: string,
+    role: 'endpoint' | 'via' = 'endpoint'
+  ) => {
     const modelItem = modelItems.find((item) => {
       return item.id === itemId;
     });
@@ -583,7 +593,8 @@ export const getConnectorRelationSummary = ({
 
     const port = portId ? modelItem.ports?.[portId] : undefined;
     const vlan = port?.vlan?.trim() || '1';
-    const isNonVlanAware = isNonVlanAwareDevice(modelItem.icon);
+    const isNonVlanAware =
+      role === 'via' ? true : isNonVlanAwareDevice(modelItem.icon);
     // Hosts never expose trunk — treat as access even if misconfigured.
     const portType =
       isNonVlanAware || port?.type !== 'trunk' ? 'access' : 'trunk';
@@ -604,9 +615,15 @@ export const getConnectorRelationSummary = ({
       vlan,
       vlanColor,
       type: portType,
-      isNonVlanAware
+      isNonVlanAware,
+      role
     });
   };
+
+  // Build path: real end(s) + optional patch-panel hop in the middle.
+  type PathHop = { itemId: string; portId: string };
+  const realEnds: PathHop[] = [];
+  const viaPanel: PathHop = { itemId: '', portId: '' };
 
   anchors.forEach((anchor) => {
     if (!anchor.ref.item) return;
@@ -618,8 +635,9 @@ export const getConnectorRelationSummary = ({
 
     const portId = anchor.ref.port ?? '';
 
-    // Patch panel is a passive bridge — use the other cable on this jack.
     if (isPatchPanelItem(modelItem) || isPassiveBridgeDevice(modelItem.icon)) {
+      viaPanel.itemId = anchor.ref.item;
+      viaPanel.portId = portId;
       if (portId && connectors) {
         const peer = findPatchPanelBridgePeer({
           panelItemId: anchor.ref.item,
@@ -627,20 +645,37 @@ export const getConnectorRelationSummary = ({
           connectors,
           excludeConnectorId: connectorId
         });
-        if (peer) {
-          pushEndpoint(peer.itemId, peer.portId ?? '');
+        if (peer?.itemId) {
+          realEnds.push({ itemId: peer.itemId, portId: peer.portId ?? '' });
         }
       }
       return;
     }
 
-    pushEndpoint(anchor.ref.item, portId);
+    realEnds.push({ itemId: anchor.ref.item, portId });
+  });
+
+  if (viaPanel.itemId && realEnds.length > 0) {
+    // Source → patch panel → destination
+    pushEndpoint(realEnds[0].itemId, realEnds[0].portId);
+    pushEndpoint(viaPanel.itemId, viaPanel.portId, 'via');
+    if (realEnds[1]) {
+      pushEndpoint(realEnds[1].itemId, realEnds[1].portId);
+    }
+  } else {
+    realEnds.forEach((hop) => {
+      pushEndpoint(hop.itemId, hop.portId);
+    });
+  }
+
+  const linkEndpoints = endpoints.filter((endpoint) => {
+    return endpoint.role !== 'via';
   });
 
   // Cable VLAN: unique access VLANs on VLAN-aware devices
   const accessVlanEntries: { vlan: string; color: string | null }[] = [];
   const seenAccessKeys = new Set<string>();
-  for (const endpoint of endpoints) {
+  for (const endpoint of linkEndpoints) {
     if (endpoint.isNonVlanAware) continue;
     if (endpoint.type !== 'access') continue;
     const key = normalizeVlanKey(endpoint.vlan) || '1';
@@ -671,28 +706,31 @@ export const getConnectorRelationSummary = ({
   let linkMode: ConnectorLinkMode = 'access';
   let allowedVlans: string[] = [];
 
-  if (endpoints.length >= 2) {
-    const trunkCount = endpoints.filter((endpoint) => {
+  if (linkEndpoints.length >= 2) {
+    const trunkCount = linkEndpoints.filter((endpoint) => {
       return endpoint.type === 'trunk';
     }).length;
-    const touchesHost = endpoints.some((endpoint) => {
+    const touchesHost = linkEndpoints.some((endpoint) => {
       return endpoint.isNonVlanAware;
     });
 
-    if (trunkCount >= 1 && (trunkCount < endpoints.length || touchesHost)) {
+    if (trunkCount >= 1 && (trunkCount < linkEndpoints.length || touchesHost)) {
       // Trunk ↔ access, or trunk ↔ host (PC / non-VLAN device)
       linkMode = 'mismatch';
     } else if (trunkCount >= 2) {
       linkMode = 'trunk';
       vlanColor = null;
     }
-  } else if (endpoints.length === 1 && endpoints[0].type === 'trunk') {
+  } else if (
+    linkEndpoints.length === 1 &&
+    linkEndpoints[0].type === 'trunk'
+  ) {
     linkMode = 'trunk';
     vlanColor = null;
   }
 
   if (linkMode === 'trunk') {
-    const trunkEndpoints = endpoints.filter((endpoint) => {
+    const trunkEndpoints = linkEndpoints.filter((endpoint) => {
       return endpoint.type === 'trunk' && Boolean(endpoint.portId);
     });
 
@@ -746,7 +784,7 @@ export const getConnectorRelationSummary = ({
 
   /** Access VLAN carried by this link (for matching switch SVIs). */
   const linkAccessVlan = (() => {
-    for (const endpoint of endpoints) {
+    for (const endpoint of linkEndpoints) {
       if (endpoint.isNonVlanAware) continue;
       if (endpoint.type !== 'access') continue;
       return endpoint.vlan;
@@ -765,6 +803,11 @@ export const getConnectorRelationSummary = ({
       const modelItem = modelItems.find((item) => {
         return item.id === endpoint.itemId;
       });
+
+      // Patch-panel hop — no VLAN/IP of its own.
+      if (endpoint.role === 'via') {
+        return { ...endpoint, ip: null };
+      }
 
       // Hosts do not configure VLANs — show the peer switch access VLAN on the link.
       const displayEndpoint =
@@ -822,6 +865,7 @@ export const getConnectorRelationSummary = ({
   // VLAN per endpoint (only when access VLANs actually differ).
   const displayedAccessKeys = new Set<string>();
   endpointsWithIp.forEach((endpoint) => {
+    if (endpoint.role === 'via') return;
     if (endpoint.type !== 'access') return;
     displayedAccessKeys.add(normalizeVlanKey(endpoint.vlan) || '1');
   });
@@ -846,6 +890,7 @@ const linkVlanKey = (summary: ConnectorRelationSummary): string => {
 
   for (let i = 0; i < summary.endpoints.length; i += 1) {
     const endpoint = summary.endpoints[i];
+    if (endpoint.role === 'via') continue;
     if (endpoint.isNonVlanAware || endpoint.type !== 'access') continue;
     if (!isVlan1(endpoint.vlan)) {
       return normalizeVlanKey(endpoint.vlan);

@@ -431,7 +431,14 @@ export const IpamPanel = () => {
   const [bulkNetwork, setBulkNetwork] = useState('');
   const [pipHover, setPipHover] = useState<{
     itemId: string;
-    screen: { x: number; y: number };
+    anchor: {
+      left: number;
+      top: number;
+      right: number;
+      bottom: number;
+      width: number;
+      height: number;
+    };
   } | null>(null);
   const [descItemId, setDescItemId] = useState<string | null>(null);
   const [notesDialogOpen, setNotesDialogOpen] = useState(false);
@@ -1197,7 +1204,7 @@ export const IpamPanel = () => {
         <IpamNodePipPreview
           item={pipItem.item}
           viewItem={pipItem.viewItem}
-          screen={pipHover.screen}
+          anchor={pipHover.anchor}
         />
       )}
 
@@ -2309,15 +2316,17 @@ export const IpamPanel = () => {
                               size="small"
                               aria-label="Pokaż na mapie"
                               onMouseEnter={(e) => {
+                                const rect = e.currentTarget.getBoundingClientRect();
                                 setPipHover({
                                   itemId: item.id,
-                                  screen: { x: e.clientX, y: e.clientY }
-                                });
-                              }}
-                              onMouseMove={(e) => {
-                                setPipHover({
-                                  itemId: item.id,
-                                  screen: { x: e.clientX, y: e.clientY }
+                                  anchor: {
+                                    left: rect.left,
+                                    top: rect.top,
+                                    right: rect.right,
+                                    bottom: rect.bottom,
+                                    width: rect.width,
+                                    height: rect.height
+                                  }
                                 });
                               }}
                               onMouseLeave={() => setPipHover(null)}
